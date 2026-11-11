@@ -15,7 +15,7 @@ Deno.serve(async (req) => {
   try { body = await req.json(); } catch { return respond(400, { error: 'Invalid JSON' }); }
   const str = (key: string, max: number) => typeof body[key] === 'string' ? (body[key] as string).trim().slice(0, max + 1) : '';
   const full_name = str('fullName',160), email = str('email',254), contact_number = str('contactNumber',50), company = str('company',200), service_id = str('serviceId',100), project_description = str('projectDescription',10000), estimated_budget = str('estimatedBudget',100);
-  if (!full_name || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) || !contact_number || !company || !service_id || project_description.length < 20 || body.privacyConsent !== true || [full_name,email,contact_number,company,service_id,project_description].some((v,i)=>v.length > [160,254,50,200,100,10000][i])) return respond(422, { error: 'Invalid inquiry fields' });
+  if (!full_name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !contact_number || !company || !service_id || project_description.length < 20 || body.privacyConsent !== true || [full_name,email,contact_number,company,service_id,project_description].some((v,i)=>v.length > [160,254,50,200,100,10000][i])) return respond(422, { error: 'Invalid inquiry fields' });
   const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
   const { data, error } = await supabase.from('opm_inquiries').insert({ full_name, email, contact_number, company, service_id, project_description, estimated_budget, privacy_consent: true }).select('id').single();
   if (error) { console.error('Inquiry persistence failed', error.code); return respond(503, { error: 'Unable to save inquiry' }); }
