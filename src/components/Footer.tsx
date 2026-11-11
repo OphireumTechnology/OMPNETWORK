@@ -22,10 +22,11 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenPortal }) => {
             <div className="flex items-center gap-3">
               <div className="w-11 h-11 rounded-full p-0.5 bg-gradient-to-tr from-[#D4AF37] via-[#00C2C7] to-[#C0C7D1] shrink-0">
                 <img
-                  src="/assets/aistudio/OPHIREUM_Logo_6504e623.png"
-                  alt="OPHIREUM MULTIMEDIA PRODUCTION Emblem"
+                  src={COMPANY_CONFIG.logoUrl}
+                  alt=""
+                  aria-hidden="true"
                   className="w-full h-full object-contain rounded-full bg-[#111827]"
-                  referrerPolicy="no-referrer"
+                  loading="lazy"
                 />
               </div>
               <div>

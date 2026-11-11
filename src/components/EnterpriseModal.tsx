@@ -56,10 +56,10 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({ isOpen, onClos
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-full p-0.5 bg-gradient-to-tr from-[#D4AF37] via-[#00C2C7] to-[#C0C7D1]">
               <img
-                src="/assets/aistudio/OPHIREUM_Logo_6504e623.png"
-                alt="OPM Emblem"
+                src={COMPANY_CONFIG.logoUrl}
+                alt=""
+                aria-hidden="true"
                 className="w-full h-full object-contain rounded-full bg-[#111827]"
-                referrerPolicy="no-referrer"
               />
             </div>
             <div>
