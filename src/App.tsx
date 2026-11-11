@@ -7,6 +7,7 @@ import { PortfolioSection } from './components/PortfolioSection';
 import { EnterpriseSuiteSection } from './components/EnterpriseSuiteSection';
 import { ContactSection } from './components/ContactSection';
 import { EnterpriseModal } from './components/EnterpriseModal';
+import { AIConsultantWidget } from './components/consultant/AIConsultantWidget';
 import { Footer } from './components/Footer';
 
 export default function App() {
@@ -116,6 +117,9 @@ export default function App() {
         onNavigate={handleNavigate}
         onOpenPortal={() => handleOpenEnterpriseModal('portal')}
       />
+
+      {/* AI Solutions Consultant Floating Assistant & Booking System */}
+      <AIConsultantWidget />
     </div>
   );
 }

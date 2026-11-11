@@ -3,10 +3,12 @@ import { aiAgentsData } from '../data/aiAgentsData';
 import { 
   X, Shield, Cpu, Code2, Users, LayoutDashboard, 
   CheckCircle2, Clock, Terminal, GitBranch, Key, Activity,
-  Lock, ArrowRight, RefreshCw, Send, Layers, Phone, MapPin, Building
+  Lock, ArrowRight, RefreshCw, Send, Layers, Phone, MapPin, Building,
+  Calendar, Video, FileCheck, ExternalLink, FileText
 } from 'lucide-react';
 import { AIProcessingVisualizer } from './animations/AIProcessingVisualizer';
 import { COMPANY_CONFIG } from '../data/companyConfig';
+import { supabaseService, AppointmentRecord, ProjectBrief } from '../services/supabaseService';
 
 interface EnterpriseModalProps {
   isOpen: boolean;
@@ -16,10 +18,26 @@ interface EnterpriseModalProps {
 
 export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({ isOpen, onClose, defaultTab = 'portal' }) => {
   const [activeTab, setActiveTab] = useState<'portal' | 'studio' | 'agents' | 'admin'>(defaultTab);
+  const [adminSubTab, setAdminSubTab] = useState<'appointments' | 'briefs' | 'inquiries'>('appointments');
   const [recentInquiries, setRecentInquiries] = useState<any[]>([]);
+  const [appointments, setAppointments] = useState<AppointmentRecord[]>([]);
+  const [projectBriefs, setProjectBriefs] = useState<ProjectBrief[]>([]);
   const [promptInput, setPromptInput] = useState('');
   const [studioGenerating, setStudioGenerating] = useState(false);
   const [studioOutput, setStudioOutput] = useState<string | null>(null);
+
+  const loadAdminData = () => {
+    try {
+      const stored = JSON.parse(localStorage.getItem('opm_inquiries') || '[]');
+      setRecentInquiries(stored);
+    } catch (e) {
+      setRecentInquiries([]);
+    }
+    const appts = supabaseService.getLocalAppointments();
+    setAppointments(appts);
+    const briefs = supabaseService.getLocalBriefs();
+    setProjectBriefs(briefs);
+  };
 
   useEffect(() => {
     setActiveTab(defaultTab);
@@ -27,12 +45,7 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({ isOpen, onClos
 
   useEffect(() => {
     if (isOpen) {
-      try {
-        const stored = JSON.parse(localStorage.getItem('opm_inquiries') || '[]');
-        setRecentInquiries(stored);
-      } catch (e) {
-        setRecentInquiries([]);
-      }
+      loadAdminData();
     }
   }, [isOpen]);
 
@@ -336,48 +349,206 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({ isOpen, onClos
                 </p>
               </div>
 
-              {/* Live Inquiries Table */}
+              {/* Consultations & Inquiries Command Center */}
               <div className="rounded-xl bg-[#111827] border border-slate-800 p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <h4 className="text-xs font-mono uppercase text-slate-400">Incoming Project Inquiries & Briefs</h4>
-                  <span className="text-xs font-mono text-[#00C2C7]">{recentInquiries.length} Inquiries Logged</span>
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setAdminSubTab('appointments')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${
+                        adminSubTab === 'appointments'
+                          ? 'bg-[#00C2C7] text-[#0B1220] font-bold shadow'
+                          : 'bg-slate-900 text-slate-300 hover:text-white border border-slate-800'
+                      }`}
+                    >
+                      <Calendar className="w-3.5 h-3.5" />
+                      <span>Consultation Appointments ({appointments.length})</span>
+                    </button>
+
+                    <button
+                      onClick={() => setAdminSubTab('briefs')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${
+                        adminSubTab === 'briefs'
+                          ? 'bg-[#00C2C7] text-[#0B1220] font-bold shadow'
+                          : 'bg-slate-900 text-slate-300 hover:text-white border border-slate-800'
+                      }`}
+                    >
+                      <FileCheck className="w-3.5 h-3.5" />
+                      <span>Project Briefs ({projectBriefs.length})</span>
+                    </button>
+
+                    <button
+                      onClick={() => setAdminSubTab('inquiries')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${
+                        adminSubTab === 'inquiries'
+                          ? 'bg-[#00C2C7] text-[#0B1220] font-bold shadow'
+                          : 'bg-slate-900 text-slate-300 hover:text-white border border-slate-800'
+                      }`}
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>Web Inquiries ({recentInquiries.length})</span>
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={loadAdminData}
+                    className="p-1.5 text-slate-400 hover:text-[#00C2C7] bg-slate-900 hover:bg-slate-800 rounded-lg border border-slate-800 transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-mono"
+                    title="Refresh data"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Sync</span>
+                  </button>
                 </div>
 
-                {recentInquiries.length === 0 ? (
-                  <div className="p-8 text-center text-xs text-slate-500 border border-dashed border-slate-800 rounded-lg">
-                    No inquiries submitted yet. Submit a brief in the Contact section to see real-time dispatch logging here.
+                {/* SUBTAB 1: CONSULTATION APPOINTMENTS */}
+                {adminSubTab === 'appointments' && (
+                  <div>
+                    {appointments.length === 0 ? (
+                      <div className="p-8 text-center text-xs text-slate-500 border border-dashed border-slate-800 rounded-lg">
+                        No client consultation appointments booked yet. Clients can book sessions via the floating AI Solutions Consultant or services cards.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead>
+                            <tr className="border-b border-slate-800 text-slate-400 font-mono text-[11px]">
+                              <th className="pb-2">APPOINTMENT REF</th>
+                              <th className="pb-2">CLIENT & ORG</th>
+                              <th className="pb-2">DATE & SLOT</th>
+                              <th className="pb-2">TYPE</th>
+                              <th className="pb-2">STATUS</th>
+                              <th className="pb-2 text-right">CALENDAR SYNC</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/80">
+                            {appointments.map((appt) => (
+                              <tr key={appt.id || appt.referenceCode} className="text-slate-300">
+                                <td className="py-2.5 font-mono text-[#00C2C7] font-semibold">{appt.referenceCode}</td>
+                                <td className="py-2.5">
+                                  <span className="font-semibold text-white block">{appt.client?.fullName || 'Client'}</span>
+                                  <span className="text-slate-400 text-[11px]">
+                                    {appt.client?.companyName || 'Independent'} · {appt.client?.email || 'N/A'}
+                                  </span>
+                                </td>
+                                <td className="py-2.5">
+                                  <span className="text-white font-medium block">{appt.scheduledDate}</span>
+                                  <span className="text-slate-400 text-[11px] font-mono">{appt.scheduledTimeSlot} ({appt.clientTimezone})</span>
+                                </td>
+                                <td className="py-2.5">
+                                  <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300">
+                                    {appt.consultationType}
+                                  </span>
+                                </td>
+                                <td className="py-2.5">
+                                  <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30">
+                                    {appt.status.toUpperCase()}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 text-right">
+                                  <a
+                                    href={supabaseService.generateGoogleCalendarUrl(appt)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-[#00C2C7] text-slate-300 hover:text-[#0B1220] transition-colors text-[11px] font-mono"
+                                  >
+                                    <span>G-Cal</span>
+                                    <ExternalLink className="w-3 h-3" />
+                                  </a>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead>
-                        <tr className="border-b border-slate-800 text-slate-400 font-mono text-[11px]">
-                          <th className="pb-2">TICKET REF</th>
-                          <th className="pb-2">NAME & COMPANY</th>
-                          <th className="pb-2">SERVICE</th>
-                          <th className="pb-2">BUDGET</th>
-                          <th className="pb-2">STATUS</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/80">
-                        {recentInquiries.map((inq, idx) => (
-                          <tr key={idx} className="text-slate-300">
-                            <td className="py-2.5 font-mono text-[#00C2C7]">{inq.referenceId}</td>
-                            <td className="py-2.5">
-                              <span className="font-semibold text-white block">{inq.fullName}</span>
-                              <span className="text-slate-400 text-[11px]">{inq.company}</span>
-                            </td>
-                            <td className="py-2.5 max-w-[180px] truncate">{inq.serviceTitle}</td>
-                            <td className="py-2.5 font-mono text-slate-400">{inq.estimatedBudget}</td>
-                            <td className="py-2.5">
-                              <span className="text-[10px] font-mono text-[#D4AF37] bg-[#D4AF37]/10 px-2 py-0.5 rounded border border-[#D4AF37]/30">
-                                {inq.status}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                )}
+
+                {/* SUBTAB 2: PROJECT BRIEFS */}
+                {adminSubTab === 'briefs' && (
+                  <div>
+                    {projectBriefs.length === 0 ? (
+                      <div className="p-8 text-center text-xs text-slate-500 border border-dashed border-slate-800 rounded-lg">
+                        No structured project briefs saved yet. Engage the AI Solutions Consultant to generate and store scoped enterprise briefs.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead>
+                            <tr className="border-b border-slate-800 text-slate-400 font-mono text-[11px]">
+                              <th className="pb-2">BRIEF REF</th>
+                              <th className="pb-2">CLIENT & ORG</th>
+                              <th className="pb-2">CATEGORY / DISCIPLINE</th>
+                              <th className="pb-2">SYNTHESIS DATE</th>
+                              <th className="pb-2">STATUS</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/80">
+                            {projectBriefs.map((brf, idx) => (
+                              <tr key={idx} className="text-slate-300">
+                                <td className="py-2.5 font-mono text-[#D4AF37] font-semibold">{brf.referenceCode}</td>
+                                <td className="py-2.5">
+                                  <span className="font-semibold text-white block">{brf.client.fullName}</span>
+                                  <span className="text-slate-400 text-[11px]">{brf.client.companyName}</span>
+                                </td>
+                                <td className="py-2.5 text-white max-w-[200px] truncate">{brf.requirements.category}</td>
+                                <td className="py-2.5 font-mono text-slate-400">
+                                  {new Date(brf.createdAt).toLocaleDateString()}
+                                </td>
+                                <td className="py-2.5">
+                                  <span className="text-[10px] font-mono text-[#00C2C7] bg-[#00C2C7]/10 px-2 py-0.5 rounded border border-[#00C2C7]/30">
+                                    {brf.status?.toUpperCase() || 'DRAFT'}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* SUBTAB 3: WEB INQUIRIES */}
+                {adminSubTab === 'inquiries' && (
+                  <div>
+                    {recentInquiries.length === 0 ? (
+                      <div className="p-8 text-center text-xs text-slate-500 border border-dashed border-slate-800 rounded-lg">
+                        No inquiries submitted yet. Submit a brief in the Contact section to see real-time dispatch logging here.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead>
+                            <tr className="border-b border-slate-800 text-slate-400 font-mono text-[11px]">
+                              <th className="pb-2">TICKET REF</th>
+                              <th className="pb-2">NAME & COMPANY</th>
+                              <th className="pb-2">SERVICE</th>
+                              <th className="pb-2">BUDGET</th>
+                              <th className="pb-2">STATUS</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/80">
+                            {recentInquiries.map((inq, idx) => (
+                              <tr key={idx} className="text-slate-300">
+                                <td className="py-2.5 font-mono text-[#00C2C7]">{inq.referenceId}</td>
+                                <td className="py-2.5">
+                                  <span className="font-semibold text-white block">{inq.fullName}</span>
+                                  <span className="text-slate-400 text-[11px]">{inq.company}</span>
+                                </td>
+                                <td className="py-2.5 max-w-[180px] truncate">{inq.serviceTitle}</td>
+                                <td className="py-2.5 font-mono text-slate-400">{inq.estimatedBudget}</td>
+                                <td className="py-2.5">
+                                  <span className="text-[10px] font-mono text-[#D4AF37] bg-[#D4AF37]/10 px-2 py-0.5 rounded border border-[#D4AF37]/30">
+                                    {inq.status}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
