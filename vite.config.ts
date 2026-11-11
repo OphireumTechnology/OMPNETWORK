@@ -5,7 +5,7 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
-    base: process.env.GITHUB_PAGES === 'true' ? '/OMPNETWORK/' : '/',
+    base: process.env.NODE_ENV === 'production' ? '/OMPNETWORK/' : '/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
