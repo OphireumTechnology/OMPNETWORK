@@ -103,25 +103,20 @@ export const supabaseService = {
 
   // Save Project Brief
   async saveProjectBrief(brief: ProjectBrief): Promise<ProjectBrief> {
-    if (supabase) {
-      try {
-        await supabase.from('project_briefs').insert({
-          reference_code: brief.referenceCode,
-          title: `${brief.requirements.category} Project Specification`,
-          summary: brief.requirements.businessProblem,
-          technical_architecture: brief.technicalArchitecture,
-          commercial_discovery: brief.commercialDiscovery,
-          status: brief.status,
-        });
-      } catch (err) {
-        console.warn('Supabase brief save failed:', err);
-      }
+    if (!supabase) {
+      throw new Error('Secure project brief storage is not configured.');
     }
-
-    // Persist locally
-    const briefs = this.getLocalBriefs();
-    briefs.unshift(brief);
-    localStorage.setItem(STORAGE_KEYS.BRIEFS, JSON.stringify(briefs));
+    const { error } = await supabase.from('project_briefs').insert({
+      reference_code: brief.referenceCode,
+      title: `${brief.requirements.category} Project Specification`,
+      summary: brief.requirements.businessProblem,
+      technical_architecture: brief.technicalArchitecture,
+      commercial_discovery: brief.commercialDiscovery,
+      status: brief.status,
+    });
+    if (error) {
+      throw new Error('Project brief could not be saved securely. Please try again later.');
+    }
     return brief;
   },
 
