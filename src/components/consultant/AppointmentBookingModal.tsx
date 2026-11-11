@@ -108,7 +108,8 @@ export const AppointmentBookingModal: React.FC<AppointmentBookingModalProps> = (
     setErrorMessage(null);
 
     const refCode = `OPM-APT-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
-    const meetingLink = consultationType === 'video' ? `https://meet.google.com/opm-${Math.floor(100 + Math.random() * 900)}-conf` : undefined;
+    // A real meeting link must be created by the authorized calendar provider after booking.
+    const meetingLink = undefined;
     const meetingLocation = consultationType === 'in_person' ? COMPANY_CONFIG.address.fullFormatted : undefined;
 
     const newAppointment: ConsultationAppointment = {
