@@ -94,95 +94,41 @@ export const AVAILABLE_SLOTS = [
 
 export const supabaseService = {
   // Check if a slot is already booked on a date
-  async getBookedSlots(dateStr: string): Promise<string[]> {
-    if (supabase) {
-      try {
-        const { data, error } = await supabase
-          .from('consultation_appointments')
-          .select('scheduled_time_slot')
-          .eq('scheduled_date', dateStr)
-          .eq('status', 'confirmed');
-        if (!error && data) {
-          return data.map((d: any) => d.scheduled_time_slot);
-        }
-      } catch (err) {
-        console.warn('Supabase query error, using local store:', err);
-      }
-    }
-
-    // Local storage fallback
-    const all = this.getLocalAppointments();
-    return all
-      .filter((a) => a.scheduledDate === dateStr && a.status === 'confirmed')
-      .map((a) => a.scheduledTimeSlot);
+  async getBookedSlots(_dateStr: string): Promise<string[]> {
+    // The public client cannot securely read other clients' appointments.
+    // Replace this with an authenticated availability endpoint returning
+    // available time windows without exposing appointment records.
+    throw new Error('Verified consultation availability is not yet connected.');
   },
 
   // Save Project Brief
   async saveProjectBrief(brief: ProjectBrief): Promise<ProjectBrief> {
-    if (supabase) {
-      try {
-        await supabase.from('project_briefs').insert({
-          reference_code: brief.referenceCode,
-          title: `${brief.requirements.category} Project Specification`,
-          summary: brief.requirements.businessProblem,
-          technical_architecture: brief.technicalArchitecture,
-          commercial_discovery: brief.commercialDiscovery,
-          status: brief.status,
-        });
-      } catch (err) {
-        console.warn('Supabase brief save failed:', err);
-      }
+    if (!supabase) {
+      throw new Error('Secure project brief storage is not configured.');
     }
-
-    // Persist locally
-    const briefs = this.getLocalBriefs();
-    briefs.unshift(brief);
-    localStorage.setItem(STORAGE_KEYS.BRIEFS, JSON.stringify(briefs));
+    const { error } = await supabase.from('project_briefs').insert({
+      reference_code: brief.referenceCode,
+      title: `${brief.requirements.category} Project Specification`,
+      summary: brief.requirements.businessProblem,
+      technical_architecture: brief.technicalArchitecture,
+      commercial_discovery: brief.commercialDiscovery,
+      status: brief.status,
+    });
+    if (error) {
+      throw new Error('Project brief could not be saved securely. Please try again later.');
+    }
     return brief;
   },
 
   // Book Consultation Appointment
   async bookAppointment(appointment: ConsultationAppointment): Promise<{ success: boolean; appointment: ConsultationAppointment; error?: string }> {
-    // Check for double booking
-    const booked = await this.getBookedSlots(appointment.scheduledDate);
-    if (booked.includes(appointment.scheduledTimeSlot)) {
-      return {
-        success: false,
-        appointment,
-        error: `The slot ${appointment.scheduledTimeSlot} on ${appointment.scheduledDate} has just been reserved. Please select another slot.`,
-      };
-    }
-
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('consultation_appointments').insert({
-          reference_code: appointment.referenceCode,
-          consultation_type: appointment.consultationType,
-          scheduled_date: appointment.scheduledDate,
-          scheduled_time_slot: appointment.scheduledTimeSlot,
-          duration_minutes: appointment.durationMinutes,
-          client_timezone: appointment.clientTimezone,
-          meeting_link: appointment.meetingLink,
-          meeting_location: appointment.meetingLocation,
-          assigned_consultant: appointment.assignedConsultant,
-          status: appointment.status,
-        });
-        if (error) {
-          console.warn('Supabase booking insert error:', error);
-        }
-      } catch (err) {
-        console.warn('Supabase appointment save error:', err);
-      }
-    }
-
-    // Persist locally
-    const appointments = this.getLocalAppointments();
-    appointments.unshift(appointment);
-    localStorage.setItem(STORAGE_KEYS.APPOINTMENTS, JSON.stringify(appointments));
-
+    // Fail closed: local browser storage is not a shared reservation system.
+    // A production booking must be committed by a trusted backend with an
+    // atomic uniqueness constraint and verified calendar integration.
     return {
-      success: true,
+      success: false,
       appointment,
+      error: 'Online appointment confirmation is temporarily unavailable. Please contact OPHIREUM directly to arrange a consultation.',
     };
   },
 

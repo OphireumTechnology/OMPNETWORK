@@ -81,12 +81,19 @@ export const AppointmentBookingModal: React.FC<AppointmentBookingModalProps> = (
     setSelectedSlot('');
     setErrorMessage(null);
 
-    supabaseService.getBookedSlots(selectedDate).then((slots) => {
-      if (isMounted) {
+    supabaseService.getBookedSlots(selectedDate)
+      .then((slots) => {
+        if (!isMounted) return;
         setBookedSlots(slots);
         setIsCheckingSlots(false);
-      }
-    });
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setBookedSlots([]);
+        setSelectedSlot('');
+        setIsCheckingSlots(false);
+        setErrorMessage('Verified calendar availability is currently unavailable. Please contact OPHIREUM to arrange a consultation.');
+      });
 
     return () => {
       isMounted = false;
@@ -108,7 +115,8 @@ export const AppointmentBookingModal: React.FC<AppointmentBookingModalProps> = (
     setErrorMessage(null);
 
     const refCode = `OPM-APT-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
-    const meetingLink = consultationType === 'video' ? `https://meet.google.com/opm-${Math.floor(100 + Math.random() * 900)}-conf` : undefined;
+    // A real meeting link must be created by the authorized calendar provider after booking.
+    const meetingLink = undefined;
     const meetingLocation = consultationType === 'in_person' ? COMPANY_CONFIG.address.fullFormatted : undefined;
 
     const newAppointment: ConsultationAppointment = {
@@ -344,7 +352,7 @@ export const AppointmentBookingModal: React.FC<AppointmentBookingModalProps> = (
                 <div className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800">
                   {isCheckingSlots ? (
                     <div className="py-4 text-center text-slate-500 font-mono text-xs animate-pulse">
-                      Checking real-time calendar availability...
+                      Checking consultation scheduling service...
                     </div>
                   ) : (
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
@@ -355,7 +363,7 @@ export const AppointmentBookingModal: React.FC<AppointmentBookingModalProps> = (
                           <button
                             key={slot}
                             type="button"
-                            disabled={isBooked}
+                            disabled={true}
                             onClick={() => setSelectedSlot(slot)}
                             className={`p-2 rounded-lg border text-center font-mono text-[11px] transition-all cursor-pointer ${
                               isBooked
