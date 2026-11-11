@@ -300,51 +300,15 @@ class AIVoiceService {
       return;
     }
 
-    // Client mentioned a day or time: construct next upcoming date
-    let targetDate = new Date();
-    targetDate.setDate(targetDate.getDate() + 1);
-    while (targetDate.getDay() === 0 || targetDate.getDay() === 6) {
-      targetDate.setDate(targetDate.getDate() + 1);
-    }
-    const dateStr = targetDate.toISOString().split('T')[0];
-
-    // Check booked slots to ensure real availability
-    const booked = await supabaseService.getBookedSlots(dateStr);
-    const availableSlot = AVAILABLE_SLOTS.find((s) => !booked.includes(s)) || '10:00 AM - 10:30 AM';
-
-    // Book the appointment
-    const refCode = `OPM-APT-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
-    const appointment: ConsultationAppointment = {
-      referenceCode: refCode,
-      client: {
-        fullName: 'Executive Voice Client',
-        companyName: 'Enterprise Client',
-        email: 'consultation@ophireum.com',
-        phone: '+63 917 966 8814',
-      },
-      consultationType: /in person|clark|office/i.test(transcript) ? 'in_person' : 'video',
-      scheduledDate: dateStr,
-      scheduledTimeSlot: availableSlot,
-      durationMinutes: 30,
-      clientTimezone: 'Asia/Manila (PHT)',
-      meetingLocation: /in person|clark|office/i.test(transcript)
-        ? 'KMC | One West Aeropark, Clark Freeport Zone, Pampanga'
-        : 'Google Meet Executive Video Room',
-      assignedConsultant: COMPANY_CONFIG.founderCeo,
-      status: 'confirmed',
-      createdAt: new Date().toISOString(),
-    };
-
-    await supabaseService.bookAppointment(appointment);
-    this.callbacks.onAppointmentBooked?.(appointment);
-
-    const verbalConfirmation = isFilipino
-      ? `Kumpirmado na po ang inyong consultation appointment! Reference code: ${refCode}. Naka-schedule po ito sa darating na ${dateStr} ganap na ${availableSlot} Philippine Time. Ipinadala na rin po namin ang calendar invite.`
-      : `Your executive consultation is confirmed! Your reference code is ${refCode}. You are scheduled for ${dateStr} at ${availableSlot} Philippine Time with our Founder & CEO Dhenze Languisan. A calendar invite has been generated.`;
-
-    this.conversationHistory.push({ sender: 'ai', text: verbalConfirmation });
-    this.callbacks.onAiResponse?.(verbalConfirmation, { isBookingConfirmed: true, appointment });
-    this.speakText(verbalConfirmation);
+    // Voice must never fabricate a date, client identity, meeting link, or booking.
+    // A confirmed reservation requires verified availability, explicit consent,
+    // authenticated server-side booking, and a successful calendar operation.
+    const reply = isFilipino
+      ? "Salamat po. Hindi pa available ang kumpirmadong voice booking. Maaari po kayong makipag-ugnayan sa aming team upang magtakda ng konsultasyon. Hindi pa po naka-book ang appointment."
+      : "Thanks. I can help prepare your consultation request, but verified voice booking is not available yet. Please contact our team to arrange a time. No appointment has been booked.";
+    this.conversationHistory.push({ sender: 'ai', text: reply });
+    this.callbacks.onAiResponse?.(reply, { isBookingIntent: true, isBookingConfirmed: false });
+    this.speakText(reply);
   }
 
   /**
