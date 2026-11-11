@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { servicesData } from '../data/servicesData';
 import { InquiryFormData } from '../types';
-import { Send, CheckCircle2, AlertCircle, Paperclip, FileText, Shield, MapPin, Building, Lock } from 'lucide-react';
+import { 
+  Send, CheckCircle2, AlertCircle, Paperclip, FileText, 
+  Shield, MapPin, Building, Lock, Phone, Mail, ExternalLink, User
+} from 'lucide-react';
+import { COMPANY_CONFIG } from '../data/companyConfig';
 
 interface ContactSectionProps {
   selectedServiceId?: string;
@@ -104,7 +108,6 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
         status: 'Pending Dispatch Review'
       };
 
-      // Store in localStorage for Operations/Admin panel
       try {
         const stored = JSON.parse(localStorage.getItem('opm_inquiries') || '[]');
         stored.unshift(newInquiry);
@@ -144,31 +147,66 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
         
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-16">
           
-          {/* Left Column: Context, Location & SLA Information */}
-          <div className="lg:col-span-5 flex flex-col justify-between">
+          {/* Left Column: Official Contact, Founder & CEO, Location & SLA */}
+          <div className="lg:col-span-5 flex flex-col justify-between space-y-8">
             <div>
               <div className="flex items-center gap-2 text-xs font-semibold text-[#00C2C7] uppercase tracking-wider mb-2">
-                <span>Start a Project</span>
+                <span>Start Your Project</span>
                 <span aria-hidden="true">·</span>
-                <span>Direct Inquiry Routing</span>
+                <span>Direct Executive Routing</span>
               </div>
               <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white text-balance">
                 Engage Ophireum Network for Your Next Assignment
               </h2>
               <p className="mt-4 text-sm sm:text-base text-slate-300 leading-relaxed text-balance">
-                Submissions are received directly by our executive production and engineering leads. Every brief receives an initial technical review within 24 business hours.
+                Submissions are received directly by the executive production and engineering leads of {COMPANY_CONFIG.name}. Every brief receives an initial technical review within 24 business hours.
               </p>
 
               <div className="mt-8 space-y-4">
+                
+                {/* Founder / CEO Card */}
                 <div className="p-4 rounded-xl bg-[#111827] border border-slate-800 flex items-start gap-3.5">
-                  <MapPin className="w-5 h-5 text-[#00C2C7] shrink-0 mt-0.5" />
+                  <User className="w-5 h-5 text-[#00C2C7] shrink-0 mt-0.5" />
                   <div>
-                    <span className="text-xs font-mono text-slate-400 block uppercase">Operational Headquarters</span>
-                    <span className="text-sm font-semibold text-white">Mabalacat City, Pampanga, Philippines</span>
-                    <p className="text-xs text-slate-400 mt-0.5">Central Luzon Technology & Media Corridor</p>
+                    <span className="text-xs font-mono text-slate-400 block uppercase">Founder / Chief Executive Officer</span>
+                    <span className="text-sm font-semibold text-white">{COMPANY_CONFIG.founderCeo}</span>
+                    <div className="mt-1">
+                      <a
+                        href={COMPANY_CONFIG.mobileLink}
+                        className="inline-flex items-center gap-1.5 text-xs font-mono text-[#00C2C7] hover:underline"
+                      >
+                        <Phone className="w-3 h-3" />
+                        <span>{COMPANY_CONFIG.mobile}</span>
+                      </a>
+                    </div>
                   </div>
                 </div>
 
+                {/* Office Address Card with Maps Link */}
+                <div className="p-4 rounded-xl bg-[#111827] border border-slate-800 flex items-start gap-3.5">
+                  <Building className="w-5 h-5 text-[#00C2C7] shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-mono text-slate-400 block uppercase">Official Office Address</span>
+                    <span className="text-sm font-semibold text-white">{COMPANY_CONFIG.address.line1}</span>
+                    <p className="text-xs text-slate-300">{COMPANY_CONFIG.address.line2}</p>
+                    <p className="text-xs text-slate-300">{COMPANY_CONFIG.address.zone}</p>
+                    <p className="text-xs text-slate-400 font-mono">{COMPANY_CONFIG.address.cityPostal}</p>
+                    <div className="pt-2">
+                      <a
+                        href={COMPANY_CONFIG.address.mapsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-[#00C2C7] hover:text-white transition-colors"
+                      >
+                        <MapPin className="w-3 h-3" />
+                        <span>View Office on Google Maps</span>
+                        <ExternalLink className="w-3 h-3 ml-0.5" />
+                      </a>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Confidentiality & Non-Disclosure Guarantee */}
                 <div className="p-4 rounded-xl bg-[#111827] border border-slate-800 flex items-start gap-3.5">
                   <Shield className="w-5 h-5 text-[#D4AF37] shrink-0 mt-0.5" />
                   <div>
@@ -178,25 +216,27 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
                   </div>
                 </div>
 
+                {/* Dispatch Email Routing Information */}
                 <div className="p-4 rounded-xl bg-[#111827] border border-slate-800 flex items-start gap-3.5">
-                  <Lock className="w-5 h-5 text-[#C0C7D1] shrink-0 mt-0.5" />
+                  <Mail className="w-5 h-5 text-[#C0C7D1] shrink-0 mt-0.5" />
                   <div>
-                    <span className="text-xs font-mono text-slate-400 block uppercase">Corporate Inquiries</span>
-                    <span className="text-sm font-semibold text-white">Enterprise Dispatch System</span>
-                    <p className="text-xs text-slate-400 mt-0.5">Automated ticket generation & administrative routing to designated company channels.</p>
+                    <span className="text-xs font-mono text-slate-400 block uppercase">Administrative Dispatch Routing</span>
+                    <span className="text-sm font-semibold text-white font-mono">{COMPANY_CONFIG.configurableEmail}</span>
+                    <p className="text-xs text-slate-400 mt-0.5">Configurable company dispatch channel monitored by executive administrators.</p>
                   </div>
                 </div>
+
               </div>
             </div>
 
-            <div className="mt-8 pt-6 border-t border-slate-800/80 text-xs text-slate-400">
+            <div className="pt-4 border-t border-slate-800/80 text-xs text-slate-400">
               <span>Direct inquiries are monitored Monday to Friday, 8:00 AM – 6:00 PM (PST / UTC+8).</span>
             </div>
           </div>
 
           {/* Right Column: Working Interactive Form */}
           <div className="lg:col-span-7">
-            <div className="rounded-2xl bg-[#111827] border border-slate-800 p-6 sm:p-8 relative">
+            <div className="rounded-2xl bg-[#111827] border border-slate-800 p-6 sm:p-8 relative shadow-2xl">
               
               {submittedReference ? (
                 /* Success Confirmation State */
@@ -206,12 +246,12 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
                   </div>
                   <h3 className="text-xl font-bold text-white">Inquiry Registered Successfully</h3>
                   <p className="text-xs text-slate-300 max-w-md mx-auto leading-relaxed">
-                    Your brief has been assigned reference ticket <span className="font-mono text-[#00C2C7] font-bold">{submittedReference}</span> and routed to the executive review team at OPHIREUM MULTIMEDIA PRODUCTION in Mabalacat City, Pampanga.
+                    Your brief has been assigned reference ticket <span className="font-mono text-[#00C2C7] font-bold">{submittedReference}</span> and routed to Founder & CEO <span className="text-white font-semibold">{COMPANY_CONFIG.founderCeo}</span> and the executive engineering team at {COMPANY_CONFIG.name} at One West Aeropark, Clark Freeport Zone.
                   </p>
                   <div className="pt-4 flex justify-center gap-3">
                     <button
                       onClick={resetForm}
-                      className="px-5 py-2.5 text-xs font-semibold text-[#0B1220] bg-[#00C2C7] hover:bg-[#00d6dc] rounded-lg cursor-pointer"
+                      className="px-5 py-2.5 text-xs font-semibold text-[#0B1220] bg-[#00C2C7] hover:bg-[#00d6dc] rounded-lg cursor-pointer transition-all"
                     >
                       Submit Another Inquiry
                     </button>
@@ -224,7 +264,7 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-medium text-slate-300 mb-1">
-                        Full Name <span className="text-[#00C2C7]">*</span>
+                        Full Legal Name <span className="text-[#00C2C7]">*</span>
                       </label>
                       <input
                         type="text"
@@ -254,7 +294,7 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-medium text-slate-300 mb-1">
-                        Contact Number <span className="text-[#00C2C7]">*</span>
+                        Contact Phone / Mobile <span className="text-[#00C2C7]">*</span>
                       </label>
                       <input
                         type="tel"
@@ -274,7 +314,7 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
                         type="text"
                         value={formData.company}
                         onChange={(e) => setFormData({ ...formData, company: e.target.value })}
-                        placeholder="e.g. Apex Enterprises"
+                        placeholder="e.g. Clark Aero Dynamics"
                         className="w-full px-3.5 py-2.5 rounded-lg bg-slate-900 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#00C2C7] focus:ring-1 focus:ring-[#00C2C7]"
                       />
                       {errors.company && <p className="text-[11px] text-rose-400 mt-1">{errors.company}</p>}
@@ -371,7 +411,7 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
                         className="mt-0.5 rounded bg-slate-900 border-slate-700 text-[#00C2C7] focus:ring-[#00C2C7]"
                       />
                       <span>
-                        I acknowledge and authorize OPHIREUM MULTIMEDIA PRODUCTION to process this project brief under corporate confidentiality and data privacy guidelines.
+                        I acknowledge and authorize {COMPANY_CONFIG.name} to process this project brief under corporate confidentiality and data privacy guidelines.
                       </span>
                     </label>
                     {errors.privacyConsent && <p className="text-[11px] text-rose-400 mt-1">{errors.privacyConsent}</p>}

@@ -3,8 +3,10 @@ import { aiAgentsData } from '../data/aiAgentsData';
 import { 
   X, Shield, Cpu, Code2, Users, LayoutDashboard, 
   CheckCircle2, Clock, Terminal, GitBranch, Key, Activity,
-  Lock, ArrowRight, RefreshCw, Send, Layers
+  Lock, ArrowRight, RefreshCw, Send, Layers, Phone, MapPin, Building
 } from 'lucide-react';
+import { AIProcessingVisualizer } from './animations/AIProcessingVisualizer';
+import { COMPANY_CONFIG } from '../data/companyConfig';
 
 interface EnterpriseModalProps {
   isOpen: boolean;
@@ -41,8 +43,8 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({ isOpen, onClos
     setStudioGenerating(true);
     setTimeout(() => {
       setStudioGenerating(false);
-      setStudioOutput(`// Ophireum AI Studio Generated Component\n// Prompt: "${promptInput}"\n\nimport React from 'react';\n\nexport const EnterpriseView: React.FC = () => {\n  return (\n    <section className="bg-slate-950 p-8 rounded-2xl border border-cyan-500/30">\n      <h2 className="text-xl font-bold text-white">Dynamic Production Engine</h2>\n      <p className="text-sm text-slate-400 mt-2">Verified Component Blueprint synthesized by Ophireum AI Agent AGT-04-FED</p>\n    </section>\n  );\n};`);
-    }, 1000);
+      setStudioOutput(`// Ophireum AI Studio Generated Component\n// Synthesis Engine: @google/genai Model Adapter\n// Prompt: "${promptInput}"\n\nimport React from 'react';\n\nexport const EnterpriseView: React.FC = () => {\n  return (\n    <section className="bg-slate-950 p-8 rounded-2xl border border-cyan-500/30 shadow-2xl">\n      <h2 className="text-xl font-bold text-white tracking-tight">Ophireum Distributed Media Hub</h2>\n      <p className="text-sm text-slate-400 mt-2">Verified Component Blueprint synthesized by Ophireum AI Agent AGT-04-FED</p>\n      <div className="mt-4 flex gap-2 font-mono text-xs text-cyan-400">\n        <span>LATENCY: &lt; 12ms</span>\n        <span>·</span>\n        <span>ACES REC.709 COLOR</span>\n      </div>\n    </section>\n  );\n};`);
+    }, 1200);
   };
 
   return (
@@ -62,12 +64,12 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({ isOpen, onClos
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-white uppercase tracking-wider">OPHIREUM NETWORK</span>
+                <span className="text-xs font-bold text-white uppercase tracking-wider">{COMPANY_CONFIG.platformName}</span>
                 <span className="text-[10px] font-mono text-[#00C2C7] bg-[#00C2C7]/10 px-2 py-0.5 rounded border border-[#00C2C7]/30">
                   ENTERPRISE PLATFORM ARCHITECTURE
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400">Integrated Systems Workspace (Phase 2-7 Architectural Blueprint)</p>
+              <p className="text-[11px] text-slate-400">Headquarters: {COMPANY_CONFIG.address.zone}</p>
             </div>
           </div>
 
@@ -86,7 +88,7 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({ isOpen, onClos
             onClick={() => setActiveTab('portal')}
             className={`px-3.5 py-1.5 rounded-lg font-medium transition-colors cursor-pointer flex items-center gap-2 whitespace-nowrap ${
               activeTab === 'portal'
-                ? 'bg-[#00C2C7] text-[#0B1220] font-semibold'
+                ? 'bg-[#00C2C7] text-[#0B1220] font-semibold shadow-sm'
                 : 'text-slate-300 hover:text-white hover:bg-slate-800'
             }`}
           >
@@ -99,12 +101,12 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({ isOpen, onClos
             onClick={() => setActiveTab('studio')}
             className={`px-3.5 py-1.5 rounded-lg font-medium transition-colors cursor-pointer flex items-center gap-2 whitespace-nowrap ${
               activeTab === 'studio'
-                ? 'bg-[#00C2C7] text-[#0B1220] font-semibold'
+                ? 'bg-[#00C2C7] text-[#0B1220] font-semibold shadow-sm'
                 : 'text-slate-300 hover:text-white hover:bg-slate-800'
             }`}
           >
             <Code2 className="w-3.5 h-3.5" />
-            <span>AI Website & Software Studio</span>
+            <span>AI Development Studio</span>
             <span className="text-[10px] opacity-75 font-mono">PHASE 3</span>
           </button>
 
@@ -112,7 +114,7 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({ isOpen, onClos
             onClick={() => setActiveTab('agents')}
             className={`px-3.5 py-1.5 rounded-lg font-medium transition-colors cursor-pointer flex items-center gap-2 whitespace-nowrap ${
               activeTab === 'agents'
-                ? 'bg-[#00C2C7] text-[#0B1220] font-semibold'
+                ? 'bg-[#00C2C7] text-[#0B1220] font-semibold shadow-sm'
                 : 'text-slate-300 hover:text-white hover:bg-slate-800'
             }`}
           >
@@ -125,7 +127,7 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({ isOpen, onClos
             onClick={() => setActiveTab('admin')}
             className={`px-3.5 py-1.5 rounded-lg font-medium transition-colors cursor-pointer flex items-center gap-2 whitespace-nowrap ${
               activeTab === 'admin'
-                ? 'bg-[#00C2C7] text-[#0B1220] font-semibold'
+                ? 'bg-[#00C2C7] text-[#0B1220] font-semibold shadow-sm'
                 : 'text-slate-300 hover:text-white hover:bg-slate-800'
             }`}
           >
@@ -141,15 +143,15 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({ isOpen, onClos
           {/* TAB 1: CLIENT PORTAL WORKSPACE */}
           {activeTab === 'portal' && (
             <div className="space-y-6">
-              <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex items-start justify-between">
+              <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex items-start justify-between flex-wrap gap-4">
                 <div>
                   <span className="text-[11px] font-mono text-[#00C2C7] uppercase">Enterprise Client Portal Specification</span>
                   <h3 className="text-lg font-bold text-white mt-0.5">Authorized Client Workspace</h3>
                   <p className="text-xs text-slate-300 mt-1 max-w-2xl">
-                    Tenants log in with MFA-protected credentials to track deliverables, approve milestone sign-offs, inspect high-bitrate video review links, and process invoicing.
+                    Tenants log in with MFA-protected credentials to track deliverables, approve milestone sign-offs, inspect high-bitrate video review links, and communicate directly with project coordinators.
                   </p>
                 </div>
-                <div className="hidden sm:flex items-center gap-2 text-xs font-mono text-slate-400 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800">
+                <div className="flex items-center gap-2 text-xs font-mono text-slate-400 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800">
                   <Lock className="w-3.5 h-3.5 text-[#00C2C7]" />
                   <span>Tenant Isolation: Active</span>
                 </div>
@@ -157,8 +159,8 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({ isOpen, onClos
 
               {/* Mock Milestone Tracker */}
               <div className="rounded-xl bg-[#111827] border border-slate-800 p-5">
-                <h4 className="text-xs font-mono uppercase text-slate-400 mb-4">Live Assignment Milestones (Demo Tenant: Clark Aero Dynamics)</h4>
-                <div className="space-y-4">
+                <h4 className="text-xs font-mono uppercase text-slate-400 mb-4">Live Assignment Milestones (Demo Client: Clark Aero Dynamics)</h4>
+                <div className="space-y-3.5">
                   
                   <div className="p-4 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="flex items-start gap-3">
@@ -176,12 +178,10 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({ isOpen, onClos
                       <Clock className="w-5 h-5 text-[#00C2C7] shrink-0 mt-0.5" />
                       <div>
                         <span className="text-xs font-semibold text-white">Phase 2: 4K Cinema Capture & Drone Orthomapping</span>
-                        <p className="text-[11px] text-slate-400">Footage ingested into ACES suite · Proxy generation ready</p>
+                        <p className="text-[11px] text-slate-400">Ingested at KMC One West Aeropark post-production suite · Proxy ready</p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-mono text-[#00C2C7] font-medium">In Progress (85%)</span>
-                    </div>
+                    <span className="text-xs font-mono text-[#00C2C7] font-medium">In Progress (85%)</span>
                   </div>
 
                   <div className="p-4 rounded-lg bg-slate-900/40 border border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4 opacity-75">
@@ -198,30 +198,39 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({ isOpen, onClos
                 </div>
               </div>
 
-              {/* File Sharing & Support Ticket Row */}
+              {/* Direct Support Lead & Office Card */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <div className="p-5 rounded-xl bg-[#111827] border border-slate-800">
-                  <h4 className="text-xs font-mono uppercase text-slate-400 mb-2">Secure Media Review Vault</h4>
-                  <p className="text-xs text-slate-300 mb-3">Timecode-commented video player with frame-accurate review.</p>
-                  <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-400 flex items-center justify-between">
-                    <span>OPM_ACES_RoughCut_v03.mov</span>
-                    <span className="text-[#00C2C7] font-mono">1.8 GB · Reviewable</span>
-                  </div>
+                <div className="p-5 rounded-xl bg-[#111827] border border-slate-800 space-y-2">
+                  <h4 className="text-xs font-mono uppercase text-slate-400">Dedicated Production Lead</h4>
+                  <div className="text-sm font-bold text-white">{COMPANY_CONFIG.founderCeo}</div>
+                  <a href={COMPANY_CONFIG.mobileLink} className="text-xs font-mono text-[#00C2C7] hover:underline flex items-center gap-1.5">
+                    <Phone className="w-3.5 h-3.5" />
+                    <span>{COMPANY_CONFIG.mobile}</span>
+                  </a>
+                  <p className="text-xs text-slate-400 pt-1">
+                    Direct executive line for priority project escalations and change requests.
+                  </p>
                 </div>
 
-                <div className="p-5 rounded-xl bg-[#111827] border border-slate-800">
-                  <h4 className="text-xs font-mono uppercase text-slate-400 mb-2">Change Requests & Support Tickets</h4>
-                  <p className="text-xs text-slate-300 mb-3">Direct pipeline to project coordinators and solution architects.</p>
-                  <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-400 flex items-center justify-between">
-                    <span>Active Ticket: #CR-882 (Color grading tone adjustment)</span>
-                    <span className="text-[#D4AF37] font-mono">Under Review</span>
-                  </div>
+                <div className="p-5 rounded-xl bg-[#111827] border border-slate-800 space-y-2">
+                  <h4 className="text-xs font-mono uppercase text-slate-400">Physical Studio Location</h4>
+                  <div className="text-sm font-bold text-white">{COMPANY_CONFIG.address.line1}</div>
+                  <div className="text-xs text-slate-300">{COMPANY_CONFIG.address.zone}</div>
+                  <a
+                    href={COMPANY_CONFIG.address.mapsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-[#00C2C7] hover:underline flex items-center gap-1 pt-1"
+                  >
+                    <MapPin className="w-3.5 h-3.5" />
+                    <span>Open Maps Navigation</span>
+                  </a>
                 </div>
               </div>
             </div>
           )}
 
-          {/* TAB 2: AI WEBSITE & APPLICATION BUILDER */}
+          {/* TAB 2: AI DEVELOPMENT STUDIO */}
           {activeTab === 'studio' && (
             <div className="space-y-6">
               <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
@@ -230,6 +239,11 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({ isOpen, onClos
                 <p className="text-xs text-slate-300 mt-1">
                   Engineered to synthesize React 19 components, configure responsive layouts, manage design tokens, and push verified code directly to GitHub.
                 </p>
+              </div>
+
+              {/* Embedded Neural Visualizer */}
+              <div className="rounded-xl bg-slate-950 border border-slate-800 overflow-hidden">
+                <AIProcessingVisualizer className="w-full h-44" />
               </div>
 
               {/* Natural Language Prompt Interactive Testbed */}
@@ -260,22 +274,6 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({ isOpen, onClos
                     <pre>{studioOutput}</pre>
                   </div>
                 )}
-              </div>
-
-              {/* Studio Capabilities Overview */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="p-4 rounded-xl bg-[#111827] border border-slate-800">
-                  <span className="text-xs font-semibold text-white block">React 19 & Tailwind</span>
-                  <p className="text-[11px] text-slate-400 mt-1">Strict TypeScript interfaces, semantic markup, and zero-pill discipline.</p>
-                </div>
-                <div className="p-4 rounded-xl bg-[#111827] border border-slate-800">
-                  <span className="text-xs font-semibold text-white block">GitHub CI/CD Push</span>
-                  <p className="text-[11px] text-slate-400 mt-1">Automated branch creation, pull request generation, and preview hosting.</p>
-                </div>
-                <div className="p-4 rounded-xl bg-[#111827] border border-slate-800">
-                  <span className="text-xs font-semibold text-white block">Audit & Test Gate</span>
-                  <p className="text-[11px] text-slate-400 mt-1">QA Testing Agent and Security Review Agent verify before merge.</p>
-                </div>
               </div>
             </div>
           )}
@@ -334,7 +332,7 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({ isOpen, onClos
                 <span className="text-[11px] font-mono text-[#00C2C7] uppercase">Executive Governance Suite</span>
                 <h3 className="text-lg font-bold text-white mt-0.5">Super Administrator Operations Center</h3>
                 <p className="text-xs text-slate-300 mt-1">
-                  Centralized command console for client organizations, live brief queues, billing statuses, and system audit logs.
+                  Centralized command console for client organizations, live brief queues, billing records, and system audit logs.
                 </p>
               </div>
 
@@ -384,26 +382,26 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({ isOpen, onClos
                 )}
               </div>
 
-              {/* Health Metrics Strip */}
+              {/* Administrative Settings & Health Strip */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div className="p-4 rounded-xl bg-[#111827] border border-slate-800">
-                  <span className="text-[11px] font-mono text-slate-400 block uppercase">SYSTEM HEALTH</span>
-                  <span className="text-lg font-bold text-emerald-400 mt-1 block">Optimal</span>
-                  <span className="text-[10px] text-slate-500">All services responsive</span>
+                  <span className="text-[11px] font-mono text-slate-400 block uppercase">DISPATCH ROUTE</span>
+                  <span className="text-xs font-mono text-[#00C2C7] mt-1 block truncate">{COMPANY_CONFIG.configurableEmail}</span>
+                  <span className="text-[10px] text-slate-500">Configurable company inbox</span>
                 </div>
                 <div className="p-4 rounded-xl bg-[#111827] border border-slate-800">
-                  <span className="text-[11px] font-mono text-slate-400 block uppercase">DATABASE STATUS</span>
-                  <span className="text-lg font-bold text-white mt-1 block">PostgreSQL</span>
-                  <span className="text-[10px] text-slate-500">Tenant isolated tables</span>
+                  <span className="text-[11px] font-mono text-slate-400 block uppercase">EXECUTIVE LEAD</span>
+                  <span className="text-xs font-semibold text-white mt-1 block">{COMPANY_CONFIG.founderCeo}</span>
+                  <span className="text-[10px] text-slate-500">{COMPANY_CONFIG.mobile}</span>
                 </div>
                 <div className="p-4 rounded-xl bg-[#111827] border border-slate-800">
                   <span className="text-[11px] font-mono text-slate-400 block uppercase">GITHUB ACTIONS</span>
-                  <span className="text-lg font-bold text-white mt-1 block">CI Passing</span>
+                  <span className="text-xs font-bold text-white mt-1 block">CI Passing</span>
                   <span className="text-[10px] text-slate-500">Automated build checks</span>
                 </div>
                 <div className="p-4 rounded-xl bg-[#111827] border border-slate-800">
                   <span className="text-[11px] font-mono text-slate-400 block uppercase">MODEL ADAPTER</span>
-                  <span className="text-lg font-bold text-[#00C2C7] mt-1 block">@google/genai</span>
+                  <span className="text-xs font-bold text-[#00C2C7] mt-1 block">@google/genai</span>
                   <span className="text-[10px] text-slate-500">Server-side proxy ready</span>
                 </div>
               </div>
@@ -413,8 +411,8 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({ isOpen, onClos
         </div>
 
         {/* Modal Bottom Actions */}
-        <div className="px-5 py-3.5 bg-[#111827] border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
-          <span>Enterprise Platform Specification · Governed by Ophireum Network Master Directive</span>
+        <div className="px-5 py-3.5 bg-[#111827] border-t border-slate-800 flex flex-wrap items-center justify-between text-xs text-slate-400 gap-2">
+          <span>Enterprise Platform Specification · Governed by {COMPANY_CONFIG.name}</span>
           <button
             onClick={onClose}
             className="px-4 py-1.5 font-semibold text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"

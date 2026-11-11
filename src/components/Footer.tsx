@@ -1,5 +1,6 @@
 import React from 'react';
-import { Building, Shield, MapPin, ArrowUpRight } from 'lucide-react';
+import { Building, Shield, MapPin, ArrowUpRight, Phone, Mail, ExternalLink, User } from 'lucide-react';
+import { COMPANY_CONFIG } from '../data/companyConfig';
 
 interface FooterProps {
   onNavigate: (sectionId: string) => void;
@@ -8,15 +9,18 @@ interface FooterProps {
 
 export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenPortal }) => {
   return (
-    <footer className="bg-[#080d18] border-t border-slate-800 text-slate-400 text-xs">
+    <footer className="bg-[#080d18] border-t border-slate-800 text-slate-400 text-xs relative">
+      {/* Subtle cyan accent glow border line */}
+      <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-[#00C2C7]/50 to-transparent" />
+
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-10">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-10">
           
-          {/* Brand & Emblem Lockup */}
-          <div className="lg:col-span-2 space-y-4">
+          {/* Brand & Executive Lockup (Cols 1-4) */}
+          <div className="lg:col-span-4 space-y-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full p-0.5 bg-gradient-to-tr from-[#D4AF37] via-[#00C2C7] to-[#C0C7D1] shrink-0">
+              <div className="w-11 h-11 rounded-full p-0.5 bg-gradient-to-tr from-[#D4AF37] via-[#00C2C7] to-[#C0C7D1] shrink-0">
                 <img
                   src="/assets/aistudio/OPHIREUM_Logo_6504e623.png"
                   alt="OPHIREUM MULTIMEDIA PRODUCTION Emblem"
@@ -26,28 +30,63 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenPortal }) => {
               </div>
               <div>
                 <span className="text-sm font-extrabold tracking-wider text-white uppercase block">
-                  OPHIREUM MULTIMEDIA PRODUCTION
+                  {COMPANY_CONFIG.name}
                 </span>
                 <span className="text-[10px] font-mono text-[#00C2C7] tracking-wider block">
-                  OPHIREUM NETWORK
+                  {COMPANY_CONFIG.platformName}
                 </span>
               </div>
             </div>
 
-            <p className="text-xs text-slate-400 leading-relaxed max-w-sm">
-              Creative Media, Intelligent Technology, and Connected Digital Solutions. Combining high-impact cinematography, artificial intelligence, software engineering, and enterprise cloud systems.
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Transforming digital experiences through multimedia production, artificial intelligence, enterprise software engineering, creative technology, and intelligent digital platforms.
             </p>
 
-            <div className="flex items-center gap-2 text-slate-300 font-medium pt-1">
-              <MapPin className="w-4 h-4 text-[#00C2C7] shrink-0" />
-              <span>Mabalacat City, Pampanga, Philippines</span>
+            {/* Founder / CEO Information */}
+            <div className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1.5 text-xs">
+              <div className="flex items-center gap-2 text-slate-300 font-medium">
+                <User className="w-3.5 h-3.5 text-[#00C2C7]" />
+                <span>Founder & CEO: <strong className="text-white">{COMPANY_CONFIG.founderCeo}</strong></span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Phone className="w-3.5 h-3.5 text-[#00C2C7]" />
+                <a href={COMPANY_CONFIG.mobileLink} className="text-[#00C2C7] hover:underline font-mono">
+                  {COMPANY_CONFIG.mobile}
+                </a>
+              </div>
             </div>
           </div>
 
-          {/* Navigation Links */}
-          <div className="space-y-3">
-            <h4 className="text-xs font-mono uppercase text-white tracking-wider">Corporate Site</h4>
-            <ul className="space-y-2">
+          {/* Office Address Location (Cols 5-7) */}
+          <div className="lg:col-span-3 space-y-3">
+            <h4 className="text-xs font-mono uppercase text-white tracking-wider flex items-center gap-1.5">
+              <Building className="w-3.5 h-3.5 text-[#00C2C7]" />
+              <span>Official Office Address</span>
+            </h4>
+            <div className="space-y-1 text-xs text-slate-300 leading-relaxed">
+              <p className="font-semibold text-white">{COMPANY_CONFIG.address.line1}</p>
+              <p>{COMPANY_CONFIG.address.line2}</p>
+              <p>{COMPANY_CONFIG.address.zone}</p>
+              <p className="font-mono text-slate-400">{COMPANY_CONFIG.address.cityPostal}</p>
+            </div>
+            <div className="pt-2">
+              <a
+                href={COMPANY_CONFIG.address.mapsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-[#00C2C7] hover:underline"
+              >
+                <span>Google Maps Location</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+          </div>
+
+          {/* Quick Links (Cols 8-9) */}
+          <div className="lg:col-span-2 space-y-3">
+            <h4 className="text-xs font-mono uppercase text-white tracking-wider">Navigation</h4>
+            <ul className="space-y-2 text-xs">
               <li>
                 <button
                   onClick={() => onNavigate('hero')}
@@ -61,7 +100,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenPortal }) => {
                   onClick={() => onNavigate('about')}
                   className="hover:text-white transition-colors cursor-pointer"
                 >
-                  About Us & Governance
+                  About & Governance
                 </button>
               </li>
               <li>
@@ -69,7 +108,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenPortal }) => {
                   onClick={() => onNavigate('services')}
                   className="hover:text-white transition-colors cursor-pointer"
                 >
-                  12 Proposed Services
+                  12 Services
                 </button>
               </li>
               <li>
@@ -77,7 +116,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenPortal }) => {
                   onClick={() => onNavigate('portfolio')}
                   className="hover:text-white transition-colors cursor-pointer"
                 >
-                  Portfolio & Blueprints
+                  Portfolio Showcases
                 </button>
               </li>
               <li>
@@ -85,16 +124,16 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenPortal }) => {
                   onClick={() => onNavigate('contact')}
                   className="hover:text-white transition-colors cursor-pointer"
                 >
-                  Inquiry & Brief Routing
+                  Project Brief
                 </button>
               </li>
             </ul>
           </div>
 
-          {/* Enterprise Platform */}
-          <div className="space-y-3">
+          {/* Enterprise Network Links (Cols 10-12) */}
+          <div className="lg:col-span-3 space-y-3">
             <h4 className="text-xs font-mono uppercase text-white tracking-wider">Enterprise Network</h4>
-            <ul className="space-y-2">
+            <ul className="space-y-2 text-xs">
               <li>
                 <button
                   onClick={onOpenPortal}
@@ -109,7 +148,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenPortal }) => {
                   onClick={onOpenPortal}
                   className="hover:text-[#00C2C7] transition-colors cursor-pointer flex items-center gap-1"
                 >
-                  <span>AI Website Studio (Phase 3)</span>
+                  <span>AI Development Studio (Phase 3)</span>
                   <ArrowUpRight className="w-3 h-3 text-[#00C2C7]" />
                 </button>
               </li>
@@ -118,7 +157,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenPortal }) => {
                   onClick={onOpenPortal}
                   className="hover:text-[#00C2C7] transition-colors cursor-pointer flex items-center gap-1"
                 >
-                  <span>AI Agent Workforce (Phase 5/7)</span>
+                  <span>AI Agent Workforce Matrix (Phase 5/7)</span>
                   <ArrowUpRight className="w-3 h-3 text-[#00C2C7]" />
                 </button>
               </li>
@@ -132,35 +171,25 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenPortal }) => {
                 </button>
               </li>
             </ul>
-          </div>
 
-          {/* Standards & Brand System */}
-          <div className="space-y-3">
-            <h4 className="text-xs font-mono uppercase text-white tracking-wider">Brand & Standards</h4>
-            <ul className="space-y-1.5 text-[11px] text-slate-400">
-              <li>Graphite: <span className="font-mono text-slate-300">#111827</span></li>
-              <li>Technology Cyan: <span className="font-mono text-[#00C2C7]">#00C2C7</span></li>
-              <li>Silver Gray: <span className="font-mono text-slate-300">#F3F4F6</span></li>
-              <li>Metallic Gold: <span className="font-mono text-[#D4AF37]">#D4AF37</span></li>
-              <li className="pt-2 text-slate-400">
-                Official Emblem: Circular OPM monogram with interconnected circuits.
-              </li>
-            </ul>
+            <div className="pt-2 text-[11px] text-slate-500 font-mono">
+              Graphite #111827 · Cyan #00C2C7 · Gold #D4AF37
+            </div>
           </div>
 
         </div>
 
-        {/* Bottom Bar */}
+        {/* Bottom Legal & Regulatory Bar */}
         <div className="mt-12 pt-8 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px] text-slate-500">
           <div>
-            © 2026 OPHIREUM MULTIMEDIA PRODUCTION. All rights reserved.
+            © 2026 {COMPANY_CONFIG.name}. All rights reserved.
           </div>
-          <div className="flex items-center gap-4 text-slate-400">
-            <span>Enterprise Terms</span>
+          <div className="flex flex-wrap items-center gap-4 text-slate-400">
+            <span>Privacy Policy</span>
             <span>·</span>
-            <span>Data Privacy Policy</span>
+            <span>Terms of Use</span>
             <span>·</span>
-            <span>Mabalacat City, Pampanga</span>
+            <span>Clark Freeport Zone, Pampanga</span>
           </div>
         </div>
 
