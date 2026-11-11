@@ -133,18 +133,13 @@ ALTER TABLE public.notification_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.consent_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 
--- Anonymous public can create profiles and access their own session by session_token
+-- Anonymous inserts are permitted only where required; no public session or appointment reads.
+-- For existing deployments, run the companion policy-revocation migration.
 CREATE POLICY "Public insert client profiles" ON public.client_profiles
   FOR INSERT WITH CHECK (true);
 
 CREATE POLICY "Public insert conversation session" ON public.ai_conversation_sessions
   FOR INSERT WITH CHECK (true);
-
-CREATE POLICY "Public access session by token" ON public.ai_conversation_sessions
-  FOR SELECT USING (true);
-
-CREATE POLICY "Public update session by token" ON public.ai_conversation_sessions
-  FOR UPDATE USING (true);
 
 CREATE POLICY "Public insert requirements" ON public.project_requirements
   FOR INSERT WITH CHECK (true);
@@ -154,9 +149,6 @@ CREATE POLICY "Public insert project brief" ON public.project_briefs
 
 CREATE POLICY "Public insert appointment" ON public.consultation_appointments
   FOR INSERT WITH CHECK (true);
-
-CREATE POLICY "Public read appointments" ON public.consultation_appointments
-  FOR SELECT USING (true);
 
 CREATE POLICY "Public insert consent" ON public.consent_records
   FOR INSERT WITH CHECK (true);
