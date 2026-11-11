@@ -105,7 +105,7 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
         referenceId: refNumber,
         timestamp: new Date().toISOString(),
         serviceTitle: servicesData.find((s) => s.id === formData.serviceId)?.title || formData.serviceId,
-        status: 'Pending Dispatch Review'
+        status: 'Saved on this device only'
       };
 
       try {
@@ -244,9 +244,9 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
                   <div className="w-14 h-14 rounded-full bg-[#00C2C7]/10 border border-[#00C2C7]/30 flex items-center justify-center text-[#00C2C7] mx-auto">
                     <CheckCircle2 className="w-8 h-8" />
                   </div>
-                  <h3 className="text-xl font-bold text-white">Inquiry Registered Successfully</h3>
+                  <h3 className="text-xl font-bold text-white">Inquiry Saved on This Device</h3>
                   <p className="text-xs text-slate-300 max-w-md mx-auto leading-relaxed">
-                    Your brief has been assigned reference ticket <span className="font-mono text-[#00C2C7] font-bold">{submittedReference}</span> and routed to Founder & CEO <span className="text-white font-semibold">{COMPANY_CONFIG.founderCeo}</span> and the executive engineering team at {COMPANY_CONFIG.name} at One West Aeropark, Clark Freeport Zone.
+                    Your brief has been assigned reference ticket <span className="font-mono text-[#00C2C7] font-bold">{submittedReference}</span> but has not been sent to the company. Please contact our team directly using the contact details on this page; automated delivery is not yet configured.
                   </p>
                   <div className="pt-4 flex justify-center gap-3">
                     <button
