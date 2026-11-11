@@ -5,7 +5,7 @@
  * language switching (EN / FIL), and voice appointment scheduling.
  */
 
-import { supabaseService, ConsultationAppointment, AVAILABLE_SLOTS } from './supabaseService';
+import type { ConsultationAppointment } from './supabaseService';
 import { COMPANY_CONFIG } from '../data/companyConfig';
 
 export type VoiceState = 'disconnected' | 'connecting' | 'idle' | 'listening' | 'thinking' | 'speaking' | 'error';
