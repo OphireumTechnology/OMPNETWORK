@@ -352,7 +352,7 @@ export const AppointmentBookingModal: React.FC<AppointmentBookingModalProps> = (
                 <div className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800">
                   {isCheckingSlots ? (
                     <div className="py-4 text-center text-slate-500 font-mono text-xs animate-pulse">
-                      Checking real-time calendar availability...
+                      Checking consultation scheduling service...
                     </div>
                   ) : (
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
@@ -363,7 +363,7 @@ export const AppointmentBookingModal: React.FC<AppointmentBookingModalProps> = (
                           <button
                             key={slot}
                             type="button"
-                            disabled={isBooked || true}
+                            disabled={true}
                             onClick={() => setSelectedSlot(slot)}
                             className={`p-2 rounded-lg border text-center font-mono text-[11px] transition-all cursor-pointer ${
                               isBooked
