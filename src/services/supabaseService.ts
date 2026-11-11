@@ -94,27 +94,11 @@ export const AVAILABLE_SLOTS = [
 
 export const supabaseService = {
   // Check if a slot is already booked on a date
-  async getBookedSlots(dateStr: string): Promise<string[]> {
-    if (supabase) {
-      try {
-        const { data, error } = await supabase
-          .from('consultation_appointments')
-          .select('scheduled_time_slot')
-          .eq('scheduled_date', dateStr)
-          .eq('status', 'confirmed');
-        if (!error && data) {
-          return data.map((d: any) => d.scheduled_time_slot);
-        }
-      } catch (err) {
-        console.warn('Supabase query error, using local store:', err);
-      }
-    }
-
-    // Local storage fallback
-    const all = this.getLocalAppointments();
-    return all
-      .filter((a) => a.scheduledDate === dateStr && a.status === 'confirmed')
-      .map((a) => a.scheduledTimeSlot);
+  async getBookedSlots(_dateStr: string): Promise<string[]> {
+    // The public client cannot securely read other clients' appointments.
+    // Replace this with an authenticated availability endpoint returning
+    // available time windows without exposing appointment records.
+    throw new Error('Verified consultation availability is not yet connected.');
   },
 
   // Save Project Brief
