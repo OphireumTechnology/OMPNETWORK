@@ -43,7 +43,7 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({ isOpen, onClos
     setStudioGenerating(true);
     setTimeout(() => {
       setStudioGenerating(false);
-      setStudioOutput(`// Ophireum AI Studio Generated Component\n// Synthesis Engine: @google/genai Model Adapter\n// Prompt: "${promptInput}"\n\nimport React from 'react';\n\nexport const EnterpriseView: React.FC = () => {\n  return (\n    <section className="bg-slate-950 p-8 rounded-2xl border border-cyan-500/30 shadow-2xl">\n      <h2 className="text-xl font-bold text-white tracking-tight">Ophireum Distributed Media Hub</h2>\n      <p className="text-sm text-slate-400 mt-2">Verified Component Blueprint synthesized by Ophireum AI Agent AGT-04-FED</p>\n      <div className="mt-4 flex gap-2 font-mono text-xs text-cyan-400">\n        <span>LATENCY: &lt; 12ms</span>\n        <span>·</span>\n        <span>ACES REC.709 COLOR</span>\n      </div>\n    </section>\n  );\n};`);
+      setStudioOutput(`// DEMONSTRATION ONLY — static example, not AI-generated\n// No live AI service is connected\n// Prompt: "${promptInput}"\n\nimport React from 'react';\n\nexport const EnterpriseView: React.FC = () => {\n  return (\n    <section className="bg-slate-950 p-8 rounded-2xl border border-cyan-500/30 shadow-2xl">\n      <h2 className="text-xl font-bold text-white tracking-tight">Ophireum Distributed Media Hub</h2>\n      <p className="text-sm text-slate-400 mt-2">Illustrative example only — no live AI generation or verification</p>\n      <div className="mt-4 flex gap-2 font-mono text-xs text-cyan-400">\n        <span>LATENCY: &lt; 12ms</span>\n        <span>·</span>\n        <span>ACES REC.709 COLOR</span>\n      </div>\n    </section>\n  );\n};`);
     }, 1200);
   };
 
