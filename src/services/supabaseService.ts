@@ -143,46 +143,13 @@ export const supabaseService = {
 
   // Book Consultation Appointment
   async bookAppointment(appointment: ConsultationAppointment): Promise<{ success: boolean; appointment: ConsultationAppointment; error?: string }> {
-    // Check for double booking
-    const booked = await this.getBookedSlots(appointment.scheduledDate);
-    if (booked.includes(appointment.scheduledTimeSlot)) {
-      return {
-        success: false,
-        appointment,
-        error: `The slot ${appointment.scheduledTimeSlot} on ${appointment.scheduledDate} has just been reserved. Please select another slot.`,
-      };
-    }
-
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('consultation_appointments').insert({
-          reference_code: appointment.referenceCode,
-          consultation_type: appointment.consultationType,
-          scheduled_date: appointment.scheduledDate,
-          scheduled_time_slot: appointment.scheduledTimeSlot,
-          duration_minutes: appointment.durationMinutes,
-          client_timezone: appointment.clientTimezone,
-          meeting_link: appointment.meetingLink,
-          meeting_location: appointment.meetingLocation,
-          assigned_consultant: appointment.assignedConsultant,
-          status: appointment.status,
-        });
-        if (error) {
-          console.warn('Supabase booking insert error:', error);
-        }
-      } catch (err) {
-        console.warn('Supabase appointment save error:', err);
-      }
-    }
-
-    // Persist locally
-    const appointments = this.getLocalAppointments();
-    appointments.unshift(appointment);
-    localStorage.setItem(STORAGE_KEYS.APPOINTMENTS, JSON.stringify(appointments));
-
+    // Fail closed: local browser storage is not a shared reservation system.
+    // A production booking must be committed by a trusted backend with an
+    // atomic uniqueness constraint and verified calendar integration.
     return {
-      success: true,
+      success: false,
       appointment,
+      error: 'Online appointment confirmation is temporarily unavailable. Please contact OPHIREUM directly to arrange a consultation.',
     };
   },
 
