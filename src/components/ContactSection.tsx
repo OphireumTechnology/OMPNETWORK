@@ -95,34 +95,12 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!validate()) return;
-
-    setIsSubmitting(true);
-
-    setTimeout(() => {
-      const refNumber = `OPM-INQ-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
-      const newInquiry = {
-        ...formData,
-        referenceId: refNumber,
-        timestamp: new Date().toISOString(),
-        serviceTitle: servicesData.find((s) => s.id === formData.serviceId)?.title || formData.serviceId,
-        status: 'Pending Dispatch Review'
-      };
-
-      try {
-        const stored = JSON.parse(localStorage.getItem('opm_inquiries') || '[]');
-        stored.unshift(newInquiry);
-        localStorage.setItem('opm_inquiries', JSON.stringify(stored));
-      } catch (e) {
-        // Safe fallback
-      }
-
-      if (onInquirySubmitted) {
-        onInquirySubmitted(newInquiry);
-      }
-
-      setIsSubmitting(false);
-      setSubmittedReference(refNumber);
-    }, 600);
+    // Do not store sensitive inquiry data in browser storage or claim that
+    // the executive team received it without a verified server delivery.
+    setErrors((previous) => ({
+      ...previous,
+      submission: 'Secure online inquiry delivery is temporarily unavailable. Please contact OPHIREUM directly using the contact details on this page. Your information has not been sent.',
+    }));
   };
 
   const resetForm = () => {
@@ -222,7 +200,7 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
                   <div>
                     <span className="text-xs font-mono text-slate-400 block uppercase">Administrative Dispatch Routing</span>
                     <span className="text-sm font-semibold text-white font-mono">{COMPANY_CONFIG.configurableEmail}</span>
-                    <p className="text-xs text-slate-400 mt-0.5">Configurable company dispatch channel monitored by executive administrators.</p>
+                    <p className="text-xs text-slate-400 mt-0.5">Company contact channel; automated inquiry delivery is not yet verified.</p>
                   </div>
                 </div>
 
@@ -230,7 +208,7 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
             </div>
 
             <div className="pt-4 border-t border-slate-800/80 text-xs text-slate-400">
-              <span>Direct inquiries are monitored Monday to Friday, 8:00 AM – 6:00 PM (PST / UTC+8).</span>
+              <span>For assistance, please use the listed company contact details.</span>
             </div>
           </div>
 
@@ -435,6 +413,9 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
                     </button>
                   </div>
 
+                  {errors.submission && (
+                    <p role="alert" className="text-xs text-rose-400 mt-3">{errors.submission}</p>
+                  )}
                 </form>
               )}
 
