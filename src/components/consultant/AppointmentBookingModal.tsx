@@ -81,12 +81,19 @@ export const AppointmentBookingModal: React.FC<AppointmentBookingModalProps> = (
     setSelectedSlot('');
     setErrorMessage(null);
 
-    supabaseService.getBookedSlots(selectedDate).then((slots) => {
-      if (isMounted) {
+    supabaseService.getBookedSlots(selectedDate)
+      .then((slots) => {
+        if (!isMounted) return;
         setBookedSlots(slots);
         setIsCheckingSlots(false);
-      }
-    });
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setBookedSlots([]);
+        setSelectedSlot('');
+        setIsCheckingSlots(false);
+        setErrorMessage('Verified calendar availability is currently unavailable. Please contact OPHIREUM to arrange a consultation.');
+      });
 
     return () => {
       isMounted = false;
@@ -356,7 +363,7 @@ export const AppointmentBookingModal: React.FC<AppointmentBookingModalProps> = (
                           <button
                             key={slot}
                             type="button"
-                            disabled={isBooked}
+                            disabled={isBooked || true}
                             onClick={() => setSelectedSlot(slot)}
                             className={`p-2 rounded-lg border text-center font-mono text-[11px] transition-all cursor-pointer ${
                               isBooked
