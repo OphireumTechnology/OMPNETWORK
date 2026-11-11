@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowUpRight, Shield, MapPin, Sparkles, Phone, Compass, Cpu } from 'lucide-react';
+import { ArrowUpRight, Shield, MapPin, Sparkles, Phone, CheckCircle, ExternalLink } from 'lucide-react';
 import { BlockchainNetworkCanvas } from './animations/BlockchainNetworkCanvas';
 import { FloatingTechnologyIcons } from './animations/FloatingTechnologyIcons';
 import { COMPANY_CONFIG } from '../data/companyConfig';
@@ -11,19 +11,19 @@ interface HeroProps {
 
 export const Hero: React.FC<HeroProps> = ({ onNavigate, onOpenPortal }) => {
   return (
-    <section id="hero" className="relative pt-8 pb-20 lg:pt-14 lg:pb-28 overflow-hidden bg-[#0B1220]">
+    <section id="hero" className="relative pt-10 pb-20 lg:pt-16 lg:pb-28 overflow-hidden bg-[#0B1220]">
       {/* Dynamic Animated Blockchain Network Background Canvas */}
-      <div className="absolute inset-0 pointer-events-auto opacity-75">
-        <BlockchainNetworkCanvas nodeCount={55} interactive={true} />
+      <div className="absolute inset-0 pointer-events-auto opacity-70">
+        <BlockchainNetworkCanvas nodeCount={50} interactive={true} />
       </div>
 
       {/* Atmospheric lighting halos */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[750px] h-[550px] bg-[#00C2C7]/12 blur-[140px] rounded-full pointer-events-none" />
-      <div className="absolute top-1/3 right-10 w-[400px] h-[400px] bg-[#D4AF37]/8 blur-[130px] rounded-full pointer-events-none" />
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[500px] bg-[#00C2C7]/10 blur-[140px] rounded-full pointer-events-none" />
+      <div className="absolute top-1/3 right-10 w-[380px] h-[380px] bg-[#D4AF37]/6 blur-[130px] rounded-full pointer-events-none" />
 
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pointer-events-none">
         
-        {/* Trust & Location Indicator - clickable maps & phone link */}
+        {/* Trust & Location Indicator */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium text-slate-400 mb-6 pointer-events-auto">
           <a
             href={COMPANY_CONFIG.address.mapsUrl}
@@ -35,22 +35,22 @@ export const Hero: React.FC<HeroProps> = ({ onNavigate, onOpenPortal }) => {
             <span>{COMPANY_CONFIG.address.line1} · {COMPANY_CONFIG.address.zone}</span>
           </a>
           <span aria-hidden="true" className="text-slate-600">·</span>
-          <span className="text-[#00C2C7] font-semibold">{COMPANY_CONFIG.platformName}</span>
+          <span className="text-[#00C2C7] font-semibold font-mono">{COMPANY_CONFIG.platformName}</span>
           <span aria-hidden="true" className="text-slate-600">·</span>
           <span className="text-slate-300">Pampanga, Philippines</span>
         </div>
 
-        {/* 2-Column Split: Editorial Value Proposition & Official Logo Showcase */}
+        {/* 2-Column Split: Editorial Value Proposition & Corporate Technology Identity Card */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-14 items-center">
           
           {/* Left Column: Heading, Subtitle & 4 Primary Actions */}
           <div className="lg:col-span-7 flex flex-col justify-center pointer-events-auto">
             
-            <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-[3.25rem] font-extrabold tracking-tight text-white text-balance leading-[1.12]">
+            <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-[3.25rem] font-extrabold tracking-tight text-white leading-[1.14] text-balance">
               {COMPANY_CONFIG.headline}
             </h1>
 
-            <p className="mt-4 text-xl sm:text-2xl font-semibold text-transparent bg-clip-text bg-gradient-to-r from-[#00C2C7] via-[#C0C7D1] to-[#D4AF37] text-balance">
+            <p className="mt-4 text-xl sm:text-2xl font-semibold text-transparent bg-clip-text bg-gradient-to-r from-[#00C2C7] via-[#C0C7D1] to-[#D4AF37] leading-snug text-balance">
               {COMPANY_CONFIG.subheadline}
             </p>
 
@@ -106,47 +106,53 @@ export const Hero: React.FC<HeroProps> = ({ onNavigate, onOpenPortal }) => {
 
           </div>
 
-          {/* Right Column: Prominent Official Emblem Showcase & Dimensional Circuit Framing */}
+          {/* Right Column: Redesigned Corporate Technology Identity Card (180–220px Emblem) */}
           <div className="lg:col-span-5 flex justify-center pointer-events-auto">
             <div className="relative group max-w-sm sm:max-w-md w-full">
               
-              {/* Outer Decorative Circular Halo matching Logo Dimensions */}
-              <div className="absolute -inset-2 bg-gradient-to-r from-[#D4AF37]/35 via-[#00C2C7]/35 to-[#C0C7D1]/25 rounded-full blur-xl opacity-80 group-hover:opacity-100 transition duration-700" />
+              {/* Subtle ambient lighting halo */}
+              <div className="absolute -inset-1.5 bg-gradient-to-br from-[#D4AF37]/20 via-[#00C2C7]/25 to-slate-800/40 rounded-3xl blur-lg opacity-70 group-hover:opacity-95 transition duration-500" />
               
-              <div className="relative rounded-3xl bg-gradient-to-b from-[#111827] via-[#0B1220] to-[#080d18] border border-slate-700/90 p-6 sm:p-8 shadow-2xl flex flex-col items-center text-center backdrop-blur-md">
+              {/* Clean Corporate Identity Card */}
+              <div className="relative rounded-2xl bg-[#111827] border border-slate-700/80 p-7 sm:p-8 shadow-2xl flex flex-col items-center text-center">
                 
-                {/* Official Circular Logo with Metallic Rim */}
-                <div className="relative w-52 h-52 sm:w-64 sm:h-64 rounded-full p-1 bg-gradient-to-br from-[#D4AF37] via-[#00C2C7] to-[#C0C7D1] shadow-2xl glow-cyan-sm transition-transform duration-500 group-hover:scale-[1.02]">
+                {/* Official Circular Logo with 180-220px dimensions, centered, with no text inside */}
+                <div className="relative w-[190px] h-[190px] sm:w-[210px] sm:h-[210px] rounded-full p-[3px] bg-gradient-to-tr from-[#D4AF37] via-[#00C2C7] to-[#C0C7D1] shadow-xl transition-transform duration-500 group-hover:scale-[1.02] flex items-center justify-center shrink-0">
                   <img
-                    src="/assets/aistudio/OPHIREUM_Logo_6504e623.png"
-                    alt="OPHIREUM MULTIMEDIA PRODUCTION Official Corporate Emblem"
+                    src={COMPANY_CONFIG.logoUrl}
+                    alt=""
+                    aria-hidden="true"
                     className="w-full h-full object-contain rounded-full bg-[#111827]"
-                    referrerPolicy="no-referrer"
+                    loading="eager"
                   />
                 </div>
 
-                <div className="mt-5 space-y-1">
-                  <h2 className="text-base font-bold tracking-wider text-white uppercase">
-                    {COMPANY_CONFIG.platformName}
+                {/* Corporate Branding cleanly beneath the logo */}
+                <div className="mt-6 space-y-1 w-full">
+                  <h2 className="text-base sm:text-lg font-bold tracking-wide text-white uppercase">
+                    {COMPANY_CONFIG.name}
                   </h2>
-                  <p className="text-xs text-slate-400 font-mono tracking-wide">
+                  <p className="text-xs font-semibold text-[#00C2C7] font-mono tracking-widest uppercase">
+                    {COMPANY_CONFIG.platformName}
+                  </p>
+                  <p className="text-[11px] text-slate-400 font-mono tracking-wider pt-0.5">
                     MEDIA · TECHNOLOGY · AI · CONTENT · PRODUCTION
                   </p>
                 </div>
 
-                {/* Subdued Hexagon Circuit Indicators */}
-                <div className="mt-5 w-full pt-4 border-t border-slate-800/80 grid grid-cols-3 gap-2 text-center text-[11px]">
-                  <div className="p-2 rounded bg-slate-900/80 border border-slate-800">
-                    <span className="block text-slate-400">Headquarters</span>
-                    <span className="font-semibold text-slate-200">Clark Zone</span>
+                {/* Symmetrical Information Strip */}
+                <div className="mt-6 w-full pt-4 border-t border-slate-800/80 grid grid-cols-3 gap-2 text-center text-[11px]">
+                  <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
+                    <span className="block text-slate-400 text-[10px] uppercase font-mono">Headquarters</span>
+                    <span className="font-semibold text-slate-200 mt-0.5 block truncate">Clark Zone</span>
                   </div>
-                  <div className="p-2 rounded bg-slate-900/80 border border-slate-800">
-                    <span className="block text-slate-400">Network Tier</span>
-                    <span className="font-semibold text-[#00C2C7]">Enterprise</span>
+                  <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
+                    <span className="block text-slate-400 text-[10px] uppercase font-mono">Network Tier</span>
+                    <span className="font-semibold text-[#00C2C7] mt-0.5 block">Enterprise</span>
                   </div>
-                  <div className="p-2 rounded bg-slate-900/80 border border-slate-800">
-                    <span className="block text-slate-400">Standards</span>
-                    <span className="font-semibold text-[#D4AF37]">ACES & AI</span>
+                  <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
+                    <span className="block text-slate-400 text-[10px] uppercase font-mono">Standards</span>
+                    <span className="font-semibold text-[#D4AF37] mt-0.5 block">ACES & AI</span>
                   </div>
                 </div>
 
