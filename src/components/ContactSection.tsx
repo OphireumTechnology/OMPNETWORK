@@ -1,19 +1,33 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { servicesData } from '../data/servicesData';
 import { CATALOG_CATEGORIES, SERVICE_CATALOG } from '../data/serviceCatalog';
 import { InquiryFormData } from '../types';
-import { 
-  Send, CheckCircle2, AlertCircle, Paperclip, FileText, 
-  Shield, MapPin, Building, Lock, Phone, Mail, ExternalLink, User
+import {
+  Send,
+  CheckCircle2,
+  AlertCircle,
+  Paperclip,
+  FileText,
+  Shield,
+  MapPin,
+  Building,
+  Phone,
+  Mail,
+  ExternalLink,
+  User,
 } from 'lucide-react';
 import { COMPANY_CONFIG } from '../data/companyConfig';
+import { apiUrl, createIdempotencyKey } from '../lib/apiClient';
 
 interface ContactSectionProps {
   selectedServiceId?: string;
   onInquirySubmitted?: (inquiry: any) => void;
 }
 
-export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceId, onInquirySubmitted }) => {
+export const ContactSection: React.FC<ContactSectionProps> = ({
+  selectedServiceId,
+  onInquirySubmitted,
+}) => {
   const [formData, setFormData] = useState<InquiryFormData>({
     fullName: '',
     email: '',
@@ -36,7 +50,16 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [websiteHoneypot, setWebsiteHoneypot] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submittedReference, setSubmittedReference] = useState<string | null>(null);
+  const [submittedRecord, setSubmittedRecord] = useState<{
+    referenceId: string;
+    emailDeliveryStatus: string;
+    emailConfigured: boolean;
+  } | null>(null);
+
+  const idempotencyKeyRef = useRef<string>(createIdempotencyKey());
+  useEffect(() => {
+    idempotencyKeyRef.current = createIdempotencyKey();
+  }, [formData]);
 
   const budgetOptions = [
     { value: 'undisclosed', label: 'To be determined / Flexible' },
@@ -49,7 +72,7 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
   const validate = (): boolean => {
     const errs: { [key: string]: string } = {};
 
-    if (!formData.fullName.trim()) {
+    if (!formData.fullName.trim() || formData.fullName.trim().length < 2) {
       errs.fullName = 'Full legal name is required.';
     }
 
@@ -59,11 +82,11 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
       errs.email = 'Please provide a valid email format.';
     }
 
-    if (!formData.contactNumber.trim()) {
+    if (!formData.contactNumber.trim() || formData.contactNumber.replace(/[^0-9]/g, '').length < 5) {
       errs.contactNumber = 'Contact phone number is required.';
     }
 
-    if (!formData.company.trim()) {
+    if (!formData.company.trim() || formData.company.trim().length < 2) {
       errs.company = 'Organization or brand name is required.';
     }
 
@@ -97,6 +120,7 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setSubmitError(null);
     if (!validate()) return;
 
@@ -107,10 +131,14 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
     const resolvedTitle = matchedCatalog?.title || matchedLegacy?.title || formData.serviceId;
 
     try {
-      const response = await fetch('/api/inquiries', {
+      const response = await fetch(apiUrl('/api/inquiries'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKeyRef.current,
+        },
         body: JSON.stringify({
+          idempotencyKey: idempotencyKeyRef.current,
           type: 'contact_form',
           fullName: formData.fullName.trim(),
           email: formData.email.trim(),
@@ -127,34 +155,28 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
         }),
       });
 
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Unable to process your inquiry right now.');
-      }
-
-      const newInquiry = {
-        ...formData,
-        referenceId: data.referenceId,
-        timestamp: data.timestamp || new Date().toISOString(),
-        serviceTitle: resolvedTitle,
-        status: 'Routed to Executive Desk',
-      };
-
-      try {
-        const stored = JSON.parse(localStorage.getItem('opm_inquiries') || '[]');
-        stored.unshift(newInquiry);
-        localStorage.setItem('opm_inquiries', JSON.stringify(stored));
-      } catch {
-        // Ignore storage restrictions
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success || !data.referenceId) {
+        throw new Error(
+          data.error ||
+            'Unable to persist your inquiry on the server right now. Your inputs remain intact so you can retry.'
+        );
       }
 
       if (onInquirySubmitted) {
-        onInquirySubmitted(newInquiry);
+        onInquirySubmitted(data.inquiry);
       }
 
-      setSubmittedReference(data.referenceId);
+      setSubmittedRecord({
+        referenceId: data.referenceId,
+        emailDeliveryStatus: data.emailDelivery?.customerStatus || 'unconfigured',
+        emailConfigured: Boolean(data.emailDelivery?.emailConfigured),
+      });
+      idempotencyKeyRef.current = createIdempotencyKey();
     } catch (err: any) {
-      setSubmitError(err?.message || 'Submission failed. Please review your details or contact us directly.');
+      setSubmitError(
+        err?.message || 'Submission failed. Your details are preserved—please review or contact us directly.'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -172,17 +194,16 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
       fileName: '',
       privacyConsent: false,
     });
-    setSubmittedReference(null);
+    setSubmittedRecord(null);
     setErrors({});
+    setSubmitError(null);
   };
 
   return (
     <section id="contact" className="py-20 lg:py-28 bg-[#0B1220] border-t border-slate-800/80 relative">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-16">
-          
-          {/* Left Column: Official Contact, Founder & CEO, Location & SLA */}
+          {/* Left Column */}
           <div className="lg:col-span-5 flex flex-col justify-between space-y-8">
             <div>
               <div className="flex items-center gap-2 text-xs font-semibold text-[#00C2C7] uppercase tracking-wider mb-2">
@@ -198,12 +219,12 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
               </p>
 
               <div className="mt-8 space-y-4">
-                
-                {/* Founder / CEO Card */}
                 <div className="p-4 rounded-xl bg-[#111827] border border-slate-800 flex items-start gap-3.5">
                   <User className="w-5 h-5 text-[#00C2C7] shrink-0 mt-0.5" />
                   <div>
-                    <span className="text-xs font-mono text-slate-400 block uppercase">Founder / Chief Executive Officer</span>
+                    <span className="text-xs font-mono text-slate-400 block uppercase">
+                      Founder / Chief Executive Officer
+                    </span>
                     <span className="text-sm font-semibold text-white">{COMPANY_CONFIG.founderCeo}</span>
                     <div className="mt-1">
                       <a
@@ -217,11 +238,12 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
                   </div>
                 </div>
 
-                {/* Office Address Card with Maps Link */}
                 <div className="p-4 rounded-xl bg-[#111827] border border-slate-800 flex items-start gap-3.5">
                   <Building className="w-5 h-5 text-[#00C2C7] shrink-0 mt-0.5" />
                   <div className="space-y-0.5">
-                    <span className="text-xs font-mono text-slate-400 block uppercase">Official Office Address</span>
+                    <span className="text-xs font-mono text-slate-400 block uppercase">
+                      Official Office Address
+                    </span>
                     <span className="text-sm font-semibold text-white">{COMPANY_CONFIG.address.line1}</span>
                     <p className="text-xs text-slate-300">{COMPANY_CONFIG.address.line2}</p>
                     <p className="text-xs text-slate-300">{COMPANY_CONFIG.address.zone}</p>
@@ -241,26 +263,35 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
                   </div>
                 </div>
 
-                {/* Confidentiality & Non-Disclosure Guarantee */}
                 <div className="p-4 rounded-xl bg-[#111827] border border-slate-800 flex items-start gap-3.5">
                   <Shield className="w-5 h-5 text-[#D4AF37] shrink-0 mt-0.5" />
                   <div>
-                    <span className="text-xs font-mono text-slate-400 block uppercase">Non-Disclosure & Confidentiality</span>
-                    <span className="text-sm font-semibold text-white">Strict Enterprise Non-Disclosure Guarantee</span>
-                    <p className="text-xs text-slate-400 mt-0.5">All shared project briefs and documents are protected under proprietary commercial confidentiality.</p>
+                    <span className="text-xs font-mono text-slate-400 block uppercase">
+                      Non-Disclosure & Confidentiality
+                    </span>
+                    <span className="text-sm font-semibold text-white">
+                      Strict Enterprise Non-Disclosure Guarantee
+                    </span>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      All shared project briefs and documents are protected under proprietary commercial confidentiality.
+                    </p>
                   </div>
                 </div>
 
-                {/* Dispatch Email Routing Information */}
                 <div className="p-4 rounded-xl bg-[#111827] border border-slate-800 flex items-start gap-3.5">
                   <Mail className="w-5 h-5 text-[#C0C7D1] shrink-0 mt-0.5" />
                   <div>
-                    <span className="text-xs font-mono text-slate-400 block uppercase">Administrative Dispatch Routing</span>
-                    <span className="text-sm font-semibold text-white font-mono">{COMPANY_CONFIG.configurableEmail}</span>
-                    <p className="text-xs text-slate-400 mt-0.5">Configurable company dispatch channel monitored by executive administrators.</p>
+                    <span className="text-xs font-mono text-slate-400 block uppercase">
+                      Administrative Dispatch Routing
+                    </span>
+                    <span className="text-sm font-semibold text-white font-mono">
+                      {COMPANY_CONFIG.configurableEmail}
+                    </span>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Configurable company dispatch channel monitored by executive administrators.
+                    </p>
                   </div>
                 </div>
-
               </div>
             </div>
 
@@ -269,19 +300,27 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
             </div>
           </div>
 
-          {/* Right Column: Working Interactive Form */}
+          {/* Right Column */}
           <div className="lg:col-span-7">
             <div className="rounded-2xl bg-[#111827] border border-slate-800 p-6 sm:p-8 relative shadow-2xl">
-              
-              {submittedReference ? (
-                /* Success Confirmation State */
+              {submittedRecord ? (
                 <div className="py-8 text-center space-y-4">
                   <div className="w-14 h-14 rounded-full bg-[#00C2C7]/10 border border-[#00C2C7]/30 flex items-center justify-center text-[#00C2C7] mx-auto">
                     <CheckCircle2 className="w-8 h-8" />
                   </div>
-                  <h3 className="text-xl font-bold text-white">Inquiry Registered Successfully</h3>
+                  <h3 className="text-xl font-bold text-white">Inquiry Recorded Successfully</h3>
                   <p className="text-xs text-slate-300 max-w-md mx-auto leading-relaxed">
-                    Your brief has been assigned reference ticket <span className="font-mono text-[#00C2C7] font-bold">{submittedReference}</span> and routed to Founder & CEO <span className="text-white font-semibold">{COMPANY_CONFIG.founderCeo}</span> and the executive engineering team at {COMPANY_CONFIG.name} at One West Aeropark, Clark Freeport Zone.
+                    Your inquiry has been persisted under reference number{' '}
+                    <span className="font-mono text-[#00C2C7] font-bold">
+                      {submittedRecord.referenceId}
+                    </span>{' '}
+                    and assigned for review by Founder & CEO{' '}
+                    <span className="text-white font-semibold">{COMPANY_CONFIG.founderCeo}</span> and the engineering team.
+                  </p>
+                  <p className="text-[11px] text-slate-400 max-w-md mx-auto">
+                    {submittedRecord.emailDeliveryStatus === 'sent'
+                      ? 'Confirmation email dispatched to your inbox.'
+                      : 'Database persistence verified. Automated email notification awaits transactional email configuration.'}
                   </p>
                   <div className="pt-4 flex justify-center gap-3">
                     <button
@@ -293,9 +332,7 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
                   </div>
                 </div>
               ) : (
-                /* Interactive Form Fields */
                 <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-                  {/* Honeypot field for anti-spam */}
                   <div className="hidden" aria-hidden="true">
                     <label htmlFor="contact-website-hp">Company Website</label>
                     <input
@@ -308,12 +345,15 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
                     />
                   </div>
                   {submitError && (
-                    <div className="p-3 rounded-lg bg-rose-950/60 border border-rose-500/40 text-xs text-rose-200 flex items-start gap-2">
+                    <div
+                      role="alert"
+                      className="p-3 rounded-lg bg-rose-950/60 border border-rose-500/40 text-xs text-rose-200 flex items-start gap-2"
+                    >
                       <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                       <span>{submitError}</span>
                     </div>
                   )}
-                  
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-medium text-slate-300 mb-1">
@@ -356,7 +396,9 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
                         placeholder="+63 9XX XXX XXXX"
                         className="w-full px-3.5 py-2.5 rounded-lg bg-slate-900 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#00C2C7] focus:ring-1 focus:ring-[#00C2C7]"
                       />
-                      {errors.contactNumber && <p className="text-[11px] text-rose-400 mt-1">{errors.contactNumber}</p>}
+                      {errors.contactNumber && (
+                        <p className="text-[11px] text-rose-400 mt-1">{errors.contactNumber}</p>
+                      )}
                     </div>
 
                     <div>
@@ -374,7 +416,6 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
                     </div>
                   </div>
 
-                  {/* Service Required Dropdown (All 12 Disciplines) */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-medium text-slate-300 mb-1">
@@ -423,7 +464,6 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
                     </div>
                   </div>
 
-                  {/* Project Description */}
                   <div>
                     <label className="block text-xs font-medium text-slate-300 mb-1">
                       Project Scope & Objectives <span className="text-[#00C2C7]">*</span>
@@ -435,13 +475,14 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
                       placeholder="Outline your target deliverables, timeline expectations, media format requirements, or software specifications..."
                       className="w-full px-3.5 py-2.5 rounded-lg bg-slate-900 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#00C2C7] focus:ring-1 focus:ring-[#00C2C7]"
                     />
-                    {errors.projectDescription && <p className="text-[11px] text-rose-400 mt-1">{errors.projectDescription}</p>}
+                    {errors.projectDescription && (
+                      <p className="text-[11px] text-rose-400 mt-1">{errors.projectDescription}</p>
+                    )}
                   </div>
 
-                  {/* Optional Attachment Upload */}
                   <div>
                     <label className="block text-xs font-medium text-slate-300 mb-1">
-                      Project Brief or Reference File (Optional, max 25MB)
+                      Project Brief or Reference File Name (Optional)
                     </label>
                     <div className="flex items-center gap-3">
                       <label className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-medium text-slate-200 cursor-pointer transition-colors">
@@ -466,7 +507,6 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
                     {errors.fileName && <p className="text-[11px] text-rose-400 mt-1">{errors.fileName}</p>}
                   </div>
 
-                  {/* Privacy Consent Checkbox */}
                   <div className="pt-2">
                     <label className="flex items-start gap-2.5 text-xs text-slate-300 cursor-pointer select-none">
                       <input
@@ -479,10 +519,11 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
                         I acknowledge and authorize {COMPANY_CONFIG.name} to process this project brief under corporate confidentiality and data privacy guidelines.
                       </span>
                     </label>
-                    {errors.privacyConsent && <p className="text-[11px] text-rose-400 mt-1">{errors.privacyConsent}</p>}
+                    {errors.privacyConsent && (
+                      <p className="text-[11px] text-rose-400 mt-1">{errors.privacyConsent}</p>
+                    )}
                   </div>
 
-                  {/* Submit Action Button */}
                   <div className="pt-4">
                     <button
                       type="submit"
@@ -490,7 +531,7 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
                       className="w-full py-3 px-6 text-sm font-semibold text-[#0B1220] bg-[#00C2C7] hover:bg-[#00d6dc] disabled:opacity-50 rounded-lg shadow-lg shadow-[#00C2C7]/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
                     >
                       {isSubmitting ? (
-                        <span>Validating and Registering...</span>
+                        <span>Validating and Saving Request...</span>
                       ) : (
                         <>
                           <span>Submit Project Brief</span>
@@ -499,15 +540,11 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
                       )}
                     </button>
                   </div>
-
                 </form>
               )}
-
             </div>
           </div>
-
         </div>
-
       </div>
     </section>
   );

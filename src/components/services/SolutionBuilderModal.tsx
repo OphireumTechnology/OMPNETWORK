@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { CatalogService } from '../../types';
 import {
   formatCatalogPrice,
@@ -7,6 +7,7 @@ import {
   EXTERNAL_CHARGES_DISCLOSURE,
 } from '../../data/serviceCatalog';
 import { COMPANY_CONFIG } from '../../data/companyConfig';
+import { apiUrl, createIdempotencyKey } from '../../lib/apiClient';
 import {
   X,
   Trash2,
@@ -14,9 +15,9 @@ import {
   CheckCircle2,
   AlertCircle,
   Bot,
-  Calendar,
   FileText,
-  Shield,
+  MailCheck,
+  MailWarning,
 } from 'lucide-react';
 
 interface SolutionBuilderModalProps {
@@ -58,7 +59,26 @@ export const SolutionBuilderModal: React.FC<SolutionBuilderModalProps> = ({
   const [submittedRecord, setSubmittedRecord] = useState<{
     referenceId: string;
     summaryText: string;
+    emailDeliveryStatus: string;
+    emailConfigured: boolean;
   } | null>(null);
+
+  // Stable idempotency key per draft submission; reset only when inputs/services change or after completion
+  const idempotencyKeyRef = useRef<string>(createIdempotencyKey());
+  const draftSignature = JSON.stringify({
+    selectedIds: selectedServices.map((s) => s.id),
+    selectedOptionsMap,
+    fullName,
+    email,
+    contactNumber,
+    company,
+    projectDescription,
+    targetTimeline,
+  });
+
+  useEffect(() => {
+    idempotencyKeyRef.current = createIdempotencyKey();
+  }, [draftSignature]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -86,12 +106,18 @@ export const SolutionBuilderModal: React.FC<SolutionBuilderModalProps> = ({
     if (selectedServices.length === 0) {
       errs.services = 'Please select at least one solution to build your project summary.';
     }
-    if (!fullName.trim()) errs.fullName = 'Full name is required.';
+    if (!fullName.trim() || fullName.trim().length < 2) {
+      errs.fullName = 'Full name is required (minimum 2 characters).';
+    }
     if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       errs.email = 'A valid business or personal email is required.';
     }
-    if (!contactNumber.trim()) errs.contactNumber = 'Contact phone number is required.';
-    if (!company.trim()) errs.company = 'Organization or brand name is required.';
+    if (!contactNumber.trim() || contactNumber.replace(/[^0-9]/g, '').length < 5) {
+      errs.contactNumber = 'A valid contact phone number is required.';
+    }
+    if (!company.trim() || company.trim().length < 2) {
+      errs.company = 'Organization or brand name is required.';
+    }
     if (!projectDescription.trim() || projectDescription.trim().length < 20) {
       errs.projectDescription = 'Please describe your goals and requirements (minimum 20 characters).';
     }
@@ -104,15 +130,20 @@ export const SolutionBuilderModal: React.FC<SolutionBuilderModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setSubmitError(null);
     if (!validate()) return;
 
     setIsSubmitting(true);
     try {
-      const response = await fetch('/api/inquiries', {
+      const response = await fetch(apiUrl('/api/inquiries'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKeyRef.current,
+        },
         body: JSON.stringify({
+          idempotencyKey: idempotencyKeyRef.current,
           type: 'solution_builder',
           fullName: fullName.trim(),
           email: email.trim(),
@@ -122,14 +153,6 @@ export const SolutionBuilderModal: React.FC<SolutionBuilderModalProps> = ({
           targetTimeline,
           selectedServiceIds: selectedServices.map((s) => s.id),
           selectedOptionsMap,
-          selectedServicesSummary: selectedServices.map((s) => ({
-            id: s.id,
-            title: s.title,
-            startingUsd: s.pricing.startingUsd,
-            monthlyUsd: s.pricing.monthlyUsd,
-            model: s.pricing.model,
-            selectedOptionIds: selectedOptionsMap[s.id] || [],
-          })),
           projectDescription: projectDescription.trim(),
           preferredCurrency: currency,
           phpConversionRate: phpRate,
@@ -138,45 +161,31 @@ export const SolutionBuilderModal: React.FC<SolutionBuilderModalProps> = ({
         }),
       });
 
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Unable to submit your solution request right now.');
-      }
-
-      // Also keep local admin mirror synchronized for preview inspection
-      try {
-        const stored = JSON.parse(localStorage.getItem('opm_inquiries') || '[]');
-        stored.unshift({
-          referenceId: data.referenceId,
-          fullName: fullName.trim(),
-          email: email.trim(),
-          contactNumber: contactNumber.trim(),
-          company: company.trim(),
-          serviceId: selectedServices.map((s) => s.id).join(', '),
-          serviceTitle: selectedServices.map((s) => s.title).join(' + '),
-          estimatedBudget: `Starting est. $${oneTimeStartingTotal.toLocaleString()}${
-            monthlyStartingTotal > 0 ? ` + $${monthlyStartingTotal.toLocaleString()}/mo` : ''
-          }`,
-          projectDescription: projectDescription.trim(),
-          timestamp: data.timestamp || new Date().toISOString(),
-          status: 'Received by Backend',
-        });
-        localStorage.setItem('opm_inquiries', JSON.stringify(stored));
-      } catch {
-        // Ignore storage quota issues
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success || !data.referenceId) {
+        throw new Error(
+          data.error ||
+            'Unable to persist your solution request on the server right now. Your inputs have been preserved so you can retry.'
+        );
       }
 
       const summaryLines = [
         `OPHIREUM MULTIMEDIA PRODUCTION — PRELIMINARY PROJECT SUMMARY`,
-        `Reference Ticket: ${data.referenceId}`,
+        `Reference Number: ${data.referenceId}`,
         `Organization: ${company.trim()} (${fullName.trim()})`,
         `Selected Solutions (${selectedServices.length}):`,
         ...selectedServices.map((s) => {
           const p = formatCatalogPrice(s, currency, phpRate);
           return `  - ${s.title}: ${p.primaryLabel}${p.secondaryLabel ? ` | ${p.secondaryLabel}` : ''}`;
         }),
-        `Preliminary Starting Investment Estimate: $${oneTimeStartingTotal.toLocaleString('en-US')} USD${
-          monthlyStartingTotal > 0 ? ` + $${monthlyStartingTotal.toLocaleString('en-US')}/month` : ''
+        `Preliminary Server Estimate: $${Number(
+          data.inquiry?.estimatedOneTimeStartingUsd ?? oneTimeStartingTotal
+        ).toLocaleString('en-US')} USD${
+          (data.inquiry?.estimatedMonthlyStartingUsd ?? monthlyStartingTotal) > 0
+            ? ` + $${Number(
+                data.inquiry?.estimatedMonthlyStartingUsd ?? monthlyStartingTotal
+              ).toLocaleString('en-US')}/month`
+            : ''
         }`,
         `Note: ${COMMERCIAL_PRICING_NOTICE}`,
       ].join('\n');
@@ -184,10 +193,18 @@ export const SolutionBuilderModal: React.FC<SolutionBuilderModalProps> = ({
       setSubmittedRecord({
         referenceId: data.referenceId,
         summaryText: summaryLines,
+        emailDeliveryStatus: data.emailDelivery?.customerStatus || 'unconfigured',
+        emailConfigured: Boolean(data.emailDelivery?.emailConfigured),
       });
+
+      // Clear draft selection ONLY after confirmed server persistence
       onClearAll();
+      idempotencyKeyRef.current = createIdempotencyKey();
     } catch (err: any) {
-      setSubmitError(err?.message || 'Submission failed. Please verify your connection and retry.');
+      // Preserve form state so user never loses entered requirements
+      setSubmitError(
+        err?.message || 'Submission failed. Your form entries remain intact so you may retry.'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -228,17 +245,72 @@ export const SolutionBuilderModal: React.FC<SolutionBuilderModalProps> = ({
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-5 sm:p-7 space-y-6">
           {submittedRecord ? (
-            <div className="py-6 text-center space-y-5 max-w-2xl mx-auto">
-              <div className="w-14 h-14 rounded-full bg-[#00C2C7]/15 border border-[#00C2C7]/40 flex items-center justify-center text-[#00C2C7] mx-auto">
-                <CheckCircle2 className="w-8 h-8" />
-              </div>
-              <div>
-                <h4 className="text-xl font-bold text-white">
-                  Preliminary Solution Summary Registered
+            <div className="py-4 space-y-5 max-w-2xl mx-auto">
+              <div className="text-center">
+                <div className="w-14 h-14 rounded-full bg-[#00C2C7]/15 border border-[#00C2C7]/40 flex items-center justify-center text-[#00C2C7] mx-auto">
+                  <CheckCircle2 className="w-8 h-8" />
+                </div>
+                <h4 className="text-xl font-bold text-white mt-3">
+                  Solution Request Confirmed on Server
                 </h4>
-                <p className="text-xs sm:text-sm text-slate-300 mt-2 leading-relaxed">
-                  Reference <span className="font-mono text-[#00C2C7] font-bold">{submittedRecord.referenceId}</span> has been securely transmitted to authorized {COMPANY_CONFIG.name} personnel for technical review and formal proposal preparation.
+                <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-[#111827] border border-[#00C2C7]/40 text-xs font-mono text-[#00C2C7]">
+                  <span>Reference Number:</span>
+                  <strong className="text-white">{submittedRecord.referenceId}</strong>
+                </div>
+              </div>
+
+              {/* Exact Required Block 4 Confirmation Copy */}
+              <div className="p-5 rounded-xl bg-[#111827] border border-slate-800 text-xs sm:text-sm text-slate-200 leading-relaxed space-y-3 text-left">
+                <p>
+                  Thank you for submitting your custom solution request to Ophireum Multimedia Production.
                 </p>
+                <p>
+                  Your inquiry has been recorded under reference number{' '}
+                  <strong className="font-mono text-[#00C2C7]">{submittedRecord.referenceId}</strong> and assigned for executive and technical review.
+                </p>
+                <p>
+                  All pricing shown on the website represents preliminary starting investments and estimated configurations only. Final project pricing, timelines, deliverables, and third-party infrastructure, licensing, or platform fees will be confirmed in your formal written proposal.
+                </p>
+                <p>
+                  For urgent project requirements, you may also reach us directly at{' '}
+                  <a
+                    href={COMPANY_CONFIG.mobileLink}
+                    className="font-mono text-[#00C2C7] hover:underline font-semibold"
+                  >
+                    +63 917 966 8814
+                  </a>
+                  .
+                </p>
+                <p>
+                  You will be contacted using the email and contact details provided in your request.
+                </p>
+              </div>
+
+              {/* Honest Email Notification Status */}
+              <div
+                className={`p-3.5 rounded-xl border text-xs flex items-start gap-2.5 ${
+                  submittedRecord.emailDeliveryStatus === 'sent'
+                    ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-200'
+                    : 'bg-amber-950/30 border-amber-500/30 text-amber-200'
+                }`}
+              >
+                {submittedRecord.emailDeliveryStatus === 'sent' ? (
+                  <>
+                    <MailCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    <span>
+                      Confirmation email and executive team notification were delivered via our transactional email service.
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <MailWarning className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <span>
+                      {submittedRecord.emailConfigured
+                        ? 'Your request is safely stored in our database, while automated email notification queued for retry.'
+                        : 'Your request is safely persisted in our server database. Automated email confirmation is currently awaiting transactional email configuration.'}
+                    </span>
+                  </>
+                )}
               </div>
 
               <pre className="text-left p-4 rounded-xl bg-[#111827] border border-slate-800 text-[11px] font-mono text-slate-300 whitespace-pre-wrap overflow-x-auto">
@@ -285,9 +357,7 @@ export const SolutionBuilderModal: React.FC<SolutionBuilderModalProps> = ({
                   )}
                 </div>
 
-                {errors.services && (
-                  <p className="text-xs text-rose-400">{errors.services}</p>
-                )}
+                {errors.services && <p className="text-xs text-rose-400">{errors.services}</p>}
 
                 {selectedServices.length === 0 ? (
                   <div className="p-6 rounded-xl bg-[#111827] border border-dashed border-slate-700 text-center text-xs text-slate-400">
@@ -307,9 +377,7 @@ export const SolutionBuilderModal: React.FC<SolutionBuilderModalProps> = ({
                           className="p-3 rounded-xl bg-[#111827] border border-slate-800 flex items-start justify-between gap-2"
                         >
                           <div className="min-w-0">
-                            <div className="text-xs font-semibold text-white truncate">
-                              {svc.title}
-                            </div>
+                            <div className="text-xs font-semibold text-white truncate">{svc.title}</div>
                             <div className="text-[11px] font-mono text-[#00C2C7] tabular-nums mt-0.5">
                               {p.primaryLabel}
                             </div>
@@ -370,7 +438,7 @@ export const SolutionBuilderModal: React.FC<SolutionBuilderModalProps> = ({
                     </div>
                   )}
                   <p className="text-[11px] text-slate-400 pt-2 border-t border-slate-800 leading-relaxed">
-                    Preliminary estimate only—not a binding contract or guaranteed quotation.
+                    Preliminary estimate only—final scope and authoritative pricing are calculated server-side and verified in your formal proposal.
                   </p>
                 </div>
 
@@ -449,7 +517,9 @@ export const SolutionBuilderModal: React.FC<SolutionBuilderModalProps> = ({
                         placeholder="+63 9XX XXX XXXX"
                         className="w-full px-3.5 py-2 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#00C2C7]"
                       />
-                      {errors.contactNumber && <p className="text-[11px] text-rose-400 mt-1">{errors.contactNumber}</p>}
+                      {errors.contactNumber && (
+                        <p className="text-[11px] text-rose-400 mt-1">{errors.contactNumber}</p>
+                      )}
                     </div>
                     <div>
                       <label htmlFor="sb-company" className="block text-xs font-medium text-slate-300 mb-1">
@@ -491,9 +561,13 @@ export const SolutionBuilderModal: React.FC<SolutionBuilderModalProps> = ({
                         onChange={(e) => setTargetTimeline(e.target.value)}
                         className="w-full px-3.5 py-2 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-[#00C2C7] cursor-pointer"
                       >
-                        <option value="Immediate / Priority (2 to 4 Weeks)">Immediate / Priority (2 to 4 Weeks)</option>
+                        <option value="Immediate / Priority (2 to 4 Weeks)">
+                          Immediate / Priority (2 to 4 Weeks)
+                        </option>
                         <option value="Standard 4 to 8 Weeks">Standard 4 to 8 Weeks</option>
-                        <option value="Phased Enterprise Rollout (2 to 4 Months)">Phased Enterprise Rollout (2 to 4 Months)</option>
+                        <option value="Phased Enterprise Rollout (2 to 4 Months)">
+                          Phased Enterprise Rollout (2 to 4 Months)
+                        </option>
                         <option value="Exploratory Planning">Exploratory Planning</option>
                       </select>
                     </div>
@@ -511,7 +585,9 @@ export const SolutionBuilderModal: React.FC<SolutionBuilderModalProps> = ({
                       placeholder="Describe your operational goals, existing platforms, integrations, or compliance needs..."
                       className="w-full px-3.5 py-2 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#00C2C7]"
                     />
-                    {errors.projectDescription && <p className="text-[11px] text-rose-400 mt-1">{errors.projectDescription}</p>}
+                    {errors.projectDescription && (
+                      <p className="text-[11px] text-rose-400 mt-1">{errors.projectDescription}</p>
+                    )}
                   </div>
 
                   <div>
@@ -526,7 +602,9 @@ export const SolutionBuilderModal: React.FC<SolutionBuilderModalProps> = ({
                         I authorize {COMPANY_CONFIG.name} to review this preliminary project summary and acknowledge that final pricing requires an approved formal proposal.
                       </span>
                     </label>
-                    {errors.privacyConsent && <p className="text-[11px] text-rose-400 mt-1">{errors.privacyConsent}</p>}
+                    {errors.privacyConsent && (
+                      <p className="text-[11px] text-rose-400 mt-1">{errors.privacyConsent}</p>
+                    )}
                   </div>
 
                   <p className="text-[11px] text-slate-400 leading-relaxed">
@@ -534,8 +612,11 @@ export const SolutionBuilderModal: React.FC<SolutionBuilderModalProps> = ({
                   </p>
 
                   {submitError && (
-                    <div className="p-3 rounded-lg bg-rose-950/50 border border-rose-500/40 text-xs text-rose-300 flex items-center gap-2">
-                      <AlertCircle className="w-4 h-4 shrink-0" />
+                    <div
+                      role="alert"
+                      className="p-3 rounded-lg bg-rose-950/50 border border-rose-500/40 text-xs text-rose-300 flex items-start gap-2"
+                    >
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                       <span>{submitError}</span>
                     </div>
                   )}
@@ -546,7 +627,7 @@ export const SolutionBuilderModal: React.FC<SolutionBuilderModalProps> = ({
                     className="w-full py-3 px-5 rounded-lg bg-[#00C2C7] hover:bg-[#00d6dc] disabled:opacity-50 text-[#0B1220] font-semibold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
                   >
                     {isSubmitting ? (
-                      <span>Validating & Delivering Request...</span>
+                      <span>Persisting & Submitting Request...</span>
                     ) : (
                       <>
                         <span>Submit Preliminary Solution Request</span>

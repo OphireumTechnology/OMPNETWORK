@@ -1,5 +1,6 @@
 import { SERVICE_CATALOG, CATALOG_CATEGORIES, formatCatalogPrice } from '../data/serviceCatalog';
 import { ProjectBrief, ClientProfile, ProjectRequirements } from './supabaseService';
+import { apiUrl } from '../lib/apiClient';
 
 export interface ChatMessage {
   id: string;
@@ -194,15 +195,15 @@ export const aiConsultantService = {
 
     // Call live server-side AI Solutions Consultant endpoint grounded in the 10-category catalog
     try {
-      const response = await fetch('/api/consultant/chat', {
+      const response = await fetch(apiUrl('/api/consultant/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userMessage: trimmed,
+          userMessage: trimmed.slice(0, 2000),
           state: updatedState,
           conversationHistory: conversationHistory.slice(-8).map((m) => ({
             sender: m.sender,
-            text: m.text,
+            text: m.text.slice(0, 1200),
           })),
           language,
         }),

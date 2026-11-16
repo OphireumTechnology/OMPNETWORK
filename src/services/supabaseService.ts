@@ -1,11 +1,12 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { apiUrl } from '../lib/apiClient';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
 export const isSupabaseConfigured = Boolean(
-  supabaseUrl && 
-  supabaseAnonKey && 
+  supabaseUrl &&
+  supabaseAnonKey &&
   !supabaseUrl.includes('your-ompnetwork-id')
 );
 
@@ -63,25 +64,18 @@ export interface ConsultationAppointment {
   client: ClientProfile;
   briefReferenceCode?: string;
   consultationType: 'video' | 'phone' | 'in_person';
-  scheduledDate: string; // YYYY-MM-DD
-  scheduledTimeSlot: string; // e.g. "10:00 AM - 10:30 AM"
+  scheduledDate: string;
+  scheduledTimeSlot: string;
   durationMinutes: number;
   clientTimezone: string;
   meetingLink?: string;
   meetingLocation?: string;
   assignedConsultant: string;
-  status: 'confirmed' | 'rescheduled' | 'cancelled';
+  status: 'pending_review' | 'confirmed' | 'rescheduled' | 'cancelled';
+  calendarSyncStatus?: 'synced' | 'pending' | 'failed' | 'unconfigured';
   createdAt: string;
 }
 
-// Local Storage Keys for offline / static hosting reliability
-const STORAGE_KEYS = {
-  BRIEFS: 'opm_project_briefs',
-  APPOINTMENTS: 'opm_consultation_appointments',
-  INQUIRIES: 'opm_inquiries',
-};
-
-// Available consultation slots generator (Monday - Friday, 9:00 AM - 5:00 PM PST)
 export const AVAILABLE_SLOTS = [
   '09:00 AM - 09:30 AM',
   '10:00 AM - 10:30 AM',
@@ -93,107 +87,143 @@ export const AVAILABLE_SLOTS = [
 ];
 
 export const supabaseService = {
-  // Check if a slot is already booked on a date
-  async getBookedSlots(dateStr: string): Promise<string[]> {
-    if (supabase) {
-      try {
-        const { data, error } = await supabase
-          .from('consultation_appointments')
-          .select('scheduled_time_slot')
-          .eq('scheduled_date', dateStr)
-          .eq('status', 'confirmed');
-        if (!error && data) {
-          return data.map((d: any) => d.scheduled_time_slot);
-        }
-      } catch (err) {
-        console.warn('Supabase query error, using local store:', err);
+  async getBookedSlots(dateStr: string): Promise<{
+    bookedSlots: string[];
+    calendarConfigured: boolean;
+    error?: string;
+  }> {
+    try {
+      const response = await fetch(
+        apiUrl(`/api/appointments/availability?date=${encodeURIComponent(dateStr)}`)
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) {
+        return {
+          bookedSlots: [],
+          calendarConfigured: false,
+          error: data.error || 'Real-time availability could not be verified from the database.',
+        };
       }
-    }
-
-    // Local storage fallback
-    const all = this.getLocalAppointments();
-    return all
-      .filter((a) => a.scheduledDate === dateStr && a.status === 'confirmed')
-      .map((a) => a.scheduledTimeSlot);
-  },
-
-  // Save Project Brief
-  async saveProjectBrief(brief: ProjectBrief): Promise<ProjectBrief> {
-    if (supabase) {
-      try {
-        await supabase.from('project_briefs').insert({
-          reference_code: brief.referenceCode,
-          title: `${brief.requirements.category} Project Specification`,
-          summary: brief.requirements.businessProblem,
-          technical_architecture: brief.technicalArchitecture,
-          commercial_discovery: brief.commercialDiscovery,
-          status: brief.status,
-        });
-      } catch (err) {
-        console.warn('Supabase brief save failed:', err);
-      }
-    }
-
-    // Persist locally
-    const briefs = this.getLocalBriefs();
-    briefs.unshift(brief);
-    localStorage.setItem(STORAGE_KEYS.BRIEFS, JSON.stringify(briefs));
-    return brief;
-  },
-
-  // Book Consultation Appointment
-  async bookAppointment(appointment: ConsultationAppointment): Promise<{ success: boolean; appointment: ConsultationAppointment; error?: string }> {
-    // Check for double booking
-    const booked = await this.getBookedSlots(appointment.scheduledDate);
-    if (booked.includes(appointment.scheduledTimeSlot)) {
       return {
-        success: false,
-        appointment,
-        error: `The slot ${appointment.scheduledTimeSlot} on ${appointment.scheduledDate} has just been reserved. Please select another slot.`,
+        bookedSlots: Array.isArray(data.bookedSlots) ? data.bookedSlots : [],
+        calendarConfigured: Boolean(data.calendarConfigured),
+      };
+    } catch {
+      return {
+        bookedSlots: [],
+        calendarConfigured: false,
+        error: 'Unable to reach scheduling availability server.',
       };
     }
+  },
 
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('consultation_appointments').insert({
-          reference_code: appointment.referenceCode,
-          consultation_type: appointment.consultationType,
-          scheduled_date: appointment.scheduledDate,
-          scheduled_time_slot: appointment.scheduledTimeSlot,
-          duration_minutes: appointment.durationMinutes,
-          client_timezone: appointment.clientTimezone,
-          meeting_link: appointment.meetingLink,
-          meeting_location: appointment.meetingLocation,
-          assigned_consultant: appointment.assignedConsultant,
-          status: appointment.status,
-        });
-        if (error) {
-          console.warn('Supabase booking insert error:', error);
-        }
-      } catch (err) {
-        console.warn('Supabase appointment save error:', err);
+  async bookAppointment(params: {
+    fullName: string;
+    email: string;
+    phone: string;
+    companyName: string;
+    briefReferenceCode?: string;
+    consultationType: 'video' | 'phone' | 'in_person';
+    scheduledDate: string;
+    scheduledTimeSlot: string;
+    clientTimezone: string;
+    idempotencyKey?: string;
+    notes?: string;
+  }): Promise<{
+    success: boolean;
+    appointment?: ConsultationAppointment;
+    managementToken?: string;
+    calendarSynced?: boolean;
+    error?: string;
+  }> {
+    try {
+      const response = await fetch(apiUrl('/api/appointments'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success || !data.appointment) {
+        return {
+          success: false,
+          error: data.error || 'Unable to submit scheduling request.',
+        };
       }
+
+      const raw = data.appointment;
+      const mapped: ConsultationAppointment = {
+        id: raw.id,
+        referenceCode: raw.referenceCode,
+        client: {
+          fullName: raw.fullName,
+          email: raw.email,
+          phone: raw.phone,
+          companyName: raw.companyName,
+        },
+        briefReferenceCode: raw.briefReferenceCode,
+        consultationType: raw.consultationType,
+        scheduledDate: raw.scheduledDate,
+        scheduledTimeSlot: raw.scheduledTimeSlot,
+        durationMinutes: raw.durationMinutes || 30,
+        clientTimezone: raw.clientTimezone,
+        meetingLink: raw.meetingLink,
+        meetingLocation: raw.meetingLocation,
+        assignedConsultant: raw.assignedConsultant,
+        status: raw.status,
+        calendarSyncStatus: raw.calendarSyncStatus,
+        createdAt: raw.createdAt,
+      };
+
+      return {
+        success: true,
+        appointment: mapped,
+        managementToken: data.managementToken,
+        calendarSynced: Boolean(data.calendarSynced),
+      };
+    } catch {
+      return {
+        success: false,
+        error: 'Network error communicating with scheduling backend.',
+      };
     }
+  },
 
-    // Persist locally
-    const appointments = this.getLocalAppointments();
-    appointments.unshift(appointment);
-    localStorage.setItem(STORAGE_KEYS.APPOINTMENTS, JSON.stringify(appointments));
-
-    return {
-      success: true,
-      appointment,
-    };
+  async manageAppointment(params: {
+    referenceCode: string;
+    action: 'cancel' | 'reschedule';
+    managementToken: string;
+    email: string;
+    scheduledDate?: string;
+    scheduledTimeSlot?: string;
+  }): Promise<{ success: boolean; appointment?: any; error?: string }> {
+    try {
+      const response = await fetch(
+        apiUrl(`/api/appointments/${encodeURIComponent(params.referenceCode)}`),
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(params),
+        }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) {
+        return { success: false, error: data.error || 'Failed to update consultation request.' };
+      }
+      return { success: true, appointment: data.appointment };
+    } catch {
+      return { success: false, error: 'Network failure updating consultation request.' };
+    }
   },
 
   generateGoogleCalendarUrl(appointment: ConsultationAppointment): string {
-    const title = encodeURIComponent(`OPHIREUM Consultation: ${appointment.referenceCode}`);
+    const title = encodeURIComponent(`OPHIREUM Consultation Request: ${appointment.referenceCode}`);
     const details = encodeURIComponent(
-      `Executive Consultation with OPHIREUM MULTIMEDIA PRODUCTION.\nReference Code: ${appointment.referenceCode}\nMode: ${appointment.consultationType.toUpperCase()}\nClient: ${appointment.client.fullName} (${appointment.client.companyName})\nLead: ${appointment.assignedConsultant}\nLocation: ${appointment.meetingLocation || appointment.meetingLink || 'KMC One West Aeropark, Clark Freeport Zone'}`
+      `Consultation with OPHIREUM MULTIMEDIA PRODUCTION.\nReference Code: ${appointment.referenceCode}\nStatus: ${appointment.status}\nMode: ${appointment.consultationType.toUpperCase()}\nClient: ${appointment.client.fullName} (${appointment.client.companyName})\nLead: ${appointment.assignedConsultant}`
     );
-    const location = encodeURIComponent(appointment.meetingLocation || 'Clark Freeport Zone, Pampanga / Google Meet');
-    
-    // Parse scheduled date and time slot
+    const location = encodeURIComponent(
+      appointment.meetingLocation || appointment.meetingLink || 'Clark Freeport Zone, Pampanga / Online (Link Pending Confirmation)'
+    );
+
     try {
       const [startTimeStr] = appointment.scheduledTimeSlot.split(' - ');
       const [time, period] = startTimeStr.trim().split(' ');
@@ -203,13 +233,12 @@ export const supabaseService = {
       if (period === 'AM' && hours === 12) hours = 0;
 
       const [yyyy, mm, dd] = appointment.scheduledDate.split('-').map(Number);
-      const startDt = new Date(Date.UTC(yyyy, mm - 1, dd, hours, m));
-      const endDt = new Date(startDt.getTime() + appointment.durationMinutes * 60 * 1000);
+      // Manila UTC+8 to UTC conversion
+      const utcStart = new Date(Date.UTC(yyyy, mm - 1, dd, hours - 8, m));
+      const utcEnd = new Date(utcStart.getTime() + appointment.durationMinutes * 60 * 1000);
 
       const fmt = (d: Date) => d.toISOString().replace(/-|:|\.\d\d\d/g, '');
-      const datesParam = `${fmt(startDt)}/${fmt(endDt)}`;
-
-      return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&location=${location}&dates=${datesParam}`;
+      return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&location=${location}&dates=${fmt(utcStart)}/${fmt(utcEnd)}`;
     } catch {
       return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&location=${location}`;
     }
@@ -247,11 +276,11 @@ export const supabaseService = {
           'Automated GitHub Actions CI/CD Pipeline',
         ],
         suggestedStack: ['React 19', 'TypeScript', 'Node.js', 'PostgreSQL / Supabase', '@google/genai SDK'],
-        infrastructure: 'Dedicated Cloud Run & Cloud SQL with automated failover and daily snapshots.',
+        infrastructure: 'Managed cloud architecture with database backups and access controls.',
         securityMeasures: [
           'Row-Level Security (RLS) enforcement',
-          'JWT & MFA privilege isolation',
-          'Zero-hallucination verification gates',
+          'Server-verified Admin RBAC isolation',
+          'Durable database outbox & audit trails',
         ],
       },
       commercialDiscovery: {
@@ -273,23 +302,6 @@ export const supabaseService = {
       status: 'draft',
     };
   },
-
-  getLocalBriefs(): ProjectBrief[] {
-    try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEYS.BRIEFS) || '[]');
-    } catch {
-      return [];
-    }
-  },
-
-  getLocalAppointments(): ConsultationAppointment[] {
-    try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEYS.APPOINTMENTS) || '[]');
-    } catch {
-      return [];
-    }
-  },
 };
 
 export type AppointmentRecord = ConsultationAppointment;
-

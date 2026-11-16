@@ -18,12 +18,19 @@ export const ProjectBriefModal: React.FC<ProjectBriefModalProps> = ({
   onClose,
   onScheduleConsultation,
 }) => {
+  const [copied, setCopied] = React.useState(false);
+
   if (!isOpen || !brief) return null;
 
-  const handleCopy = () => {
+  const handleCopy = async () => {
     const text = `OPHIREUM ENTERPRISE PROJECT BRIEF\nReference: ${brief.referenceCode}\nClient: ${brief.client.fullName} (${brief.client.companyName})\nCategory: ${brief.requirements.category}\nObjectives: ${brief.requirements.businessProblem}\nFeatures: ${brief.requirements.keyFeatures.join(', ')}\nArchitecture: ${brief.technicalArchitecture.suggestedStack.join(', ')}`;
-    navigator.clipboard.writeText(text);
-    alert('Project brief summary copied to clipboard.');
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 3000);
+    } catch {
+      // Clipboard blocked in restricted context
+    }
   };
 
   const handlePrint = () => {
@@ -58,10 +65,11 @@ export const ProjectBriefModal: React.FC<ProjectBriefModalProps> = ({
           <div className="flex items-center gap-2">
             <button
               onClick={handleCopy}
-              className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+              className="px-2 py-1.5 text-slate-300 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-mono"
               title="Copy Summary"
             >
-              <Copy className="w-4 h-4" />
+              <Copy className="w-3.5 h-3.5 text-[#00C2C7]" />
+              {copied && <span className="text-emerald-400">Copied</span>}
             </button>
             <button
               onClick={handlePrint}

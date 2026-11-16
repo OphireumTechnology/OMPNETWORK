@@ -150,6 +150,9 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
           scheduledAppointment: appointment,
         }));
       },
+      onBookingRequested: () => {
+        setIsBookingModalOpen(true);
+      },
       onError: (err) => {
         setVoiceError(err);
         setTimeout(() => setVoiceError(null), 7000);
@@ -902,6 +905,7 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
                 >
                   <input
                     type="text"
+                    maxLength={2000}
                     value={inputMessage}
                     onChange={(e) => setInputMessage(e.target.value)}
                     placeholder={
@@ -969,12 +973,15 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
             currentStage: 'confirmed',
             scheduledAppointment: appointment,
           }));
+          const isConfirmedCalendar = appointment.status === 'confirmed';
           setMessages((prev) => [
             ...prev,
             {
               id: `msg-confirmed-${Date.now()}`,
               sender: 'ai',
-              text: `Your consultation appointment has been scheduled!\n\n• Confirmation Ref: ${appointment.referenceCode}\n• Date & Time: ${appointment.scheduledDate} at ${appointment.scheduledTimeSlot} (${appointment.clientTimezone})\n• Consultation Mode: ${appointment.consultationType.toUpperCase()}\n\nOur team has dispatched an executive calendar invite to ${appointment.client.email}. You can also download or sync this appointment to Google Calendar.`,
+              text: isConfirmedCalendar
+                ? `Your consultation appointment is confirmed!\n\n• Reference: ${appointment.referenceCode}\n• Date & Time: ${appointment.scheduledDate} at ${appointment.scheduledTimeSlot} (${appointment.clientTimezone})\n• Mode: ${appointment.consultationType.toUpperCase()}`
+                : `Your consultation request has been registered (${appointment.status.replace('_', ' ')}).\n\n• Reference: ${appointment.referenceCode}\n• Requested Date & Time: ${appointment.scheduledDate} at ${appointment.scheduledTimeSlot} (${appointment.clientTimezone})\n• Channel: ${appointment.consultationType.toUpperCase()}\n\nOur executive coordinator will issue your final calendar invite shortly.`,
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
               stage: 'schedule',
               suggestedAction: 'talk_to_human',
