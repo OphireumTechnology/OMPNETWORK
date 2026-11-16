@@ -27,6 +27,7 @@ export const ServiceCard: React.FC<ServiceCardProps> = ({
 }) => {
   const isSignature = service.featuredTier === 'signature';
   const isFlagship = service.featuredTier === 'flagship';
+  const isStandardized = service.engagementMode === 'standardized';
   const priceInfo = formatCatalogPrice(service, currency, phpRate);
   const categoryMeta = CATALOG_CATEGORIES.find((c) => c.id === service.categoryId);
 
@@ -51,9 +52,13 @@ export const ServiceCard: React.FC<ServiceCardProps> = ({
               accent={isSignature ? 'gold' : 'cyan'}
             />
             <div className="min-w-0">
-              <div className="flex items-center gap-1.5 text-[11px] font-mono text-slate-400">
+              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] font-mono text-slate-400">
                 <span className={isSignature ? 'text-[#D4AF37] font-semibold' : 'text-[#00C2C7]'}>
                   {categoryMeta?.shortLabel || service.categoryId}
+                </span>
+                <span aria-hidden="true">·</span>
+                <span className={isStandardized ? 'text-emerald-400' : 'text-slate-400'}>
+                  {isStandardized ? 'Standardized' : 'Custom-Scoped'}
                 </span>
                 {isFlagship && !isSignature && (
                   <>
@@ -147,14 +152,14 @@ export const ServiceCard: React.FC<ServiceCardProps> = ({
           )}
           <button
             type="button"
-            onClick={() => onRequestProposal(service)}
+            onClick={() => (isStandardized ? onExplore(service) : onRequestProposal(service))}
             className={`inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00C2C7] ${
               isSignature
                 ? 'bg-[#D4AF37] hover:bg-[#e3be48] text-[#0B1220]'
                 : 'bg-[#00C2C7] hover:bg-[#00d6dc] text-[#0B1220]'
             }`}
           >
-            <span>Request Proposal</span>
+            <span>{isStandardized ? 'Configure Package' : 'Request Proposal'}</span>
             <ArrowUpRight className="w-3.5 h-3.5" />
           </button>
         </div>

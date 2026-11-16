@@ -2,21 +2,24 @@ import React, { useEffect } from 'react';
 import { CatalogService } from '../../types';
 import {
   formatCatalogPrice,
+  computeConfiguredServiceTotal,
   COMMERCIAL_PRICING_NOTICE,
   EXTERNAL_CHARGES_DISCLOSURE,
   CATALOG_CATEGORIES,
 } from '../../data/serviceCatalog';
 import { ServiceTechIcon } from '../animations/ServiceTechIcon';
 import { BlockchainNetworkCanvas } from '../animations/BlockchainNetworkCanvas';
-import { X, Check, AlertCircle, Shield, Bot, Plus, ArrowUpRight } from 'lucide-react';
+import { X, Check, AlertCircle, Shield, Bot, Plus, ArrowUpRight, Sliders } from 'lucide-react';
 
 interface ServiceDetailModalProps {
   service: CatalogService | null;
   currency: 'USD' | 'PHP';
   phpRate: number;
   isSelected: boolean;
+  selectedOptionIds: string[];
   onClose: () => void;
   onToggleSelect: (service: CatalogService) => void;
+  onToggleOption: (serviceId: string, optionId: string) => void;
   onRequestProposal: (service: CatalogService) => void;
   onConsultAI: (service: CatalogService) => void;
 }
@@ -26,8 +29,10 @@ export const ServiceDetailModal: React.FC<ServiceDetailModalProps> = ({
   currency,
   phpRate,
   isSelected,
+  selectedOptionIds,
   onClose,
   onToggleSelect,
+  onToggleOption,
   onRequestProposal,
   onConsultAI,
 }) => {
@@ -42,8 +47,11 @@ export const ServiceDetailModal: React.FC<ServiceDetailModalProps> = ({
 
   if (!service) return null;
 
+  const isStandardized = service.engagementMode === 'standardized';
   const priceInfo = formatCatalogPrice(service, currency, phpRate);
   const categoryMeta = CATALOG_CATEGORIES.find((c) => c.id === service.categoryId);
+  const configuredTotals = computeConfiguredServiceTotal(service, selectedOptionIds);
+  const options = service.configurableOptions || [];
 
   return (
     <div
@@ -67,8 +75,12 @@ export const ServiceDetailModal: React.FC<ServiceDetailModalProps> = ({
               accent={service.featuredTier === 'signature' ? 'gold' : 'cyan'}
             />
             <div>
-              <div className="text-xs font-mono text-[#00C2C7]">
-                {categoryMeta?.label || service.categoryId}
+              <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
+                <span className="text-[#00C2C7]">{categoryMeta?.label || service.categoryId}</span>
+                <span aria-hidden="true" className="text-slate-600">·</span>
+                <span className={isStandardized ? 'text-emerald-400' : 'text-[#D4AF37]'}>
+                  {isStandardized ? 'Standardized Package' : 'Custom-Scoped Engagement'}
+                </span>
               </div>
               <h3 id="service-detail-title" className="text-lg sm:text-xl font-bold text-white mt-0.5">
                 {service.title}
@@ -103,6 +115,69 @@ export const ServiceDetailModal: React.FC<ServiceDetailModalProps> = ({
               )}
             </div>
           </div>
+
+          {/* Interactive Supported Options Configurator for Standardized Packages */}
+          {isStandardized && options.length > 0 && (
+            <div className="p-4 rounded-xl bg-[#111827] border border-slate-800 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="text-xs font-mono uppercase tracking-wider text-[#00C2C7] flex items-center gap-1.5">
+                  <Sliders className="w-3.5 h-3.5" />
+                  <span>Supported Package Options</span>
+                </h4>
+                <div className="text-xs font-mono text-white tabular-nums">
+                  Configured Est.:{' '}
+                  <span className="text-[#00C2C7] font-bold">
+                    {configuredTotals.oneTimeUsd > 0 ? `$${configuredTotals.oneTimeUsd.toLocaleString('en-US')}` : ''}
+                    {configuredTotals.oneTimeUsd > 0 && configuredTotals.monthlyUsd > 0 ? ' + ' : ''}
+                    {configuredTotals.monthlyUsd > 0 ? `$${configuredTotals.monthlyUsd.toLocaleString('en-US')}/mo` : ''}
+                  </span>
+                  {currency === 'PHP' && (
+                    <span className="text-slate-400 ml-1">
+                      (≈ ₱
+                      {Math.round(
+                        (configuredTotals.oneTimeUsd || configuredTotals.monthlyUsd) * phpRate
+                      ).toLocaleString('en-US')}
+                      )
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {options.map((opt) => {
+                  const checked = selectedOptionIds.includes(opt.id);
+                  return (
+                    <label
+                      key={opt.id}
+                      className={`flex items-start justify-between gap-3 p-3 rounded-xl border transition-colors cursor-pointer ${
+                        checked
+                          ? 'bg-[#131d31] border-[#00C2C7]/60'
+                          : 'bg-[#0B1220] border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-start gap-2.5">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => onToggleOption(service.id, opt.id)}
+                          className="mt-0.5 rounded bg-slate-900 border-slate-700 text-[#00C2C7] focus:ring-[#00C2C7]"
+                        />
+                        <div>
+                          <div className="text-xs font-semibold text-white">{opt.label}</div>
+                          <div className="text-[11px] text-slate-400 mt-0.5">{opt.description}</div>
+                        </div>
+                      </div>
+                      <span className="text-xs font-mono text-[#00C2C7] shrink-0 tabular-nums">
+                        {opt.deltaUsd > 0 ? `+$${opt.deltaUsd.toLocaleString('en-US')}` : ''}
+                        {opt.deltaUsd > 0 && opt.monthlyDeltaUsd ? ' · ' : ''}
+                        {opt.monthlyDeltaUsd ? `+$${opt.monthlyDeltaUsd.toLocaleString('en-US')}/mo` : ''}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Interactive Blockchain Visualization if Blockchain service */}
           {service.interactiveDemoType === 'blockchain_canvas' && (
@@ -169,7 +244,7 @@ export const ServiceDetailModal: React.FC<ServiceDetailModalProps> = ({
             <div className="p-4 rounded-xl bg-[#111827] border border-[#D4AF37]/40 flex items-start gap-3 text-xs text-slate-300">
               <Shield className="w-4 h-4 text-[#D4AF37] shrink-0 mt-0.5" />
               <div>
-                <div className="font-semibold text-[#D4AF37] mb-1">Compliance & Feasibility Notice</div>
+                <div className="font-semibold text-[#D4AF37] mb-1">Compliance &amp; Feasibility Notice</div>
                 <p className="leading-relaxed">{service.complianceNote}</p>
               </div>
             </div>
@@ -219,7 +294,7 @@ export const ServiceDetailModal: React.FC<ServiceDetailModalProps> = ({
             }}
             className="px-4 py-2 rounded-lg bg-[#00C2C7] hover:bg-[#00d6dc] text-[#0B1220] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00C2C7]"
           >
-            <span>Request Personalized Proposal</span>
+            <span>{isStandardized ? 'Proceed to Solution Request' : 'Request Personalized Proposal'}</span>
             <ArrowUpRight className="w-3.5 h-3.5" />
           </button>
         </div>

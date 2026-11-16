@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { CatalogService } from '../../types';
 import {
   formatCatalogPrice,
+  computeConfiguredServiceTotal,
   COMMERCIAL_PRICING_NOTICE,
   EXTERNAL_CHARGES_DISCLOSURE,
 } from '../../data/serviceCatalog';
@@ -21,6 +22,7 @@ import {
 interface SolutionBuilderModalProps {
   isOpen: boolean;
   selectedServices: CatalogService[];
+  selectedOptionsMap?: Record<string, string[]>;
   currency: 'USD' | 'PHP';
   phpRate: number;
   onClose: () => void;
@@ -32,6 +34,7 @@ interface SolutionBuilderModalProps {
 export const SolutionBuilderModal: React.FC<SolutionBuilderModalProps> = ({
   isOpen,
   selectedServices,
+  selectedOptionsMap = {},
   currency,
   phpRate,
   onClose,
@@ -68,18 +71,15 @@ export const SolutionBuilderModal: React.FC<SolutionBuilderModalProps> = ({
 
   if (!isOpen) return null;
 
-  const oneTimeStartingTotal = selectedServices.reduce((sum, svc) => {
-    if (svc.pricing.model === 'subscription_monthly') return sum;
-    return sum + svc.pricing.startingUsd;
-  }, 0);
+  const oneTimeStartingTotal = selectedServices.reduce(
+    (sum, svc) => sum + computeConfiguredServiceTotal(svc, selectedOptionsMap[svc.id] || []).oneTimeUsd,
+    0
+  );
 
-  const monthlyStartingTotal = selectedServices.reduce((sum, svc) => {
-    if (svc.pricing.model === 'subscription_monthly') return sum + svc.pricing.startingUsd;
-    if (svc.pricing.model === 'setup_plus_monthly' && svc.pricing.monthlyUsd) {
-      return sum + svc.pricing.monthlyUsd;
-    }
-    return sum;
-  }, 0);
+  const monthlyStartingTotal = selectedServices.reduce(
+    (sum, svc) => sum + computeConfiguredServiceTotal(svc, selectedOptionsMap[svc.id] || []).monthlyUsd,
+    0
+  );
 
   const validate = (): boolean => {
     const errs: Record<string, string> = {};
@@ -121,12 +121,14 @@ export const SolutionBuilderModal: React.FC<SolutionBuilderModalProps> = ({
           industry: industry.trim() || undefined,
           targetTimeline,
           selectedServiceIds: selectedServices.map((s) => s.id),
+          selectedOptionsMap,
           selectedServicesSummary: selectedServices.map((s) => ({
             id: s.id,
             title: s.title,
             startingUsd: s.pricing.startingUsd,
             monthlyUsd: s.pricing.monthlyUsd,
             model: s.pricing.model,
+            selectedOptionIds: selectedOptionsMap[s.id] || [],
           })),
           projectDescription: projectDescription.trim(),
           preferredCurrency: currency,
@@ -295,6 +297,10 @@ export const SolutionBuilderModal: React.FC<SolutionBuilderModalProps> = ({
                   <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
                     {selectedServices.map((svc) => {
                       const p = formatCatalogPrice(svc, currency, phpRate);
+                      const chosenOptionIds = selectedOptionsMap[svc.id] || [];
+                      const chosenOptions = (svc.configurableOptions || []).filter((o) =>
+                        chosenOptionIds.includes(o.id)
+                      );
                       return (
                         <div
                           key={svc.id}
@@ -310,6 +316,15 @@ export const SolutionBuilderModal: React.FC<SolutionBuilderModalProps> = ({
                             {p.secondaryLabel && (
                               <div className="text-[10px] font-mono text-slate-400 tabular-nums">
                                 {p.secondaryLabel}
+                              </div>
+                            )}
+                            {chosenOptions.length > 0 && (
+                              <div className="mt-1 space-y-0.5">
+                                {chosenOptions.map((opt) => (
+                                  <div key={opt.id} className="text-[10px] text-slate-300 font-mono truncate">
+                                    + {opt.label}
+                                  </div>
+                                ))}
                               </div>
                             )}
                           </div>

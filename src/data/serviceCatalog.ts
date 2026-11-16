@@ -1,4 +1,10 @@
-import { CatalogCategoryMeta, CatalogService } from '../types';
+import {
+  CatalogCategoryId,
+  CatalogCategoryMeta,
+  CatalogService,
+  CatalogServiceOption,
+  ServiceEngagementMode,
+} from '../types';
 
 export const DEFAULT_USD_TO_PHP_RATE = 58;
 
@@ -133,7 +139,7 @@ const STD_EXCLUDED = [
   'Custom scope additions requested after formal proposal sign-off',
 ];
 
-export const SERVICE_CATALOG: CatalogService[] = [
+const RAW_SERVICE_CATALOG: CatalogService[] = [
   // =========================================================================
   // 1. WEBSITE & DIGITAL EXPERIENCE DEVELOPMENT (BLOCK 3)
   // =========================================================================
@@ -2044,3 +2050,174 @@ export function formatCatalogPrice(
     phpEstimateLabel: currency === 'PHP' ? fmtPhp(startingUsd) : undefined,
   };
 }
+
+const STANDARDIZED_IDS = new Set<string>([
+  'essential-digital-presence',
+  'signature-business-experience',
+  'ai-concierge-elite',
+  'ai-scheduling-concierge',
+  'ai-communications-executive',
+  'content-refinement-digital-updates',
+  'website-page-expansion',
+  'responsive-experience-optimization',
+  'performance-speed-enhancement',
+  'technical-seo-optimization',
+  'essential-care-membership',
+  'professional-care-membership',
+  'executive-care-membership',
+  'professional-technology-training',
+  'signature-1-digital-foundation',
+  'signature-2-business-elevation',
+]);
+
+const OPTIONS_BY_SERVICE_OR_GROUP = (service: CatalogService): CatalogServiceOption[] => {
+  if (service.categoryId === 'website-digital' && service.engagementMode === 'standardized') {
+    return [
+      {
+        id: 'opt-bilingual-i18n',
+        label: 'Bilingual EN / Filipino Switcher',
+        description: 'Localized UI navigation and dual-language content templates.',
+        deltaUsd: 240,
+      },
+      {
+        id: 'opt-cms-workshop',
+        label: 'Editorial & CMS Handover Workshop',
+        description: 'Live 90-minute training session plus recorded documentation.',
+        deltaUsd: 150,
+      },
+      {
+        id: 'opt-priority-sprint',
+        label: 'Priority 10-Day Fast-Track Delivery',
+        description: 'Dedicated accelerated engineering sprint for faster launch.',
+        deltaUsd: 390,
+      },
+    ];
+  }
+
+  if (service.subcategory === 'care-membership') {
+    return [
+      {
+        id: 'opt-weekly-staging',
+        label: 'Dedicated Staging & Pre-Deploy QA',
+        description: 'Verify monthly updates in an isolated staging environment first.',
+        deltaUsd: 0,
+        monthlyDeltaUsd: 65,
+      },
+      {
+        id: 'opt-uptime-sms',
+        label: '24/7 Real-Time Incident Alert Routing',
+        description: 'Priority executive alerting on endpoint or SSL anomalies.',
+        deltaUsd: 0,
+        monthlyDeltaUsd: 45,
+      },
+    ];
+  }
+
+  if (service.subcategory === 'agent-plan' && service.engagementMode === 'standardized') {
+    return [
+      {
+        id: 'opt-extra-knowledge-pack',
+        label: 'Extended Knowledge Base Ingestion (50 Docs)',
+        description: 'Index additional service manuals, PDFs, and policy documents.',
+        deltaUsd: 190,
+        monthlyDeltaUsd: 45,
+      },
+      {
+        id: 'opt-crm-webhook-sync',
+        label: 'Direct CRM / Email Webhook Sync',
+        description: 'Automatic structured lead dispatch to your existing CRM.',
+        deltaUsd: 220,
+      },
+    ];
+  }
+
+  if (service.engagementMode === 'standardized') {
+    return [
+      {
+        id: 'opt-priority-turnaround',
+        label: 'Priority Express Scheduling',
+        description: 'Expedited engineering queue assignment and verification.',
+        deltaUsd: 95,
+      },
+    ];
+  }
+
+  return [];
+};
+
+export const SERVICE_CATALOG: CatalogService[] = RAW_SERVICE_CATALOG.map((item) => {
+  const mode: ServiceEngagementMode =
+    item.engagementMode ||
+    (STANDARDIZED_IDS.has(item.id) || item.subcategory === 'care-membership'
+      ? 'standardized'
+      : 'custom_proposal');
+
+  const withMode: CatalogService = {
+    ...item,
+    engagementMode: mode,
+  };
+
+  return {
+    ...withMode,
+    configurableOptions: item.configurableOptions ?? OPTIONS_BY_SERVICE_OR_GROUP(withMode),
+  };
+});
+
+export function getCatalogServiceById(serviceId: string): CatalogService | undefined {
+  return SERVICE_CATALOG.find((s) => s.id === serviceId);
+}
+
+export function computeConfiguredServiceTotal(
+  service: CatalogService,
+  selectedOptionIds: string[] = []
+): { oneTimeUsd: number; monthlyUsd: number } {
+  const options = (service.configurableOptions || []).filter((o) =>
+    selectedOptionIds.includes(o.id)
+  );
+  const optionOneTime = options.reduce((sum, o) => sum + (o.deltaUsd || 0), 0);
+  const optionMonthly = options.reduce((sum, o) => sum + (o.monthlyDeltaUsd || 0), 0);
+
+  if (service.pricing.model === 'subscription_monthly') {
+    return {
+      oneTimeUsd: optionOneTime,
+      monthlyUsd: service.pricing.startingUsd + optionMonthly,
+    };
+  }
+
+  if (service.pricing.model === 'setup_plus_monthly') {
+    return {
+      oneTimeUsd: service.pricing.startingUsd + optionOneTime,
+      monthlyUsd: (service.pricing.monthlyUsd || 0) + optionMonthly,
+    };
+  }
+
+  return {
+    oneTimeUsd: service.pricing.startingUsd + optionOneTime,
+    monthlyUsd: optionMonthly,
+  };
+}
+
+export interface DivisionPriceSummary {
+  categoryId: Exclude<CatalogCategoryId, 'all'>;
+  number: string;
+  label: string;
+  minStartingUsd: number;
+  maxStartingUsd: number;
+  count: number;
+}
+
+export const CATALOG_DIVISION_PRICE_RANGES: DivisionPriceSummary[] = CATALOG_CATEGORIES.filter(
+  (c): c is CatalogCategoryMeta & { id: Exclude<CatalogCategoryId, 'all'> } => c.id !== 'all'
+).map((cat) => {
+  const items = SERVICE_CATALOG.filter((s) => s.categoryId === cat.id);
+  const prices = items.map((s) => s.pricing.startingUsd);
+  return {
+    categoryId: cat.id,
+    number: cat.number,
+    label: cat.label,
+    minStartingUsd: prices.length > 0 ? Math.min(...prices) : 0,
+    maxStartingUsd: prices.length > 0 ? Math.max(...prices) : 0,
+    count: items.length,
+  };
+});
+

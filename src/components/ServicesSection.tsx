@@ -8,6 +8,7 @@ import {
   EXTERNAL_CHARGES_DISCLOSURE,
   BLOCKCHAIN_COMPLIANCE_NOTICE,
   EMERGING_TECH_FEASIBILITY_NOTICE,
+  computeConfiguredServiceTotal,
 } from '../data/serviceCatalog';
 import { CatalogCategoryId, CatalogService } from '../types';
 import { ServiceTechIcon } from './animations/ServiceTechIcon';
@@ -45,9 +46,45 @@ export const ServicesSection: React.FC<ServicesSectionProps> = ({
   const [phpRate, setPhpRate] = useState<number>(DEFAULT_USD_TO_PHP_RATE);
   const [showRateEditor, setShowRateEditor] = useState(false);
 
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('opm_pending_selection_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed?.selectedIds)) return parsed.selectedIds;
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return [];
+  });
+  const [selectedOptionsMap, setSelectedOptionsMap] = useState<Record<string, string[]>>(() => {
+    try {
+      const saved = localStorage.getItem('opm_pending_selection_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.selectedOptionsMap && typeof parsed.selectedOptionsMap === 'object') {
+          return parsed.selectedOptionsMap;
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return {};
+  });
   const [detailService, setDetailService] = useState<CatalogService | null>(null);
   const [isBuilderOpen, setIsBuilderOpen] = useState(false);
+
+  React.useEffect(() => {
+    try {
+      localStorage.setItem(
+        'opm_pending_selection_v1',
+        JSON.stringify({ selectedIds, selectedOptionsMap })
+      );
+    } catch {
+      // ignore storage errors
+    }
+  }, [selectedIds, selectedOptionsMap]);
 
   const activeCategoryMeta = useMemo(
     () => CATALOG_CATEGORIES.find((c) => c.id === activeCategory) || CATALOG_CATEGORIES[0],
@@ -77,6 +114,17 @@ export const ServicesSection: React.FC<ServicesSectionProps> = ({
     setSelectedIds((prev) =>
       prev.includes(service.id) ? prev.filter((id) => id !== service.id) : [...prev, service.id]
     );
+  };
+
+  const toggleServiceOption = (serviceId: string, optionId: string) => {
+    setSelectedOptionsMap((prev) => {
+      const existing = prev[serviceId] || [];
+      const next = existing.includes(optionId)
+        ? existing.filter((id) => id !== optionId)
+        : [...existing, optionId];
+      return { ...prev, [serviceId]: next };
+    });
+    setSelectedIds((prev) => (prev.includes(serviceId) ? prev : [...prev, serviceId]));
   };
 
   const handleRequestProposal = (service: CatalogService) => {
@@ -114,17 +162,14 @@ export const ServicesSection: React.FC<ServicesSectionProps> = ({
   const otherServices = filteredServices.filter((s) => s.categoryId !== 'modernization-care');
 
   const selectedOneTimeTotal = selectedServices.reduce(
-    (sum, s) => (s.pricing.model === 'subscription_monthly' ? sum : sum + s.pricing.startingUsd),
+    (sum, s) => sum + computeConfiguredServiceTotal(s, selectedOptionsMap[s.id] || []).oneTimeUsd,
     0
   );
 
-  const selectedMonthlyTotal = selectedServices.reduce((sum, s) => {
-    if (s.pricing.model === 'subscription_monthly') return sum + s.pricing.startingUsd;
-    if (s.pricing.model === 'setup_plus_monthly' && s.pricing.monthlyUsd) {
-      return sum + s.pricing.monthlyUsd;
-    }
-    return sum;
-  }, 0);
+  const selectedMonthlyTotal = selectedServices.reduce(
+    (sum, s) => sum + computeConfiguredServiceTotal(s, selectedOptionsMap[s.id] || []).monthlyUsd,
+    0
+  );
 
   return (
     <section
@@ -683,8 +728,10 @@ export const ServicesSection: React.FC<ServicesSectionProps> = ({
         currency={currency}
         phpRate={phpRate}
         isSelected={detailService ? selectedIds.includes(detailService.id) : false}
+        selectedOptionIds={detailService ? selectedOptionsMap[detailService.id] || [] : []}
         onClose={() => setDetailService(null)}
         onToggleSelect={toggleSelectService}
+        onToggleOption={toggleServiceOption}
         onRequestProposal={handleRequestProposal}
         onConsultAI={handleConsultAIForService}
       />
@@ -692,11 +739,22 @@ export const ServicesSection: React.FC<ServicesSectionProps> = ({
       <SolutionBuilderModal
         isOpen={isBuilderOpen}
         selectedServices={selectedServices}
+        selectedOptionsMap={selectedOptionsMap}
         currency={currency}
         phpRate={phpRate}
         onClose={() => setIsBuilderOpen(false)}
-        onRemoveService={(id) => setSelectedIds((prev) => prev.filter((item) => item !== id))}
-        onClearAll={() => setSelectedIds([])}
+        onRemoveService={(id) => {
+          setSelectedIds((prev) => prev.filter((item) => item !== id));
+          setSelectedOptionsMap((prev) => {
+            const next = { ...prev };
+            delete next[id];
+            return next;
+          });
+        }}
+        onClearAll={() => {
+          setSelectedIds([]);
+          setSelectedOptionsMap({});
+        }}
         onConsultAIWithSelection={handleConsultAIWithSelection}
       />
     </section>

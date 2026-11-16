@@ -7,6 +7,8 @@ import { GoogleGenAI, Type } from '@google/genai';
 import {
   CATALOG_CATEGORIES,
   SERVICE_CATALOG,
+  CATALOG_DIVISION_PRICE_RANGES,
+  computeConfiguredServiceTotal,
   COMMERCIAL_PRICING_NOTICE,
   EXTERNAL_CHARGES_DISCLOSURE,
   BLOCKCHAIN_COMPLIANCE_NOTICE,
@@ -161,6 +163,22 @@ app.get('/api/health', (_req: Request, res: Response) => {
   });
 });
 
+// Authoritative centralized catalog endpoint
+app.get('/api/catalog', (_req: Request, res: Response) => {
+  res.json({
+    success: true,
+    categories: CATALOG_CATEGORIES,
+    services: SERVICE_CATALOG,
+    divisionRanges: CATALOG_DIVISION_PRICE_RANGES,
+    notices: {
+      commercialPricing: COMMERCIAL_PRICING_NOTICE,
+      externalCharges: EXTERNAL_CHARGES_DISCLOSURE,
+      blockchainCompliance: BLOCKCHAIN_COMPLIANCE_NOTICE,
+      emergingTechFeasibility: EMERGING_TECH_FEASIBILITY_NOTICE,
+    },
+  });
+});
+
 // =========================================================================
 // INQUIRIES & SOLUTION BUILDER SUBMISSION ENDPOINTS
 // =========================================================================
@@ -238,17 +256,21 @@ app.post('/api/inquiries', (req: Request, res: Response) => {
     .map((id) => SERVICE_CATALOG.find((s) => s.id === id))
     .filter((s): s is NonNullable<typeof s> => Boolean(s));
 
+  const rawOptionsMap =
+    body.selectedOptionsMap && typeof body.selectedOptionsMap === 'object'
+      ? (body.selectedOptionsMap as Record<string, unknown>)
+      : {};
+
   let estimatedOneTimeStartingUsd = 0;
   let estimatedMonthlyStartingUsd = 0;
   for (const svc of matchedCatalogServices) {
-    if (svc.pricing.model === 'subscription_monthly') {
-      estimatedMonthlyStartingUsd += svc.pricing.startingUsd;
-    } else if (svc.pricing.model === 'setup_plus_monthly') {
-      estimatedOneTimeStartingUsd += svc.pricing.startingUsd;
-      estimatedMonthlyStartingUsd += svc.pricing.monthlyUsd || 0;
-    } else {
-      estimatedOneTimeStartingUsd += svc.pricing.startingUsd;
-    }
+    const rawOpts = rawOptionsMap[svc.id];
+    const safeOptIds = Array.isArray(rawOpts)
+      ? rawOpts.filter((x): x is string => typeof x === 'string')
+      : [];
+    const totals = computeConfiguredServiceTotal(svc, safeOptIds);
+    estimatedOneTimeStartingUsd += totals.oneTimeUsd;
+    estimatedMonthlyStartingUsd += totals.monthlyUsd;
   }
 
   const serviceTitle =
@@ -466,7 +488,13 @@ CONSULTATION BEHAVIOR:
     }
     replyText += `\n\nTo prepare a tailored Project Brief, what target timeline and key integrations do you need?`;
   } else {
-    replyText = `Thank you for reaching out to OPHIREUM MULTIMEDIA PRODUCTION. We deliver across 10 integrated technology disciplines—spanning Web Platforms (starting at $450), AI Agents (starting at $300), Blockchain/Web3 (starting at $950), Enterprise & Mobile Software, Cloud/Cybersecurity, and Creative Multimedia.\n\nCould you share the primary business challenge you want to solve and your target timeline?`;
+    const summaryText = CATALOG_DIVISION_PRICE_RANGES.slice(0, 4)
+      .map(
+        (d) =>
+          `${d.label} (starting at $${d.minStartingUsd.toLocaleString('en-US')})`
+      )
+      .join(', ');
+    replyText = `Thank you for reaching out to OPHIREUM MULTIMEDIA PRODUCTION. We deliver across 10 integrated technology divisions—including ${summaryText}, plus Enterprise Software, Cloud/Security, Digital Care, Creative Multimedia, Industry Solutions, and Signature Suites.\n\nCould you share the primary business challenge you want to solve and your target timeline?`;
   }
 
   return res.json({
@@ -524,17 +552,11 @@ app.post('/api/voice/process', async (req: Request, res: Response) => {
   const systemInstruction = `You are the official OPHIREUM AI Solutions Consultant for OPHIREUM MULTIMEDIA PRODUCTION located at KMC | One West Aeropark, Clark Freeport Zone, Mabalacat City, Pampanga, Philippines.
 Registered DTI Business Name: OPHIREUM MULTIMEDIA PRODUCTION (Registration No. 7567003). Founder & CEO: Dhenze Languisan (mobile: +63 917 966 8814).
 
-Service Divisions (all pricing is Starting Investment only, external charges billed separately):
-1. Website & Digital Experience Development (Starting at $450 to $3,500)
-2. Artificial Intelligence & AI Agents (Starting at $300 to $1,500+)
-3. Blockchain & Web3 Development (Smart Contracts from $950, Web3 Apps from $1,800; never claim guaranteed returns or regulatory approval)
-4. Enterprise Software & Mobile Applications (Starting at $2,200 to $4,500+)
-5. Automation, Data Analytics, Computer Vision & IoT (Starting at $350+; emerging tech subject to feasibility)
-6. Cloud, Cybersecurity & Infrastructure (Starting at $450+)
-7. Digital Modernization & Website Care (One-time upgrades from $150; Care Memberships starting at $120/mo to $650/mo)
-8. Creative Multimedia & Brand Innovation (Starting at $350+)
-9. Industry-Specific Digital Solutions (12 verticals from $480+)
-10. Signature Business Transformation Packages (Starter $1,250, Growth $2,800, AI-Powered $4,500, Enterprise Custom Quote)
+Service Divisions (all pricing derived from official catalog as Starting Investment only, external charges billed separately):
+${CATALOG_DIVISION_PRICE_RANGES.map(
+  (d) =>
+    `${Number(d.number)}. ${d.label} (${d.count} solutions, starting from $${d.minStartingUsd.toLocaleString('en-US')} up to $${d.maxStartingUsd.toLocaleString('en-US')}+)`
+).join('\n')}
 
 Tone & Voice Personality:
 - Professional, consultative, articulate, executive-grade, confident, approachable.

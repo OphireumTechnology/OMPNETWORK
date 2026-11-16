@@ -45,6 +45,16 @@ export type PricingModel =
   | 'hourly'
   | 'per_session';
 
+export type ServiceEngagementMode = 'standardized' | 'custom_proposal';
+
+export interface CatalogServiceOption {
+  id: string;
+  label: string;
+  description: string;
+  deltaUsd: number;
+  monthlyDeltaUsd?: number;
+}
+
 export interface CatalogPricing {
   model: PricingModel;
   startingUsd: number;
@@ -61,6 +71,8 @@ export interface CatalogService {
   fullDescription: string;
   iconKind: TechIconKind;
   pricing: CatalogPricing;
+  engagementMode?: ServiceEngagementMode;
+  configurableOptions?: CatalogServiceOption[];
   capabilities: string[];
   includedScope: string[];
   excludedScope: string[];
