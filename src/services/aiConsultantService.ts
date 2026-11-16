@@ -1,5 +1,4 @@
-import { servicesData } from '../data/servicesData';
-import { COMPANY_CONFIG } from '../data/companyConfig';
+import { SERVICE_CATALOG, CATALOG_CATEGORIES, formatCatalogPrice } from '../data/serviceCatalog';
 import { ProjectBrief, ClientProfile, ProjectRequirements } from './supabaseService';
 
 export interface ChatMessage {
@@ -9,11 +8,21 @@ export interface ChatMessage {
   timestamp: string;
   stage?: 'welcome' | 'category' | 'details' | 'recommendation' | 'brief' | 'schedule';
   quickReplies?: string[];
+  recommendedServiceIds?: string[];
   suggestedAction?: 'review_brief' | 'schedule_meeting' | 'talk_to_human';
 }
 
 export interface ConsultationState {
-  currentStage: 'welcome' | 'category' | 'problem' | 'features' | 'client_info' | 'recommendation' | 'brief_ready' | 'scheduling' | 'confirmed';
+  currentStage:
+    | 'welcome'
+    | 'category'
+    | 'problem'
+    | 'features'
+    | 'client_info'
+    | 'recommendation'
+    | 'brief_ready'
+    | 'scheduling'
+    | 'confirmed';
   client: ClientProfile;
   requirements: ProjectRequirements;
   generatedBrief?: ProjectBrief;
@@ -43,212 +52,241 @@ export const INITIAL_CONSULTATION_STATE: ConsultationState = {
   },
 };
 
-export const PROJECT_CATEGORIES = [
-  'Website Design & Development',
-  'Enterprise Software Development',
-  'AI Solutions & Automation',
-  'Multimedia & Cinema Production',
-  'Cloud & Database Integration',
-  'Digital Platforms & Interactive 3D',
-  'Broadcast & Streaming Solutions',
-  'Cybersecurity & Technology Consulting',
-];
+export const PROJECT_CATEGORIES = CATALOG_CATEGORIES.filter((c) => c.id !== 'all').map((c) => c.label);
+
+const matchCatalogLocally = (query: string, limit = 3) => {
+  const q = query.toLowerCase();
+  const tokens = q.split(/\W+/).filter((t) => t.length > 2);
+  return SERVICE_CATALOG.map((svc) => {
+    const text = `${svc.title} ${svc.shortDescription} ${svc.capabilities.join(' ')} ${svc.categoryId}`.toLowerCase();
+    let score = 0;
+    for (const token of tokens) {
+      if (svc.title.toLowerCase().includes(token)) score += 4;
+      else if (text.includes(token)) score += 1;
+    }
+    return { svc, score };
+  })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((entry) => entry.svc);
+};
+
+const synthesizeBriefFromState = (state: ConsultationState, recommendedIds: string[]): ProjectBrief => {
+  const refCode = `OPM-BRF-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+  const matchedServices = recommendedIds
+    .map((id) => SERVICE_CATALOG.find((s) => s.id === id))
+    .filter((s): s is NonNullable<typeof s> => Boolean(s));
+
+  const recommendedModules =
+    matchedServices.length > 0
+      ? matchedServices.map((s) => `${s.title} (${formatCatalogPrice(s, 'USD', 58).primaryLabel})`)
+      : [
+          'Authentication & Multi-Tenant Access Controller',
+          'Distributed Cloud API & Event Engine',
+          'Real-Time Status & Progress Dashboard',
+          'Automated CI/CD & Quality Verification Pipeline',
+        ];
+
+  return {
+    referenceCode: refCode,
+    client: {
+      fullName: state.client.fullName || 'Prospective Enterprise Client',
+      email: state.client.email || 'client@organization.com',
+      phone: state.client.phone || '+63 9XX XXX XXXX',
+      companyName: state.client.companyName || 'Client Organization',
+      industry: state.client.industry || 'Digital & Enterprise Services',
+      location: state.client.location || 'Philippines / International',
+    },
+    requirements: {
+      category: state.requirements.category || 'Unified Digital & Technology Solution',
+      businessProblem:
+        state.requirements.businessProblem ||
+        'Operational scalability, digital platform modernization, and intelligent automation.',
+      keyFeatures:
+        state.requirements.keyFeatures.length > 0
+          ? state.requirements.keyFeatures
+          : matchedServices.flatMap((s) => s.capabilities).slice(0, 4),
+      budgetPreference: state.requirements.budgetPreference || 'Subject to scoped proposal review',
+      targetTimeline: state.requirements.targetTimeline || 'Staged Milestone Delivery (4–12 Weeks)',
+    },
+    technicalArchitecture: {
+      recommendedModules,
+      suggestedStack: ['React 19', 'TypeScript', 'Node.js', 'PostgreSQL / Cloud SQL', '@google/genai SDK'],
+      infrastructure: 'Managed cloud architecture with automated backups, HTTPS encryption, and access controls.',
+      securityMeasures: [
+        'Role-Based Access Control (RBAC) & Row-Level Security',
+        'Server-side secret & API key isolation',
+        'Compliance & pre-deployment security review',
+      ],
+    },
+    commercialDiscovery: {
+      budgetPreference: 'Starting investment basis — finalized upon verified proposal sign-off',
+      timelinePreference: 'Staged engineering & milestone review',
+      suggestedPhases: [
+        'Phase 1: Discovery, Feasibility & Architecture Blueprint',
+        'Phase 2: Core System & Interface Implementation',
+        'Phase 3: Integration Testing, Security Hardening & QA',
+        'Phase 4: Deployment, Handover & Optional Digital Care Plan',
+      ],
+      consultationAgenda: [
+        'Validate business workflows and integration touchpoints',
+        'Confirm deliverables, inclusions/exclusions, and external third-party costs',
+        'Approve milestone schedule and formal proposal',
+      ],
+    },
+    createdAt: new Date().toISOString(),
+    status: 'draft',
+  };
+};
 
 export const aiConsultantService = {
-  // Generate intelligent tailored response based on client stage and message
   async processUserMessage(
     userMessage: string,
     state: ConsultationState,
-    conversationHistory: ChatMessage[]
+    conversationHistory: ChatMessage[],
+    language: 'en-US' | 'fil-PH' = 'en-US'
   ): Promise<{ aiMessage: ChatMessage; updatedState: ConsultationState }> {
     const trimmed = userMessage.trim();
-    const updatedState = { ...state };
+    const updatedState: ConsultationState = {
+      ...state,
+      client: { ...state.client },
+      requirements: {
+        ...state.requirements,
+        keyFeatures: [...(state.requirements.keyFeatures || [])],
+      },
+    };
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const msgId = `msg-${Date.now()}`;
 
-    // STAGE 1: WELCOME -> CATEGORY SELECTION
-    if (state.currentStage === 'welcome') {
-      const matchedCategory = PROJECT_CATEGORIES.find((cat) =>
-        trimmed.toLowerCase().includes(cat.toLowerCase().split(' ')[0]) ||
-        (cat.includes('AI') && trimmed.toLowerCase().includes('ai')) ||
-        (cat.includes('Website') && (trimmed.toLowerCase().includes('web') || trimmed.toLowerCase().includes('site'))) ||
-        (cat.includes('Enterprise') && (trimmed.toLowerCase().includes('app') || trimmed.toLowerCase().includes('software') || trimmed.toLowerCase().includes('portal'))) ||
-        (cat.includes('Multimedia') && (trimmed.toLowerCase().includes('video') || trimmed.toLowerCase().includes('media') || trimmed.toLowerCase().includes('film')))
-      ) || trimmed;
-
-      updatedState.requirements.category = matchedCategory;
+    // Advance discovery state unobtrusively
+    if (updatedState.currentStage === 'welcome') {
+      const matchedCat =
+        CATALOG_CATEGORIES.find(
+          (c) =>
+            c.id !== 'all' &&
+            (trimmed.toLowerCase().includes(c.label.toLowerCase()) ||
+              trimmed.toLowerCase().includes(c.shortLabel.toLowerCase()))
+        )?.label || trimmed;
+      updatedState.requirements.category = matchedCat;
       updatedState.currentStage = 'problem';
-
-      return {
-        aiMessage: {
-          id: msgId,
-          sender: 'ai',
-          text: `Excellent. OPHIREUM specializes in high-caliber ${matchedCategory}. To help our solution architects tailor an optimal proposal: What is the primary business challenge or objective you are aiming to solve?`,
-          timestamp: now,
-          stage: 'details',
-          quickReplies: [
-            'Automate manual operations',
-            'Launch a new customer-facing platform',
-            'Upgrade legacy infrastructure',
-            'Produce cinema-grade brand media',
-          ],
-        },
-        updatedState,
-      };
-    }
-
-    // STAGE 2: PROBLEM -> FEATURES
-    if (state.currentStage === 'problem') {
+    } else if (updatedState.currentStage === 'problem') {
       updatedState.requirements.businessProblem = trimmed;
       updatedState.currentStage = 'features';
-
-      return {
-        aiMessage: {
-          id: msgId,
-          sender: 'ai',
-          text: `Understood. That aligns directly with our engineering and production capabilities. What key features or specific functionality are essential for this project (e.g., role-based portals, AI automation, payment gateways, 4K video workflows)?`,
-          timestamp: now,
-          stage: 'details',
-          quickReplies: [
-            'Secure client portal & RBAC',
-            'AI automation & assistant',
-            'Cloud database & API sync',
-            'High-bitrate media streaming',
-          ],
-        },
-        updatedState,
-      };
-    }
-
-    // STAGE 3: FEATURES -> CLIENT INFO
-    if (state.currentStage === 'features') {
-      updatedState.requirements.keyFeatures = trimmed.split(/,|\n|and/).map(f => f.trim()).filter(Boolean);
+    } else if (updatedState.currentStage === 'features') {
+      updatedState.requirements.keyFeatures = trimmed
+        .split(/,|\n| and /)
+        .map((f) => f.trim())
+        .filter(Boolean);
       updatedState.currentStage = 'client_info';
-
-      return {
-        aiMessage: {
-          id: msgId,
-          sender: 'ai',
-          text: `Those are clear, actionable requirements. To synthesize your official Project Brief and schedule your consultation, may I have your full name, organization/company, and email address?`,
-          timestamp: now,
-          stage: 'details',
-          quickReplies: ['Fill details directly'],
-        },
-        updatedState,
-      };
-    }
-
-    // STAGE 4: CLIENT INFO -> RECOMMENDATION & BRIEF SYNTHESIS
-    if (state.currentStage === 'client_info') {
-      // Basic extraction of name/company/email if provided in natural language
+    } else if (updatedState.currentStage === 'client_info') {
       const emailMatch = trimmed.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-      if (emailMatch) {
-        updatedState.client.email = emailMatch[0];
-      }
-      
-      const parts = trimmed.split(/[,\n-]/).map(s => s.trim());
+      if (emailMatch) updatedState.client.email = emailMatch[0];
+      const parts = trimmed.split(/[,\n-]/).map((s) => s.trim());
       if (parts[0] && !updatedState.client.fullName) {
         updatedState.client.fullName = parts[0].replace(/my name is/i, '').replace(/i am/i, '').trim();
       }
       if (parts[1] && !updatedState.client.companyName) {
         updatedState.client.companyName = parts[1].replace(/company is/i, '').replace(/at/i, '').trim();
       }
-
-      updatedState.currentStage = 'recommendation';
-
-      // Generate the structured brief
-      const refCode = `OPM-BRF-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
-      const brief: ProjectBrief = {
-        referenceCode: refCode,
-        client: {
-          fullName: updatedState.client.fullName || 'Prospective Enterprise Client',
-          email: updatedState.client.email || 'client@enterprise.com',
-          phone: updatedState.client.phone || '+63 9XX XXX XXXX',
-          companyName: updatedState.client.companyName || 'Enterprise Partner',
-          industry: 'Technology & Enterprise Services',
-          location: 'Philippines / International',
-        },
-        requirements: {
-          category: updatedState.requirements.category || 'Enterprise Digital Platform',
-          businessProblem: updatedState.requirements.businessProblem || 'Operational scalability and automated workflow transformation.',
-          keyFeatures: updatedState.requirements.keyFeatures.length > 0
-            ? updatedState.requirements.keyFeatures
-            : ['Enterprise RBAC Gateway', 'Intelligent AI Pipeline', 'Cloud Database Replication'],
-          budgetPreference: 'Enterprise Tier / Flexible',
-          targetTimeline: 'Q1–Q2 Delivery Scope',
-        },
-        technicalArchitecture: {
-          recommendedModules: [
-            'Authentication & Multi-Tenant Access Controller',
-            'Distributed Cloud API & Event Engine',
-            'Real-Time Status & Progress Dashboard',
-            'Automated GitHub Actions CI/CD Pipeline',
-          ],
-          suggestedStack: ['React 19', 'TypeScript', 'Node.js', 'PostgreSQL / Supabase', '@google/genai SDK'],
-          infrastructure: 'Dedicated Cloud Run & Cloud SQL with automated failover and daily snapshots.',
-          securityMeasures: [
-            'Row-Level Security (RLS) enforcement',
-            'JWT & MFA privilege isolation',
-            'Zero-hallucination verification gates',
-          ],
-        },
-        commercialDiscovery: {
-          budgetPreference: 'Subject to verified milestone discovery',
-          timelinePreference: 'Standard 4 to 12 week staged rollout',
-          suggestedPhases: [
-            'Phase 1: Architecture Review & Screenplay / Technical Spec',
-            'Phase 2: Prototype Development & Core Integration',
-            'Phase 3: QA Verification, Security Audit & Staging',
-            'Phase 4: Production Deployment & SLA Handover',
-          ],
-          consultationAgenda: [
-            'Deep dive into operational workflows',
-            'Review existing technical assets and dependencies',
-            'Formal scope finalization and milestone roadmap',
-          ],
-        },
-        createdAt: new Date().toISOString(),
-        status: 'draft',
-      };
-
-      updatedState.generatedBrief = brief;
       updatedState.currentStage = 'brief_ready';
+    }
 
+    // Call live server-side AI Solutions Consultant endpoint grounded in the 10-category catalog
+    try {
+      const response = await fetch('/api/consultant/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userMessage: trimmed,
+          state: updatedState,
+          conversationHistory: conversationHistory.slice(-8).map((m) => ({
+            sender: m.sender,
+            text: m.text,
+          })),
+          language,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const recommendedIds: string[] = Array.isArray(data.recommendedServiceIds)
+          ? data.recommendedServiceIds
+          : [];
+
+        if (
+          updatedState.currentStage === 'brief_ready' ||
+          data.suggestedAction === 'review_brief'
+        ) {
+          updatedState.generatedBrief = synthesizeBriefFromState(updatedState, recommendedIds);
+          updatedState.currentStage = 'brief_ready';
+        }
+
+        return {
+          aiMessage: {
+            id: msgId,
+            sender: 'ai',
+            text: data.replyText,
+            timestamp: now,
+            recommendedServiceIds: recommendedIds,
+            suggestedAction: data.suggestedAction,
+            quickReplies: Array.isArray(data.quickReplies)
+              ? data.quickReplies
+              : ['Review Project Brief', 'Schedule Consultation'],
+          },
+          updatedState,
+        };
+      }
+    } catch (err) {
+      console.warn('[OPHIREUM] Falling back to local catalog consultant engine:', err);
+    }
+
+    // Local catalog-grounded fallback if backend is unreachable
+    const localMatches = matchCatalogLocally(
+      `${trimmed} ${updatedState.requirements.category} ${updatedState.requirements.businessProblem}`,
+      3
+    );
+
+    if (updatedState.currentStage === 'brief_ready') {
+      updatedState.generatedBrief = synthesizeBriefFromState(
+        updatedState,
+        localMatches.map((m) => m.id)
+      );
       return {
         aiMessage: {
           id: msgId,
           sender: 'ai',
-          text: `Thank you. I have synthesized an initial Enterprise Project Brief (Ref: ${refCode}) based on our approved OPHIREUM engineering standards. 
-
-Here is what we recommend:
-• Modular React 19 & TypeScript frontend with strict RBAC access control
-• Server-side AI orchestration using our verified @google/genai pipeline
-• Dedicated relational database schema with Row Level Security (RLS)
-• Staged milestone delivery with human architectural approval at each gate
-
-You can review your complete structured brief below. Would you like to schedule an executive consultation with our development team to discuss your project in detail?`,
+          text: `Thank you. I have prepared a preliminary Project Brief (Ref: ${updatedState.generatedBrief.referenceCode}) tailored to your goals. All pricing figures represent starting investments and final scope will be verified prior to build kickoff. Would you like to inspect your brief or book a consultation?`,
           timestamp: now,
           stage: 'brief',
-          suggestedAction: 'schedule_meeting',
-          quickReplies: [
-            'Review Project Brief',
-            'Schedule Consultation',
-            'Speak with Dhenze Languisan (CEO)',
-          ],
+          recommendedServiceIds: localMatches.map((m) => m.id),
+          suggestedAction: 'review_brief',
+          quickReplies: ['Review Project Brief', 'Schedule Consultation', 'Speak with CEO Dhenze Languisan'],
         },
         updatedState,
       };
     }
 
-    // Default consultative follow-up
+    const matchText =
+      localMatches.length > 0
+        ? `Matched OPHIREUM capabilities:\n${localMatches
+            .map((m) => `• ${m.title} — ${formatCatalogPrice(m, 'USD', 58).primaryLabel}`)
+            .join('\n')}\n\nTo narrow the recommendation, what target timeline and key features or integrations do you require?`
+        : `Understood. To prepare your customized scope and starting investment breakdown across our 10 technology divisions, what specific goals, users, or integrations does this project require?`;
+
     return {
       aiMessage: {
         id: msgId,
         sender: 'ai',
-        text: `I've noted that detail. At OPHIREUM MULTIMEDIA PRODUCTION, our executive team in Clark Freeport Zone reviews every project requirement to ensure high technical integrity. Would you like to inspect the generated project brief, or proceed directly to select a consultation slot?`,
+        text: matchText,
         timestamp: now,
         stage: 'recommendation',
-        quickReplies: ['View Project Brief', 'Schedule Consultation'],
+        recommendedServiceIds: localMatches.map((m) => m.id),
+        quickReplies: [
+          'Prepare Project Brief',
+          'Schedule Consultation',
+          'Speak with CEO Dhenze Languisan',
+        ],
       },
       updatedState,
     };

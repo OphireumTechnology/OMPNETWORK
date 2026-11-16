@@ -13,6 +13,75 @@ export interface ServiceItem {
   status: 'Proposed Specification' | 'Client Ready' | 'Enterprise Active';
 }
 
+export type CatalogCategoryId =
+  | 'all'
+  | 'website-digital'
+  | 'ai-agents'
+  | 'blockchain-web3'
+  | 'enterprise-mobile'
+  | 'automation-systems'
+  | 'cloud-cybersecurity'
+  | 'modernization-care'
+  | 'creative-multimedia'
+  | 'industry-solutions'
+  | 'signature-packages';
+
+export type TechIconKind =
+  | 'website'
+  | 'ai'
+  | 'blockchain'
+  | 'enterprise'
+  | 'mobile'
+  | 'automation'
+  | 'cloud'
+  | 'cybersecurity'
+  | 'multimedia'
+  | 'analytics';
+
+export type PricingModel =
+  | 'one_time'
+  | 'subscription_monthly'
+  | 'setup_plus_monthly'
+  | 'hourly'
+  | 'per_session';
+
+export interface CatalogPricing {
+  model: PricingModel;
+  startingUsd: number;
+  monthlyUsd?: number;
+  unitLabel?: string;
+}
+
+export interface CatalogService {
+  id: string;
+  categoryId: Exclude<CatalogCategoryId, 'all'>;
+  subcategory?: 'one-time' | 'care-membership' | 'agent-plan' | 'custom-ai' | 'signature';
+  title: string;
+  shortDescription: string;
+  fullDescription: string;
+  iconKind: TechIconKind;
+  pricing: CatalogPricing;
+  capabilities: string[];
+  includedScope: string[];
+  excludedScope: string[];
+  externalChargesNote?: string;
+  complianceNote?: string;
+  featuredTier?: 'signature' | 'flagship';
+  signatureSubtitle?: string;
+  interactiveDemoType?: 'ai_consultant' | 'blockchain_canvas' | 'preview_only';
+  legacyServiceId?: string;
+}
+
+export interface CatalogCategoryMeta {
+  id: CatalogCategoryId;
+  number: string;
+  label: string;
+  shortLabel: string;
+  iconKind: TechIconKind;
+  headline: string;
+  description: string;
+}
+
 export interface PortfolioItem {
   id: string;
   title: string;
@@ -37,6 +106,22 @@ export interface InquiryFormData {
   estimatedBudget: string;
   fileName?: string;
   privacyConsent: boolean;
+}
+
+export interface SolutionSubmissionPayload {
+  fullName: string;
+  email: string;
+  contactNumber: string;
+  company: string;
+  industry?: string;
+  targetTimeline?: string;
+  selectedServiceIds: string[];
+  projectDescription: string;
+  estimatedBudget?: string;
+  preferredCurrency?: 'USD' | 'PHP';
+  phpConversionRate?: number;
+  privacyConsent: boolean;
+  websiteHoneypot?: string;
 }
 
 export interface AIAgentRole {

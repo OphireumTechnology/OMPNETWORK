@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { servicesData } from '../data/servicesData';
+import { CATALOG_CATEGORIES, SERVICE_CATALOG } from '../data/serviceCatalog';
 import { InquiryFormData } from '../types';
 import { 
   Send, CheckCircle2, AlertCircle, Paperclip, FileText, 
@@ -32,6 +33,8 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
   }, [selectedServiceId]);
 
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [websiteHoneypot, setWebsiteHoneypot] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submittedReference, setSubmittedReference] = useState<string | null>(null);
 
@@ -92,37 +95,69 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
     if (!validate()) return;
 
     setIsSubmitting(true);
 
-    setTimeout(() => {
-      const refNumber = `OPM-INQ-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const matchedCatalog = SERVICE_CATALOG.find((s) => s.id === formData.serviceId);
+    const matchedLegacy = servicesData.find((s) => s.id === formData.serviceId);
+    const resolvedTitle = matchedCatalog?.title || matchedLegacy?.title || formData.serviceId;
+
+    try {
+      const response = await fetch('/api/inquiries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'contact_form',
+          fullName: formData.fullName.trim(),
+          email: formData.email.trim(),
+          contactNumber: formData.contactNumber.trim(),
+          company: formData.company.trim(),
+          serviceId: formData.serviceId,
+          serviceTitle: resolvedTitle,
+          selectedServiceIds: matchedCatalog ? [matchedCatalog.id] : [],
+          estimatedBudget: formData.estimatedBudget,
+          projectDescription: formData.projectDescription.trim(),
+          fileName: formData.fileName || undefined,
+          privacyConsent: formData.privacyConsent,
+          websiteHoneypot,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Unable to process your inquiry right now.');
+      }
+
       const newInquiry = {
         ...formData,
-        referenceId: refNumber,
-        timestamp: new Date().toISOString(),
-        serviceTitle: servicesData.find((s) => s.id === formData.serviceId)?.title || formData.serviceId,
-        status: 'Pending Dispatch Review'
+        referenceId: data.referenceId,
+        timestamp: data.timestamp || new Date().toISOString(),
+        serviceTitle: resolvedTitle,
+        status: 'Routed to Executive Desk',
       };
 
       try {
         const stored = JSON.parse(localStorage.getItem('opm_inquiries') || '[]');
         stored.unshift(newInquiry);
         localStorage.setItem('opm_inquiries', JSON.stringify(stored));
-      } catch (e) {
-        // Safe fallback
+      } catch {
+        // Ignore storage restrictions
       }
 
       if (onInquirySubmitted) {
         onInquirySubmitted(newInquiry);
       }
 
+      setSubmittedReference(data.referenceId);
+    } catch (err: any) {
+      setSubmitError(err?.message || 'Submission failed. Please review your details or contact us directly.');
+    } finally {
       setIsSubmitting(false);
-      setSubmittedReference(refNumber);
-    }, 600);
+    }
   };
 
   const resetForm = () => {
@@ -260,6 +295,24 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
               ) : (
                 /* Interactive Form Fields */
                 <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+                  {/* Honeypot field for anti-spam */}
+                  <div className="hidden" aria-hidden="true">
+                    <label htmlFor="contact-website-hp">Company Website</label>
+                    <input
+                      id="contact-website-hp"
+                      type="text"
+                      tabIndex={-1}
+                      autoComplete="off"
+                      value={websiteHoneypot}
+                      onChange={(e) => setWebsiteHoneypot(e.target.value)}
+                    />
+                  </div>
+                  {submitError && (
+                    <div className="p-3 rounded-lg bg-rose-950/60 border border-rose-500/40 text-xs text-rose-200 flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                      <span>{submitError}</span>
+                    </div>
+                  )}
                   
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
@@ -332,10 +385,22 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ selectedServiceI
                         onChange={(e) => setFormData({ ...formData, serviceId: e.target.value })}
                         className="w-full px-3.5 py-2.5 rounded-lg bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-[#00C2C7] focus:ring-1 focus:ring-[#00C2C7] cursor-pointer"
                       >
-                        {servicesData.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.number}. {s.title}
-                          </option>
+                        <optgroup label="Core Company Disciplines">
+                          {servicesData.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.number}. {s.title}
+                            </option>
+                          ))}
+                        </optgroup>
+                        {CATALOG_CATEGORIES.filter((c) => c.id !== 'all').map((cat) => (
+                          <optgroup key={cat.id} label={`${cat.number}. ${cat.label}`}>
+                            {SERVICE_CATALOG.filter((item) => item.categoryId === cat.id).map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {item.title} (Starting at ${item.pricing.startingUsd.toLocaleString('en-US')}
+                                {item.pricing.model === 'subscription_monthly' ? '/mo' : ''})
+                              </option>
+                            ))}
+                          </optgroup>
                         ))}
                       </select>
                     </div>

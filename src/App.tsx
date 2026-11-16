@@ -15,6 +15,10 @@ export default function App() {
   const [isEnterpriseModalOpen, setIsEnterpriseModalOpen] = useState(false);
   const [enterpriseModalTab, setEnterpriseModalTab] = useState<'portal' | 'studio' | 'agents' | 'admin'>('portal');
   const [selectedServiceIdForInquiry, setSelectedServiceIdForInquiry] = useState<string>('multimedia-production');
+  const [consultantOpenRequest, setConsultantOpenRequest] = useState<{
+    nonce: number;
+    initialPrompt?: string;
+  } | null>(null);
 
   // Handle smooth navigation
   const handleNavigate = (sectionId: string) => {
@@ -39,6 +43,14 @@ export default function App() {
   const handleSelectServiceForInquiry = (serviceId: string) => {
     setSelectedServiceIdForInquiry(serviceId);
     handleNavigate('contact');
+  };
+
+  // Open AI Solutions Consultant widget with an optional pre-seeded context prompt
+  const handleOpenAIConsultant = (initialPrompt?: string) => {
+    setConsultantOpenRequest({
+      nonce: Date.now(),
+      initialPrompt,
+    });
   };
 
   // Scroll listener to update activeSection
@@ -86,9 +98,10 @@ export default function App() {
           onOpenPortal={() => handleOpenEnterpriseModal('portal')}
         />
 
-        {/* 12 Dedicated Proposed Services */}
+        {/* Unified Premium Services Marketplace & Advanced Technology Solutions */}
         <ServicesSection
           onSelectServiceForInquiry={handleSelectServiceForInquiry}
+          onOpenAIConsultant={handleOpenAIConsultant}
         />
 
         {/* Portfolio & Architectural Blueprints */}
@@ -119,7 +132,7 @@ export default function App() {
       />
 
       {/* AI Solutions Consultant Floating Assistant & Booking System */}
-      <AIConsultantWidget />
+      <AIConsultantWidget externalOpenRequest={consultantOpenRequest} />
     </div>
   );
 }

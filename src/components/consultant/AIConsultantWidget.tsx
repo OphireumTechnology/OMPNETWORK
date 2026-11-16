@@ -14,10 +14,15 @@ import {
 } from '../../services/aiConsultantService';
 import { supabaseService, ProjectBrief, ConsultationAppointment } from '../../services/supabaseService';
 import { aiVoiceService, VoiceState, VoiceLanguage } from '../../services/aiVoiceService';
+import { SERVICE_CATALOG, formatCatalogPrice } from '../../data/serviceCatalog';
 import { ProjectBriefModal } from './ProjectBriefModal';
 import { AppointmentBookingModal } from './AppointmentBookingModal';
 
-export const AIConsultantWidget: React.FC = () => {
+interface AIConsultantWidgetProps {
+  externalOpenRequest?: { nonce: number; initialPrompt?: string } | null;
+}
+
+export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ externalOpenRequest }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [hasUnreadNotice, setHasUnreadNotice] = useState(true);
@@ -66,10 +71,10 @@ export const AIConsultantWidget: React.FC = () => {
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         stage: 'welcome',
         quickReplies: [
-          'Website & Web Platforms',
-          'Enterprise Software Development',
-          'AI Solutions & Automation',
-          'Multimedia & Cinema Production',
+          'Website & Digital Experiences',
+          'AI Solutions & AI Agents',
+          'Blockchain & Web3 Development',
+          'Signature Transformation Packages',
         ],
       },
     ];
@@ -78,6 +83,7 @@ export const AIConsultantWidget: React.FC = () => {
   const [inputMessage, setInputMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastProcessedNonceRef = useRef<number>(0);
 
   // Setup Voice Service Callbacks
   useEffect(() => {
@@ -178,6 +184,18 @@ export const AIConsultantWidget: React.FC = () => {
       setCurrentBrief(state.generatedBrief);
     }
   }, [state.generatedBrief]);
+
+  // Handle programmatic open requests from ServicesSection hero/cards/builder
+  useEffect(() => {
+    if (!externalOpenRequest || externalOpenRequest.nonce === lastProcessedNonceRef.current) return;
+    lastProcessedNonceRef.current = externalOpenRequest.nonce;
+    setIsOpen(true);
+    setIsMinimized(false);
+    setHasUnreadNotice(false);
+    if (externalOpenRequest.initialPrompt) {
+      void handleSendMessage(externalOpenRequest.initialPrompt);
+    }
+  }, [externalOpenRequest]);
 
   // Handle Voice Toggle
   const handleToggleVoice = async () => {
@@ -280,22 +298,23 @@ export const AIConsultantWidget: React.FC = () => {
         return;
       }
 
-      // Standard consultative pipeline
-      const { aiMessage, updatedState } = await aiConsultantService.processUserMessage(text, state, messages);
-      
-      setTimeout(() => {
-        setIsTyping(false);
-        setMessages((prev) => [...prev, aiMessage]);
-        setState(updatedState);
-        if (updatedState.generatedBrief) {
-          setCurrentBrief(updatedState.generatedBrief);
-        }
-        // If voice is active, speak the response
-        if (isVoiceActive && !isSpeakerMuted) {
-          aiVoiceService.speakText(aiMessage.text);
-        }
-      }, 700);
+      // Live consultative pipeline grounded in the full 10-category service catalog
+      const { aiMessage, updatedState } = await aiConsultantService.processUserMessage(
+        text,
+        state,
+        messages,
+        voiceLanguage
+      );
 
+      setIsTyping(false);
+      setMessages((prev) => [...prev, aiMessage]);
+      setState(updatedState);
+      if (updatedState.generatedBrief) {
+        setCurrentBrief(updatedState.generatedBrief);
+      }
+      if (isVoiceActive && !isSpeakerMuted) {
+        aiVoiceService.speakText(aiMessage.text);
+      }
     } catch (err) {
       setIsTyping(false);
       setMessages((prev) => [
@@ -337,30 +356,32 @@ export const AIConsultantWidget: React.FC = () => {
   };
 
   const handleResetConversation = () => {
-    if (confirm('Start a new consultation discovery session?')) {
-      if (isVoiceActive) {
-        aiVoiceService.stopSession();
-      }
+    if (isVoiceActive) {
+      aiVoiceService.stopSession();
+    }
+    try {
       localStorage.removeItem('opm_consultant_messages');
       localStorage.removeItem('opm_consultant_state');
-      setState(INITIAL_CONSULTATION_STATE);
-      setCurrentBrief(null);
-      setMessages([
-        {
-          id: `msg-welcome-reset-${Date.now()}`,
-          sender: 'ai',
-          text: `Consultation session reset. Welcome to OPHIREUM MULTIMEDIA PRODUCTION. How can our engineering and creative team elevate your project today?`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          stage: 'welcome',
-          quickReplies: [
-            'Website & Web Platforms',
-            'Enterprise Software Development',
-            'AI Solutions & Automation',
-            'Multimedia & Cinema Production',
-          ],
-        },
-      ]);
+    } catch {
+      // ignore storage errors
     }
+    setState(INITIAL_CONSULTATION_STATE);
+    setCurrentBrief(null);
+    setMessages([
+      {
+        id: `msg-welcome-reset-${Date.now()}`,
+        sender: 'ai',
+        text: `Consultation session reset. Welcome to OPHIREUM MULTIMEDIA PRODUCTION. Explore any of our 10 service divisions or describe your business goal to generate a tailored Project Brief.`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        stage: 'welcome',
+        quickReplies: [
+          'Website & Digital Experiences',
+          'AI Solutions & AI Agents',
+          'Blockchain & Web3 Development',
+          'Signature Transformation Packages',
+        ],
+      },
+    ]);
   };
 
   // Stage progress calculation
@@ -664,6 +685,37 @@ export const AIConsultantWidget: React.FC = () => {
                             </div>
                           )}
 
+                          {/* Recommended Catalog Service Cards */}
+                          {isAi && msg.recommendedServiceIds && msg.recommendedServiceIds.length > 0 && (
+                            <div className="mt-2.5 space-y-1.5">
+                              {msg.recommendedServiceIds
+                                .map((id) => SERVICE_CATALOG.find((s) => s.id === id))
+                                .filter((s): s is NonNullable<typeof s> => Boolean(s))
+                                .map((svc) => {
+                                  const price = formatCatalogPrice(svc, 'USD', 58);
+                                  return (
+                                    <button
+                                      key={svc.id}
+                                      type="button"
+                                      onClick={() =>
+                                        handleSendMessage(
+                                          `Tell me more about ${svc.title} (${price.primaryLabel}), what is included, and what timeline applies.`
+                                        )
+                                      }
+                                      className="w-full text-left px-3 py-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-[#00C2C7]/25 hover:border-[#00C2C7]/60 transition-colors cursor-pointer flex items-center justify-between gap-2"
+                                    >
+                                      <span className="text-[11px] font-semibold text-white truncate">
+                                        {svc.title}
+                                      </span>
+                                      <span className="text-[10px] font-mono text-[#00C2C7] shrink-0 tabular-nums">
+                                        {price.primaryLabel}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                            </div>
+                          )}
+
                           {/* Quick replies */}
                           {isAi && msg.quickReplies && msg.quickReplies.length > 0 && (
                             <div className="mt-2.5 flex flex-wrap gap-1.5">
@@ -813,6 +865,14 @@ export const AIConsultantWidget: React.FC = () => {
                       <span className="italic flex-1 truncate">"{liveTranscript}"</span>
                     </div>
                   )}
+
+                  {/* Voice Privacy Disclosure */}
+                  <div className="flex items-center gap-1.5 text-[10px] text-slate-400 leading-tight">
+                    <Shield className="w-3 h-3 text-[#00C2C7] shrink-0" />
+                    <span>
+                      Voice Disclosure: Microphone audio is used only for real-time consultation and is not permanently stored.
+                    </span>
+                  </div>
                 </div>
               ) : (
                 /* Voice Launch Callout Strip */

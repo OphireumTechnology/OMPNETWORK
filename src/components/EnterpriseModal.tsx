@@ -26,13 +26,34 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({ isOpen, onClos
   const [studioGenerating, setStudioGenerating] = useState(false);
   const [studioOutput, setStudioOutput] = useState<string | null>(null);
 
-  const loadAdminData = () => {
+  const loadAdminData = async () => {
+    let localInquiries: any[] = [];
     try {
       const stored = JSON.parse(localStorage.getItem('opm_inquiries') || '[]');
-      setRecentInquiries(stored);
-    } catch (e) {
-      setRecentInquiries([]);
+      if (Array.isArray(stored)) localInquiries = stored;
+    } catch {
+      localInquiries = [];
     }
+
+    try {
+      const res = await fetch('/api/inquiries');
+      if (res.ok) {
+        const data = await res.json();
+        const serverList = Array.isArray(data.inquiries) ? data.inquiries : [];
+        const mergedMap = new Map<string, any>();
+        for (const item of [...serverList, ...localInquiries]) {
+          if (item?.referenceId && !mergedMap.has(item.referenceId)) {
+            mergedMap.set(item.referenceId, item);
+          }
+        }
+        setRecentInquiries(Array.from(mergedMap.values()));
+      } else {
+        setRecentInquiries(localInquiries);
+      }
+    } catch {
+      setRecentInquiries(localInquiries);
+    }
+
     const appts = supabaseService.getLocalAppointments();
     setAppointments(appts);
     const briefs = supabaseService.getLocalBriefs();

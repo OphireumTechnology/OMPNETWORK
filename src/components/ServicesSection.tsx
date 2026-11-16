@@ -1,594 +1,704 @@
-import React, { useState } from 'react';
-import { servicesData } from '../data/servicesData';
-import { ServiceItem, ServiceCategory } from '../types';
-import { 
-  Film, Camera, Clapperboard, Palette, Globe, Server, 
-  Cpu, Database, LayoutGrid, Gamepad2, Radio, Terminal,
-  ArrowUpRight, Check, X, Shield, ChevronRight, Activity,
-  Lock, GitBranch, Play
+import React, { useState, useMemo, useRef } from 'react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
+import {
+  CATALOG_CATEGORIES,
+  SERVICE_CATALOG,
+  DEFAULT_USD_TO_PHP_RATE,
+  COMMERCIAL_PRICING_NOTICE,
+  EXTERNAL_CHARGES_DISCLOSURE,
+  BLOCKCHAIN_COMPLIANCE_NOTICE,
+  EMERGING_TECH_FEASIBILITY_NOTICE,
+} from '../data/serviceCatalog';
+import { CatalogCategoryId, CatalogService } from '../types';
+import { ServiceTechIcon } from './animations/ServiceTechIcon';
+import { BlockchainNetworkCanvas } from './animations/BlockchainNetworkCanvas';
+import { ServiceCard } from './services/ServiceCard';
+import { ServiceDetailModal } from './services/ServiceDetailModal';
+import { SolutionBuilderModal } from './services/SolutionBuilderModal';
+import {
+  Search,
+  X,
+  ArrowUpRight,
+  Bot,
+  Layers,
+  Shield,
+  Check,
+  Sparkles,
+  SlidersHorizontal,
 } from 'lucide-react';
-import { AIProcessingVisualizer } from './animations/AIProcessingVisualizer';
 
 interface ServicesSectionProps {
   onSelectServiceForInquiry: (serviceId: string) => void;
+  onOpenAIConsultant: (initialPrompt?: string) => void;
 }
 
-export const ServicesSection: React.FC<ServicesSectionProps> = ({ onSelectServiceForInquiry }) => {
-  const [activeCategory, setActiveCategory] = useState<ServiceCategory>('all');
-  const [selectedService, setSelectedService] = useState<ServiceItem | null>(null);
+export const ServicesSection: React.FC<ServicesSectionProps> = ({
+  onSelectServiceForInquiry,
+  onOpenAIConsultant,
+}) => {
+  const prefersReducedMotion = useReducedMotion();
+  const catalogRef = useRef<HTMLDivElement>(null);
 
-  const filteredServices = servicesData.filter((s) => {
-    if (activeCategory === 'all') return true;
-    return s.category === activeCategory;
-  });
+  const [activeCategory, setActiveCategory] = useState<CatalogCategoryId>('website-digital');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [currency, setCurrency] = useState<'USD' | 'PHP'>('USD');
+  const [phpRate, setPhpRate] = useState<number>(DEFAULT_USD_TO_PHP_RATE);
+  const [showRateEditor, setShowRateEditor] = useState(false);
 
-  const getServiceIcon = (type: ServiceItem['visualType']) => {
-    switch (type) {
-      case 'media': return <Film className="w-5 h-5 text-[#00C2C7]" />;
-      case 'camera': return <Camera className="w-5 h-5 text-[#00C2C7]" />;
-      case 'post': return <Clapperboard className="w-5 h-5 text-[#D4AF37]" />;
-      case 'design': return <Palette className="w-5 h-5 text-[#C0C7D1]" />;
-      case 'web': return <Globe className="w-5 h-5 text-[#00C2C7]" />;
-      case 'enterprise': return <Server className="w-5 h-5 text-[#00C2C7]" />;
-      case 'ai': return <Cpu className="w-5 h-5 text-[#00C2C7]" />;
-      case 'cloud': return <Database className="w-5 h-5 text-[#00C2C7]" />;
-      case 'platform': return <LayoutGrid className="w-5 h-5 text-[#C0C7D1]" />;
-      case 'game': return <Gamepad2 className="w-5 h-5 text-[#D4AF37]" />;
-      case 'broadcast': return <Radio className="w-5 h-5 text-[#00C2C7]" />;
-      case 'consulting': return <Terminal className="w-5 h-5 text-[#C0C7D1]" />;
-      default: return <Film className="w-5 h-5 text-[#00C2C7]" />;
-    }
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [detailService, setDetailService] = useState<CatalogService | null>(null);
+  const [isBuilderOpen, setIsBuilderOpen] = useState(false);
+
+  const activeCategoryMeta = useMemo(
+    () => CATALOG_CATEGORIES.find((c) => c.id === activeCategory) || CATALOG_CATEGORIES[0],
+    [activeCategory]
+  );
+
+  const filteredServices = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return SERVICE_CATALOG.filter((svc) => {
+      const matchesCategory = q ? (activeCategory === 'all' ? true : svc.categoryId === activeCategory) : activeCategory === 'all' || svc.categoryId === activeCategory;
+      if (!matchesCategory) return false;
+      if (!q) return true;
+      return (
+        svc.title.toLowerCase().includes(q) ||
+        svc.shortDescription.toLowerCase().includes(q) ||
+        svc.capabilities.some((cap) => cap.toLowerCase().includes(q))
+      );
+    });
+  }, [activeCategory, searchQuery]);
+
+  const selectedServices = useMemo(
+    () => SERVICE_CATALOG.filter((s) => selectedIds.includes(s.id)),
+    [selectedIds]
+  );
+
+  const toggleSelectService = (service: CatalogService) => {
+    setSelectedIds((prev) =>
+      prev.includes(service.id) ? prev.filter((id) => id !== service.id) : [...prev, service.id]
+    );
   };
 
-  // Distinct technological animated illustration for each individual service
-  const getVisualArtwork = (service: ServiceItem) => {
-    switch (service.visualType) {
-      case 'media':
-        // Animated camera, sensor & cinema timeline
-        return (
-          <div className="h-36 w-full rounded-xl bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 p-4 relative overflow-hidden border border-slate-800 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-[10px] font-mono text-[#00C2C7]">
-              <span>8K RAW INGEST</span>
-              <span className="flex items-center gap-1 text-[#D4AF37]"><Play className="w-2.5 h-2.5 fill-current" /> 24.000 FPS</span>
-            </div>
-            
-            {/* Animated cinema timeline track */}
-            <div className="my-2 space-y-1">
-              <div className="h-2 w-full rounded bg-slate-800 overflow-hidden flex">
-                <div className="h-full bg-[#00C2C7] w-2/5 animate-pulse" />
-                <div className="h-full bg-[#D4AF37] w-1/4" />
-                <div className="h-full bg-cyan-700 w-1/3" />
-              </div>
-              <div className="flex justify-between text-[8px] font-mono text-slate-500">
-                <span>00:00:00</span>
-                <span>00:14:28:12 (ACES CCT)</span>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
-              <span className="text-[11px] font-semibold text-white">RED & Blackmagic Cine Systems</span>
-              <div className="w-6 h-6 rounded-md bg-[#00C2C7]/15 flex items-center justify-center text-[#00C2C7]">
-                <Film className="w-3.5 h-3.5" />
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'camera':
-        // Optical sensor array & focal grid
-        return (
-          <div className="h-36 w-full rounded-xl bg-gradient-to-br from-[#111827] via-[#0B1220] to-slate-900 p-4 relative overflow-hidden border border-slate-800 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-[10px] font-mono text-[#00C2C7]">
-              <span>FULL-FRAME ACQUISITION</span>
-              <span>ISO 800 · ƒ/1.4</span>
-            </div>
-
-            {/* Focal grid viewfinder */}
-            <div className="relative h-12 w-full border border-dashed border-cyan-500/30 rounded flex items-center justify-center">
-              <div className="w-4 h-4 border border-[#00C2C7] rounded-sm flex items-center justify-center">
-                <div className="w-1 h-1 bg-[#D4AF37] rounded-full animate-ping" />
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
-              <span className="text-[11px] font-semibold text-white">Aerial & Studio Glass Arrays</span>
-              <div className="w-6 h-6 rounded-md bg-[#00C2C7]/15 flex items-center justify-center text-[#00C2C7]">
-                <Camera className="w-3.5 h-3.5" />
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'post':
-        // Color wheels & waveform monitor
-        return (
-          <div className="h-36 w-full rounded-xl bg-gradient-to-br from-slate-900 via-[#111827] to-slate-900 p-4 relative overflow-hidden border border-slate-800 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-[10px] font-mono text-[#D4AF37]">
-              <span>ACES COLOR CALIBRATION</span>
-              <span>DCI-P3 / REC.709</span>
-            </div>
-
-            {/* Tri-color waveform simulation */}
-            <div className="flex items-end gap-1 h-10 w-full pt-2">
-              {[45, 65, 30, 85, 95, 40, 70, 90, 60, 75, 50, 80, 65, 90].map((h, i) => (
-                <div
-                  key={i}
-                  className="flex-1 bg-gradient-to-t from-[#00C2C7] to-[#D4AF37] rounded-t-sm"
-                  style={{ height: `${h}%`, opacity: 0.75 }}
-                />
-              ))}
-            </div>
-
-            <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
-              <span className="text-[11px] font-semibold text-white">DaVinci Resolve Studio & Pro Tools</span>
-              <div className="w-6 h-6 rounded-md bg-[#D4AF37]/15 flex items-center justify-center text-[#D4AF37]">
-                <Clapperboard className="w-3.5 h-3.5" />
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'design':
-        // Vector grid & design tokens
-        return (
-          <div className="h-36 w-full rounded-xl bg-gradient-to-br from-[#0B1220] via-slate-900 to-[#111827] p-4 relative overflow-hidden border border-slate-800 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-[10px] font-mono text-[#C0C7D1]">
-              <span>IDENTITY TOKENS</span>
-              <span>BEZIER CURVATURE</span>
-            </div>
-
-            {/* Vector monogram bezier preview */}
-            <div className="flex items-center justify-around py-1">
-              <span className="w-7 h-7 rounded border border-cyan-400/50 flex items-center justify-center font-bold text-xs text-white">
-                O
-              </span>
-              <div className="w-8 h-0.5 bg-[#00C2C7]" />
-              <span className="w-7 h-7 rounded border border-yellow-400/50 flex items-center justify-center font-bold text-xs text-white">
-                P
-              </span>
-              <div className="w-8 h-0.5 bg-[#D4AF37]" />
-              <span className="w-7 h-7 rounded border border-slate-400/50 flex items-center justify-center font-bold text-xs text-white">
-                M
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
-              <span className="text-[11px] font-semibold text-white">Corporate Guidelines & Token Repos</span>
-              <div className="w-6 h-6 rounded-md bg-[#C0C7D1]/15 flex items-center justify-center text-[#C0C7D1]">
-                <Palette className="w-3.5 h-3.5" />
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'web':
-        // Responsive code DOM & Lighthouse meters
-        return (
-          <div className="h-36 w-full rounded-xl bg-gradient-to-br from-slate-900 via-[#0B1220] to-slate-950 p-4 relative overflow-hidden border border-slate-800 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-[10px] font-mono text-[#00C2C7]">
-              <span>REACT 19 / TAILWIND V4</span>
-              <span className="text-emerald-400">100 LIGHTHOUSE</span>
-            </div>
-
-            {/* Code lines simulation */}
-            <div className="space-y-1 font-mono text-[9px] text-slate-400">
-              <div className="text-[#00C2C7]">export const PlatformView: FC = () =&gt; &#123;</div>
-              <div className="pl-3 text-slate-300">return &lt;InteractiveExperience theme="dark" /&gt;;</div>
-              <div className="text-[#00C2C7]">&#125;;</div>
-            </div>
-
-            <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
-              <span className="text-[11px] font-semibold text-white">Semantic Web & Responsive Layouts</span>
-              <div className="w-6 h-6 rounded-md bg-[#00C2C7]/15 flex items-center justify-center text-[#00C2C7]">
-                <Globe className="w-3.5 h-3.5" />
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'enterprise':
-        // Microservices & RBAC gateway
-        return (
-          <div className="h-36 w-full rounded-xl bg-gradient-to-br from-[#111827] via-slate-900 to-[#0B1220] p-4 relative overflow-hidden border border-slate-800 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-[10px] font-mono text-[#00C2C7]">
-              <span>RBAC TENANT ISOLATION</span>
-              <span className="text-emerald-400 font-mono">JWT / MFA</span>
-            </div>
-
-            {/* Connected microservice nodes */}
-            <div className="flex items-center justify-between py-1">
-              <div className="p-1 px-2 rounded bg-slate-900 border border-slate-700 text-[10px] font-mono text-white">
-                Auth Gate
-              </div>
-              <div className="h-0.5 flex-1 bg-gradient-to-r from-[#00C2C7] to-slate-700 mx-2" />
-              <div className="p-1 px-2 rounded bg-slate-900 border border-slate-700 text-[10px] font-mono text-white">
-                Tenant DB
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
-              <span className="text-[11px] font-semibold text-white">Mission-Critical Portals & APIs</span>
-              <div className="w-6 h-6 rounded-md bg-[#00C2C7]/15 flex items-center justify-center text-[#00C2C7]">
-                <Server className="w-3.5 h-3.5" />
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'ai':
-        // Neural network & model stream
-        return (
-          <div className="h-36 w-full rounded-xl bg-gradient-to-br from-[#0B1220] via-slate-900 to-[#00C2C7]/15 p-4 relative overflow-hidden border border-slate-800 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-[10px] font-mono text-[#00C2C7]">
-              <span>AGENTIC PIPELINE</span>
-              <span className="text-[#D4AF37] font-mono">@google/genai</span>
-            </div>
-
-            {/* Neural nodes pulse */}
-            <div className="flex items-center justify-center gap-3 py-1">
-              <div className="w-2.5 h-2.5 rounded-full bg-[#00C2C7] animate-ping" />
-              <div className="w-2 h-2 rounded-full bg-slate-400" />
-              <div className="w-3 h-3 rounded-full bg-[#D4AF37] shadow-lg shadow-[#D4AF37]/50" />
-              <div className="w-2 h-2 rounded-full bg-slate-400" />
-              <div className="w-2.5 h-2.5 rounded-full bg-[#00C2C7]" />
-            </div>
-
-            <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
-              <span className="text-[11px] font-semibold text-white">12 Autonomous AI Agent Workforce</span>
-              <div className="w-6 h-6 rounded-md bg-[#00C2C7]/15 flex items-center justify-center text-[#00C2C7]">
-                <Cpu className="w-3.5 h-3.5" />
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'cloud':
-        // Server cluster & PostgreSQL schema
-        return (
-          <div className="h-36 w-full rounded-xl bg-gradient-to-br from-slate-900 via-[#111827] to-slate-950 p-4 relative overflow-hidden border border-slate-800 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-[10px] font-mono text-[#00C2C7]">
-              <span>CLOUD SQL POSTGRESQL</span>
-              <span className="text-emerald-400">99.99% SLA</span>
-            </div>
-
-            {/* Stacked database disks */}
-            <div className="space-y-1 py-1">
-              <div className="h-2 w-full rounded bg-slate-800 border border-slate-700 flex items-center px-1">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              </div>
-              <div className="h-2 w-full rounded bg-slate-800 border border-slate-700 flex items-center px-1">
-                <div className="w-1.5 h-1.5 rounded-full bg-[#00C2C7]" />
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
-              <span className="text-[11px] font-semibold text-white">Relational Data & Disaster Recovery</span>
-              <div className="w-6 h-6 rounded-md bg-[#00C2C7]/15 flex items-center justify-center text-[#00C2C7]">
-                <Database className="w-3.5 h-3.5" />
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'platform':
-        // Real-time canvas & WebSockets
-        return (
-          <div className="h-36 w-full rounded-xl bg-gradient-to-br from-slate-900 via-[#0B1220] to-[#111827] p-4 relative overflow-hidden border border-slate-800 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-[10px] font-mono text-[#C0C7D1]">
-              <span>WEBSOCKET SYNC</span>
-              <span className="text-[#00C2C7]">&lt; 15MS LATENCY</span>
-            </div>
-
-            {/* Real-time pulse bars */}
-            <div className="flex items-center gap-1 py-1">
-              <div className="h-1 flex-1 bg-[#00C2C7] rounded" />
-              <div className="h-3 w-1 bg-[#D4AF37] rounded" />
-              <div className="h-1 flex-1 bg-[#00C2C7] rounded" />
-            </div>
-
-            <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
-              <span className="text-[11px] font-semibold text-white">Collaborative Interactive Workspaces</span>
-              <div className="w-6 h-6 rounded-md bg-[#C0C7D1]/15 flex items-center justify-center text-[#C0C7D1]">
-                <LayoutGrid className="w-3.5 h-3.5" />
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'game':
-        // WebGL / Three.js spatial axes
-        return (
-          <div className="h-36 w-full rounded-xl bg-gradient-to-br from-[#0B1220] via-slate-900 to-[#D4AF37]/15 p-4 relative overflow-hidden border border-slate-800 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-[10px] font-mono text-[#D4AF37]">
-              <span>WEBGL 3D SPATIAL</span>
-              <span>60 FPS GLSL</span>
-            </div>
-
-            {/* 3D wireframe cube projection */}
-            <div className="flex items-center justify-center py-1">
-              <div className="w-8 h-8 border border-[#D4AF37] rotate-45 transform flex items-center justify-center">
-                <div className="w-4 h-4 border border-[#00C2C7]" />
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
-              <span className="text-[11px] font-semibold text-white">Three.js Spatial Graphics & Simulators</span>
-              <div className="w-6 h-6 rounded-md bg-[#D4AF37]/15 flex items-center justify-center text-[#D4AF37]">
-                <Gamepad2 className="w-3.5 h-3.5" />
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'broadcast':
-        // SRT streaming uplink & multiviewer
-        return (
-          <div className="h-36 w-full rounded-xl bg-gradient-to-br from-slate-900 via-[#111827] to-[#0B1220] p-4 relative overflow-hidden border border-slate-800 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-[10px] font-mono text-[#00C2C7]">
-              <span>SRT TRANSMISSION</span>
-              <span className="text-rose-400 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping" /> LIVE</span>
-            </div>
-
-            {/* Multicam 4-split preview */}
-            <div className="grid grid-cols-2 gap-1 py-1">
-              <div className="h-3 rounded bg-slate-800 border border-slate-700/60" />
-              <div className="h-3 rounded bg-slate-800 border border-slate-700/60" />
-            </div>
-
-            <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
-              <span className="text-[11px] font-semibold text-white">Ultra-Low Latency Cloud Syndication</span>
-              <div className="w-6 h-6 rounded-md bg-[#00C2C7]/15 flex items-center justify-center text-[#00C2C7]">
-                <Radio className="w-3.5 h-3.5" />
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'consulting':
-        // Enterprise invariant models & terminal
-        return (
-          <div className="h-36 w-full rounded-xl bg-gradient-to-br from-[#111827] via-slate-900 to-slate-950 p-4 relative overflow-hidden border border-slate-800 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-[10px] font-mono text-[#C0C7D1]">
-              <span>SYSTEM INVARIANTS</span>
-              <span>AUDIT REVIEW</span>
-            </div>
-
-            {/* Terminal prompt */}
-            <div className="p-1 px-2 rounded bg-black/80 font-mono text-[9px] text-[#00C2C7]">
-              $ ophireum audit --verify-compliance
-            </div>
-
-            <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
-              <span className="text-[11px] font-semibold text-white">Enterprise Advisory & Security Posture</span>
-              <div className="w-6 h-6 rounded-md bg-[#C0C7D1]/15 flex items-center justify-center text-[#C0C7D1]">
-                <Terminal className="w-3.5 h-3.5" />
-              </div>
-            </div>
-          </div>
-        );
+  const handleRequestProposal = (service: CatalogService) => {
+    if (!selectedIds.includes(service.id)) {
+      setSelectedIds((prev) => [...prev, service.id]);
     }
+    onSelectServiceForInquiry(service.legacyServiceId || 'enterprise-software-development');
+    setIsBuilderOpen(true);
   };
+
+  const handleConsultAIForService = (service: CatalogService) => {
+    onOpenAIConsultant(
+      `I would like to explore "${service.title}" (starting at $${service.pricing.startingUsd.toLocaleString('en-US')}) and understand how it fits our business requirements.`
+    );
+  };
+
+  const handleConsultAIWithSelection = (services: CatalogService[]) => {
+    const names = services.map((s) => s.title).join(', ');
+    onOpenAIConsultant(
+      `I selected the following solutions in Build Your Solution: ${names}. Can you help me scope the right architecture and next steps?`
+    );
+  };
+
+  const scrollToCatalog = (category?: CatalogCategoryId) => {
+    if (category) setActiveCategory(category);
+    catalogRef.current?.scrollIntoView({ behavior: prefersReducedMotion ? 'auto' : 'smooth', block: 'start' });
+  };
+
+  const oneTimeModernization = filteredServices.filter(
+    (s) => s.categoryId === 'modernization-care' && s.subcategory === 'one-time'
+  );
+  const careMemberships = filteredServices.filter(
+    (s) => s.categoryId === 'modernization-care' && s.subcategory === 'care-membership'
+  );
+  const otherServices = filteredServices.filter((s) => s.categoryId !== 'modernization-care');
+
+  const selectedOneTimeTotal = selectedServices.reduce(
+    (sum, s) => (s.pricing.model === 'subscription_monthly' ? sum : sum + s.pricing.startingUsd),
+    0
+  );
+
+  const selectedMonthlyTotal = selectedServices.reduce((sum, s) => {
+    if (s.pricing.model === 'subscription_monthly') return sum + s.pricing.startingUsd;
+    if (s.pricing.model === 'setup_plus_monthly' && s.pricing.monthlyUsd) {
+      return sum + s.pricing.monthlyUsd;
+    }
+    return sum;
+  }, 0);
 
   return (
-    <section id="services" className="py-20 lg:py-28 bg-[#0B1220] border-t border-slate-800/80 relative">
+    <section
+      id="services"
+      aria-labelledby="services-marketplace-heading"
+      className="py-20 lg:py-28 bg-[#0B1220] border-t border-slate-800/80 relative"
+    >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        
-        {/* Section Header */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-          <div className="max-w-2xl">
-            <div className="flex items-center gap-2 text-xs font-semibold text-[#00C2C7] uppercase tracking-wider mb-2">
-              <span>Proposed Service Specifications</span>
-              <span aria-hidden="true">·</span>
-              <span>12 Enterprise Disciplines</span>
-            </div>
-            <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white text-balance">
-              Full-Spectrum Creative & Technological Capabilities
-            </h2>
-            <p className="mt-3 text-sm sm:text-base text-slate-300 text-balance">
-              Each discipline is architected as an extensible production framework, administratively manageable and configured for enterprise deployment.
-            </p>
+        {/* =================================================================
+            BLOCK 1: UNIFIED SERVICES HEADER & PRIMARY ACTIONS
+            ================================================================= */}
+        <div className="max-w-4xl">
+          <div className="text-xs font-mono font-semibold text-[#00C2C7] uppercase tracking-wider mb-3">
+            OUR SERVICES &amp; ADVANCED TECHNOLOGY SOLUTIONS
           </div>
 
-          {/* Category Filter Buttons */}
-          <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-900/90 border border-slate-800 rounded-xl">
+          <h2
+            id="services-marketplace-heading"
+            className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-white leading-[1.12] text-balance"
+          >
+            Engineering the Future of Digital Innovation.
+          </h2>
+
+          <p className="mt-4 text-base sm:text-lg text-slate-200 leading-relaxed text-balance">
+            From intelligent AI ecosystems and blockchain infrastructure to enterprise software, premium digital experiences, and next-generation automation, OPHIREUM delivers sophisticated technology solutions engineered to accelerate business transformation.
+          </p>
+
+          <p className="mt-3 text-sm text-slate-400 leading-relaxed max-w-3xl">
+            We combine creative excellence, intelligent engineering, and strategic innovation to help ambitious businesses build, automate, secure, and scale their digital operations.
+          </p>
+
+          {/* Primary Actions */}
+          <div className="mt-7 flex flex-wrap items-center gap-3">
             <button
-              onClick={() => setActiveCategory('all')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
-                activeCategory === 'all'
-                  ? 'bg-[#00C2C7] text-[#0B1220] font-semibold shadow-sm'
-                  : 'text-slate-300 hover:text-white'
-              }`}
+              type="button"
+              onClick={() => scrollToCatalog('all')}
+              className="inline-flex items-center gap-2 px-5 py-3 text-xs sm:text-sm font-semibold text-[#0B1220] bg-[#00C2C7] hover:bg-[#00d6dc] rounded-lg transition-colors cursor-pointer whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00C2C7]"
             >
-              All Disciplines (12)
+              <span>Explore Our Solutions</span>
+              <ArrowUpRight className="w-4 h-4" />
             </button>
+
             <button
-              onClick={() => setActiveCategory('creative')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
-                activeCategory === 'creative'
-                  ? 'bg-[#00C2C7] text-[#0B1220] font-semibold shadow-sm'
-                  : 'text-slate-300 hover:text-white'
-              }`}
+              type="button"
+              onClick={() => setIsBuilderOpen(true)}
+              className="inline-flex items-center gap-2 px-5 py-3 text-xs sm:text-sm font-semibold text-white bg-[#111827] hover:bg-slate-800 border border-slate-700 hover:border-[#D4AF37]/60 rounded-lg transition-colors cursor-pointer whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00C2C7]"
             >
-              Creative Media
+              <Layers className="w-4 h-4 text-[#D4AF37]" />
+              <span>Request a Personalized Proposal</span>
             </button>
+
             <button
-              onClick={() => setActiveCategory('software')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
-                activeCategory === 'software'
-                  ? 'bg-[#00C2C7] text-[#0B1220] font-semibold shadow-sm'
-                  : 'text-slate-300 hover:text-white'
-              }`}
+              type="button"
+              onClick={() => onOpenAIConsultant()}
+              className="inline-flex items-center gap-2 px-5 py-3 text-xs sm:text-sm font-semibold text-[#00C2C7] hover:text-white bg-transparent hover:bg-[#00C2C7]/10 border border-[#00C2C7]/45 rounded-lg transition-colors cursor-pointer whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00C2C7]"
             >
-              Software & Cloud
-            </button>
-            <button
-              onClick={() => setActiveCategory('ai')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
-                activeCategory === 'ai'
-                  ? 'bg-[#00C2C7] text-[#0B1220] font-semibold shadow-sm'
-                  : 'text-slate-300 hover:text-white'
-              }`}
-            >
-              Artificial Intelligence
-            </button>
-            <button
-              onClick={() => setActiveCategory('interactive')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
-                activeCategory === 'interactive'
-                  ? 'bg-[#00C2C7] text-[#0B1220] font-semibold shadow-sm'
-                  : 'text-slate-300 hover:text-white'
-              }`}
-            >
-              Interactive & Broadcast
+              <Bot className="w-4 h-4" />
+              <span>Speak With Our AI Solutions Consultant</span>
             </button>
           </div>
         </div>
 
-        {/* 12 Services Grid with Unique Visualizations */}
-        <div className="mt-12 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredServices.map((service) => (
-            <div
-              key={service.id}
-              className="rounded-2xl bg-[#111827] border border-slate-800 p-6 flex flex-col justify-between hover:border-[#00C2C7]/50 transition-all group shadow-lg"
-            >
-              <div>
-                {/* Visual Artwork Tailored to Service */}
-                {getVisualArtwork(service)}
+        {/* =================================================================
+            INTERACTIVE DISCOVERY BAR: SEARCH, CURRENCY & 10 CATEGORIES
+            ================================================================= */}
+        <div ref={catalogRef} className="mt-14 space-y-5 scroll-mt-28">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-4 rounded-2xl bg-[#111827] border border-slate-800">
+            {/* Search Input */}
+            <div className="relative flex-1 max-w-xl">
+              <label htmlFor="service-catalog-search" className="sr-only">
+                Search Ophireum services and capabilities
+              </label>
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                id="service-catalog-search"
+                type="search"
+                value={searchQuery}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSearchQuery(val);
+                  if (val.trim() && activeCategory !== 'all') {
+                    setActiveCategory('all');
+                  }
+                }}
+                placeholder="Search solutions, AI agents, blockchain, industries, or prices..."
+                className="w-full pl-10 pr-9 py-2.5 rounded-xl bg-[#0B1220] border border-slate-700 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#00C2C7]"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-white cursor-pointer"
+                  aria-label="Clear search"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
 
-                <div className="mt-5 flex items-center justify-between text-xs text-slate-400">
-                  <span className="font-mono text-[#00C2C7] font-semibold">{service.number}.</span>
-                  <span className="text-[11px] uppercase tracking-wider">{service.category}</span>
-                </div>
+            {/* Currency Switcher & Build Your Solution Trigger */}
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-1 p-1 rounded-xl bg-[#0B1220] border border-slate-800 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setCurrency('USD')}
+                  aria-pressed={currency === 'USD'}
+                  className={`px-3 py-1.5 rounded-lg font-mono font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                    currency === 'USD'
+                      ? 'bg-[#00C2C7] text-[#0B1220]'
+                      : 'text-slate-300 hover:text-white'
+                  }`}
+                >
+                  USD
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCurrency('PHP')}
+                  aria-pressed={currency === 'PHP'}
+                  className={`px-3 py-1.5 rounded-lg font-mono font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                    currency === 'PHP'
+                      ? 'bg-[#00C2C7] text-[#0B1220]'
+                      : 'text-slate-300 hover:text-white'
+                  }`}
+                >
+                  USD + PHP Est.
+                </button>
+              </div>
 
-                <h3 className="mt-2 text-lg font-bold text-white group-hover:text-[#00C2C7] transition-colors">
-                  {service.title}
-                </h3>
-
-                <p className="mt-2 text-xs text-slate-300 leading-relaxed line-clamp-3">
-                  {service.tagline}
-                </p>
-
-                {/* Key Deliverables Bullet Preview */}
-                <div className="mt-4 pt-4 border-t border-slate-800/80 space-y-1.5">
-                  {service.deliverables.slice(0, 2).map((item, idx) => (
-                    <div key={idx} className="flex items-start gap-2 text-xs text-slate-400">
-                      <span className="text-[#00C2C7] mt-0.5">·</span>
-                      <span className="truncate">{item}</span>
+              {currency === 'PHP' && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowRateEditor((v) => !v)}
+                    className="px-2.5 py-2 rounded-lg bg-[#0B1220] border border-slate-700 text-[11px] font-mono text-slate-300 hover:text-white flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                    title="Configure estimated USD to PHP exchange rate"
+                  >
+                    <SlidersHorizontal className="w-3 h-3 text-[#00C2C7]" />
+                    <span>1 USD ≈ ₱{phpRate}</span>
+                  </button>
+                  {showRateEditor && (
+                    <div className="absolute right-0 mt-2 p-3 rounded-xl bg-[#111827] border border-slate-700 shadow-xl z-20 w-56 space-y-2">
+                      <label htmlFor="php-rate-input" className="block text-[11px] font-mono text-slate-300">
+                        Configurable PHP Estimate Rate
+                      </label>
+                      <input
+                        id="php-rate-input"
+                        type="number"
+                        min={40}
+                        max={80}
+                        step={0.5}
+                        value={phpRate}
+                        onChange={(e) => {
+                          const num = parseFloat(e.target.value);
+                          if (!Number.isNaN(num) && num > 0) setPhpRate(num);
+                        }}
+                        className="w-full px-2.5 py-1.5 rounded-lg bg-[#0B1220] border border-slate-700 text-xs font-mono text-white"
+                      />
+                      <p className="text-[10px] text-slate-400">
+                        PHP figures are displayed strictly as estimates alongside USD pricing.
+                      </p>
                     </div>
-                  ))}
+                  )}
                 </div>
-              </div>
+              )}
 
-              {/* Action Buttons */}
-              <div className="mt-6 pt-4 border-t border-slate-800/80 flex items-center justify-between gap-3">
-                <button
-                  onClick={() => setSelectedService(service)}
-                  className="text-xs font-semibold text-slate-300 hover:text-[#00C2C7] transition-colors flex items-center gap-1 cursor-pointer"
-                >
-                  <span>View Full Scope</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-
-                <button
-                  onClick={() => onSelectServiceForInquiry(service.id)}
-                  className="px-3.5 py-1.5 text-xs font-semibold text-[#0B1220] bg-[#00C2C7] hover:bg-[#00d6dc] rounded-md transition-colors cursor-pointer"
-                >
-                  Inquire
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-
-      </div>
-
-      {/* Service Detail Modal */}
-      {selectedService && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
-          <div className="relative max-w-2xl w-full bg-[#111827] border border-slate-700 rounded-2xl p-6 sm:p-8 max-h-[90vh] overflow-y-auto shadow-2xl">
-            
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center border border-slate-700">
-                  {getServiceIcon(selectedService.visualType)}
-                </div>
-                <div>
-                  <span className="text-xs font-mono text-[#00C2C7] font-semibold">SERVICE {selectedService.number}</span>
-                  <h3 className="text-xl font-bold text-white">{selectedService.title}</h3>
-                </div>
-              </div>
               <button
-                onClick={() => setSelectedService(null)}
-                className="p-1 text-slate-400 hover:text-white rounded-md cursor-pointer"
-                aria-label="Close modal"
+                type="button"
+                onClick={() => setIsBuilderOpen(true)}
+                className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-[#D4AF37]/45 text-xs font-semibold text-white flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap"
               >
-                <X className="w-5 h-5" />
+                <Layers className="w-3.5 h-3.5 text-[#D4AF37]" />
+                <span>Build Your Solution ({selectedIds.length})</span>
               </button>
             </div>
+          </div>
 
-            <p className="mt-4 text-sm text-slate-300 leading-relaxed">
-              {selectedService.description}
-            </p>
+          {/* 10-Category Navigation Bar + All Solutions */}
+          <nav
+            aria-label="Service categories"
+            className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2"
+          >
+            {CATALOG_CATEGORIES.map((cat) => {
+              const isActive = activeCategory === cat.id;
+              return (
+                <button
+                  key={cat.id}
+                  type="button"
+                  onClick={() => setActiveCategory(cat.id)}
+                  aria-pressed={isActive}
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00C2C7] ${
+                    isActive
+                      ? 'bg-[#131d31] border-[#00C2C7] text-white'
+                      : 'bg-[#111827] border-slate-800 text-slate-300 hover:border-slate-700 hover:text-white'
+                  }`}
+                >
+                  <ServiceTechIcon
+                    kind={cat.iconKind}
+                    size="sm"
+                    ambient={isActive}
+                    accent={cat.id === 'signature-packages' ? 'gold' : 'cyan'}
+                  />
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-mono text-slate-400">
+                      {cat.id === 'all' ? 'CATALOG' : cat.number}
+                    </div>
+                    <div className="text-xs font-semibold truncate">{cat.shortLabel}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </nav>
+        </div>
 
-            {/* If AI service is selected, show embedded AI processing visualizer */}
-            {selectedService.visualType === 'ai' && (
-              <div className="mt-4 rounded-xl bg-slate-950 border border-slate-800 overflow-hidden">
-                <AIProcessingVisualizer className="w-full h-44" />
+        {/* =================================================================
+            ACTIVE CATEGORY SHOWCASE BANNER & DIVISION SPECIALS
+            ================================================================= */}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeCategory}
+            initial={prefersReducedMotion ? { opacity: 1 } : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={prefersReducedMotion ? { opacity: 1 } : { opacity: 0, y: -6 }}
+            transition={{ duration: prefersReducedMotion ? 0 : 0.22, ease: [0.16, 1, 0.3, 1] }}
+            className="mt-10 space-y-8"
+          >
+            {/* Active Category Banner */}
+            <div
+              className={`rounded-2xl p-6 sm:p-8 border ${
+                activeCategory === 'signature-packages'
+                  ? 'bg-gradient-to-r from-[#151e30] via-[#111827] to-[#151e30] border-[#D4AF37]/45'
+                  : 'bg-[#111827] border-slate-800'
+              }`}
+            >
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+                <div className="flex items-start gap-4 max-w-3xl">
+                  <ServiceTechIcon
+                    kind={activeCategoryMeta.iconKind}
+                    size="lg"
+                    ambient={true}
+                    accent={activeCategory === 'signature-packages' ? 'gold' : 'cyan'}
+                  />
+                  <div>
+                    <div className="text-xs font-mono text-[#00C2C7] uppercase tracking-wider">
+                      {activeCategoryMeta.label}
+                    </div>
+                    <h3 className="text-xl sm:text-2xl font-bold text-white mt-1 text-balance">
+                      {activeCategoryMeta.headline}
+                    </h3>
+                    <p className="mt-2 text-xs sm:text-sm text-slate-300 leading-relaxed">
+                      {activeCategoryMeta.description}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Contextual Division Action */}
+                {activeCategory === 'ai-agents' && (
+                  <div className="shrink-0 flex flex-col items-start lg:items-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onOpenAIConsultant(
+                          'Can you walk me through OPHIREUM AI agents and help recommend the right setup for our organization?'
+                        )
+                      }
+                      className="px-4 py-2.5 rounded-lg bg-[#00C2C7] hover:bg-[#00d6dc] text-[#0B1220] text-xs font-semibold flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap"
+                    >
+                      <Bot className="w-4 h-4" />
+                      <span>Launch Live AI Solutions Demo</span>
+                    </button>
+                    <span className="text-[11px] font-mono text-slate-400">
+                      Connected to live OPHIREUM AI Solutions Consultant
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* BLOCK 5: Blockchain & Web3 Featured Network Visual, Capabilities & Compliance */}
+              {activeCategory === 'blockchain-web3' && (
+                <div className="mt-6 pt-6 border-t border-slate-800 space-y-5">
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+                    <div className="lg:col-span-6 rounded-xl bg-[#070c16] border border-slate-800 overflow-hidden">
+                      <div className="px-4 py-2 border-b border-slate-800 flex items-center justify-between text-[11px] font-mono text-slate-400">
+                        <span className="text-[#00C2C7]">Distributed Ledger Network Visualization</span>
+                        <span>Interactive Topology</span>
+                      </div>
+                      <BlockchainNetworkCanvas className="w-full h-48" nodeCount={34} interactive={true} />
+                    </div>
+
+                    <div className="lg:col-span-6 space-y-3">
+                      <div className="text-xs font-mono uppercase text-slate-400">
+                        Advanced Blockchain Capabilities
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-200">
+                        {[
+                          'Smart contracts',
+                          'Distributed ledger systems',
+                          'Blockchain API integration',
+                          'Web3 application development',
+                          'Tokenization architecture',
+                          'Blockchain-based document verification',
+                          'Digital identity & credential verification',
+                          'Supply-chain traceability',
+                          'Permissioned enterprise blockchain networks',
+                          'Tamper-evident audit trails',
+                        ].map((item) => (
+                          <div key={item} className="flex items-start gap-2">
+                            <Check className="w-3.5 h-3.5 text-[#00C2C7] shrink-0 mt-0.5" />
+                            <span>{item}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-[#0B1220] border border-[#D4AF37]/40 flex items-start gap-3 text-xs text-slate-300">
+                    <Shield className="w-4 h-4 text-[#D4AF37] shrink-0 mt-0.5" />
+                    <p className="leading-relaxed">
+                      <strong className="text-[#D4AF37]">Regulatory &amp; Security Disclosure: </strong>
+                      {BLOCKCHAIN_COMPLIANCE_NOTICE}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* BLOCK 6: Emerging Technology Feasibility Disclosure */}
+              {(activeCategory === 'enterprise-mobile' || activeCategory === 'automation-systems') && (
+                <div className="mt-5 pt-4 border-t border-slate-800 text-xs text-slate-400 flex items-start gap-2.5">
+                  <Sparkles className="w-4 h-4 text-[#00C2C7] shrink-0 mt-0.5" />
+                  <p>{EMERGING_TECH_FEASIBILITY_NOTICE}</p>
+                </div>
+              )}
+            </div>
+
+            {/* ===============================================================
+                SERVICE CARDS GRID (OR SEPARATED MODERNIZATION + CARE GRIDS)
+                =============================================================== */}
+            {filteredServices.length === 0 ? (
+              <div className="p-12 rounded-2xl bg-[#111827] border border-slate-800 text-center space-y-3">
+                <p className="text-sm font-semibold text-white">
+                  No solutions matched "{searchQuery}".
+                </p>
+                <p className="text-xs text-slate-400">
+                  Try clearing your search or ask our AI Solutions Consultant for a custom-scoped architecture recommendation.
+                </p>
+                <div className="pt-2 flex justify-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery('');
+                      setActiveCategory('all');
+                    }}
+                    className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white cursor-pointer"
+                  >
+                    Reset Filters
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onOpenAIConsultant(`I am looking for a solution related to: ${searchQuery}`)}
+                    className="px-4 py-2 rounded-lg bg-[#00C2C7] hover:bg-[#00d6dc] text-xs font-semibold text-[#0B1220] cursor-pointer"
+                  >
+                    Ask AI Consultant
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-12">
+                {/* Non-Modernization Services Grid */}
+                {otherServices.length > 0 && (
+                  <div
+                    className={`grid gap-6 ${
+                      activeCategory === 'signature-packages'
+                        ? 'grid-cols-1 md:grid-cols-2'
+                        : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
+                    }`}
+                  >
+                    {otherServices.map((service) => (
+                      <ServiceCard
+                        key={service.id}
+                        service={service}
+                        currency={currency}
+                        phpRate={phpRate}
+                        isSelected={selectedIds.includes(service.id)}
+                        onToggleSelect={toggleSelectService}
+                        onExplore={setDetailService}
+                        onRequestProposal={handleRequestProposal}
+                        onConsultAI={handleConsultAIForService}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {/* BLOCK 7: Separate One-Time Modernization Services vs Digital Care Memberships */}
+                {oneTimeModernization.length > 0 && (
+                  <div className="space-y-5">
+                    <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 pb-3 border-b border-slate-800">
+                      <div>
+                        <div className="text-xs font-mono text-[#00C2C7] uppercase">
+                          One-Time Modernization &amp; Repair Services
+                        </div>
+                        <h4 className="text-lg font-bold text-white mt-0.5">
+                          Targeted Upgrades, Restorations &amp; Security Remediation ({oneTimeModernization.length})
+                        </h4>
+                      </div>
+                      <span className="text-xs text-slate-400 font-mono">
+                        Scoped per assignment
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {oneTimeModernization.map((service) => (
+                        <ServiceCard
+                          key={service.id}
+                          service={service}
+                          currency={currency}
+                          phpRate={phpRate}
+                          isSelected={selectedIds.includes(service.id)}
+                          onToggleSelect={toggleSelectService}
+                          onExplore={setDetailService}
+                          onRequestProposal={handleRequestProposal}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {careMemberships.length > 0 && (
+                  <div className="space-y-5 pt-4">
+                    <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 pb-3 border-b border-slate-800">
+                      <div>
+                        <div className="text-xs font-mono text-[#D4AF37] uppercase">
+                          Digital Care Memberships
+                        </div>
+                        <h4 className="text-lg font-bold text-white mt-0.5">
+                          Ongoing Monthly Maintenance, Monitoring &amp; Technical Stewardship
+                        </h4>
+                      </div>
+                      <span className="text-xs text-slate-400 font-mono">
+                        Recurring monthly plans
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      {careMemberships.map((service) => (
+                        <ServiceCard
+                          key={service.id}
+                          service={service}
+                          currency={currency}
+                          phpRate={phpRate}
+                          isSelected={selectedIds.includes(service.id)}
+                          onToggleSelect={toggleSelectService}
+                          onExplore={setDetailService}
+                          onRequestProposal={handleRequestProposal}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
+          </motion.div>
+        </AnimatePresence>
 
-            <div className="mt-6 space-y-4">
-              <div>
-                <h4 className="text-xs font-mono text-slate-400 uppercase tracking-wider mb-2">Scope of Deliverables</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {selectedService.deliverables.map((item, idx) => (
-                    <div key={idx} className="flex items-start gap-2 p-2.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-300">
-                      <Check className="w-3.5 h-3.5 text-[#00C2C7] mt-0.5 shrink-0" />
-                      <span>{item}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
+        {/* =================================================================
+            BLOCK 13: PRICING & COMMERCIAL POLICY DISCLOSURE
+            ================================================================= */}
+        <div className="mt-14 p-6 rounded-2xl bg-[#111827] border border-slate-800 space-y-2.5 text-xs text-slate-300 leading-relaxed">
+          <div className="text-[11px] font-mono uppercase tracking-wider text-[#00C2C7] font-semibold">
+            Commercial Pricing &amp; Engagement Notice
+          </div>
+          <p>{COMMERCIAL_PRICING_NOTICE}</p>
+          <p className="text-slate-400">{EXTERNAL_CHARGES_DISCLOSURE}</p>
+        </div>
 
-              <div>
-                <h4 className="text-xs font-mono text-slate-400 uppercase tracking-wider mb-2">Technologies & Toolchains</h4>
-                <div className="flex flex-wrap gap-2 text-xs text-slate-300">
-                  {selectedService.technologies.map((tech, idx) => (
-                    <span key={idx} className="px-2.5 py-1 rounded bg-slate-900 border border-slate-800">
-                      {tech}
-                    </span>
-                  ))}
-                </div>
-              </div>
+        {/* =================================================================
+            FINAL DESIGN DIRECTION: CLOSING CALL TO ACTION
+            ================================================================= */}
+        <div className="mt-12 rounded-2xl bg-gradient-to-br from-[#151e30] via-[#111827] to-[#0B1220] border border-slate-700/80 p-8 sm:p-10 text-center space-y-5">
+          <h3 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight text-balance">
+            Your Vision Deserves Extraordinary Technology.
+          </h3>
+          <p className="text-sm sm:text-base text-slate-300 max-w-2xl mx-auto leading-relaxed">
+            Discover a smarter approach to digital transformation through solutions thoughtfully engineered for your business.
+          </p>
 
-              <div className="p-3.5 rounded-lg bg-slate-900/90 border border-slate-800 text-xs text-slate-400 flex items-center justify-between">
-                <span>Administrative Status:</span>
-                <span className="text-[#00C2C7] font-medium">{selectedService.status}</span>
-              </div>
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
+            <button
+              type="button"
+              onClick={() => scrollToCatalog('signature-packages')}
+              className="px-5 py-2.5 rounded-lg bg-[#00C2C7] hover:bg-[#00d6dc] text-[#0B1220] text-xs sm:text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap"
+            >
+              Explore Our Solutions
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsBuilderOpen(true)}
+              className="px-5 py-2.5 rounded-lg bg-[#D4AF37] hover:bg-[#e3be48] text-[#0B1220] text-xs sm:text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap"
+            >
+              Request a Personalized Proposal
+            </button>
+            <button
+              type="button"
+              onClick={() => onOpenAIConsultant()}
+              className="px-5 py-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-[#00C2C7]/45 text-[#00C2C7] hover:text-white text-xs sm:text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap"
+            >
+              Speak With Our AI Solutions Consultant
+            </button>
+          </div>
+
+          <div className="pt-4 border-t border-slate-800/80 text-xs text-slate-400">
+            <span className="font-bold text-white tracking-wide">OPHIREUM MULTIMEDIA PRODUCTION</span>
+            <span className="mx-2 text-slate-600" aria-hidden="true">·</span>
+            <em className="text-[#D4AF37] not-italic">Where Creative Excellence Meets Intelligent Technology.</em>
+          </div>
+        </div>
+      </div>
+
+      {/* =================================================================
+          STICKY MULTI-SERVICE SOLUTION BUILDER BAR (Avoids AI launcher overlap on mobile)
+          ================================================================= */}
+      {selectedServices.length > 0 && (
+        <div className="fixed bottom-4 left-3 right-20 sm:left-1/2 sm:-translate-x-1/2 sm:right-auto sm:w-full sm:max-w-xl z-30 bg-[#111827]/95 backdrop-blur-md border border-[#00C2C7]/60 rounded-2xl px-3.5 sm:px-4 py-2.5 sm:py-3 shadow-2xl flex items-center justify-between gap-2.5 sm:gap-3">
+          <div className="min-w-0">
+            <div className="text-xs font-bold text-white truncate">
+              {selectedServices.length} {selectedServices.length === 1 ? 'Solution' : 'Solutions'} Selected
             </div>
-
-            <div className="mt-8 pt-6 border-t border-slate-800 flex items-center justify-end gap-3">
-              <button
-                onClick={() => setSelectedService(null)}
-                className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-white cursor-pointer"
-              >
-                Close
-              </button>
-              <button
-                onClick={() => {
-                  const sId = selectedService.id;
-                  setSelectedService(null);
-                  onSelectServiceForInquiry(sId);
-                }}
-                className="px-5 py-2 text-xs font-semibold text-[#0B1220] bg-[#00C2C7] hover:bg-[#00d6dc] rounded-lg transition-colors cursor-pointer"
-              >
-                Request Quotation & Proposal
-              </button>
+            <div className="text-[11px] font-mono text-[#00C2C7] tabular-nums truncate">
+              {selectedOneTimeTotal > 0 ? `Est. $${selectedOneTimeTotal.toLocaleString('en-US')}` : 'Est. Custom'}
+              {selectedMonthlyTotal > 0 ? ` + $${selectedMonthlyTotal.toLocaleString('en-US')}/mo` : ''}
+              {currency === 'PHP' && selectedOneTimeTotal > 0
+                ? ` (≈ ₱${Math.round(selectedOneTimeTotal * phpRate).toLocaleString('en-US')})`
+                : ''}
             </div>
-
+          </div>
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setSelectedIds([])}
+              className="px-2 py-1.5 text-xs text-slate-400 hover:text-white cursor-pointer"
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsBuilderOpen(true)}
+              className="px-3 sm:px-4 py-2 rounded-lg bg-[#00C2C7] hover:bg-[#00d6dc] text-[#0B1220] text-xs font-semibold cursor-pointer whitespace-nowrap"
+            >
+              Review
+            </button>
           </div>
         </div>
       )}
+
+      {/* Modals */}
+      <ServiceDetailModal
+        service={detailService}
+        currency={currency}
+        phpRate={phpRate}
+        isSelected={detailService ? selectedIds.includes(detailService.id) : false}
+        onClose={() => setDetailService(null)}
+        onToggleSelect={toggleSelectService}
+        onRequestProposal={handleRequestProposal}
+        onConsultAI={handleConsultAIForService}
+      />
+
+      <SolutionBuilderModal
+        isOpen={isBuilderOpen}
+        selectedServices={selectedServices}
+        currency={currency}
+        phpRate={phpRate}
+        onClose={() => setIsBuilderOpen(false)}
+        onRemoveService={(id) => setSelectedIds((prev) => prev.filter((item) => item !== id))}
+        onClearAll={() => setSelectedIds([])}
+        onConsultAIWithSelection={handleConsultAIWithSelection}
+      />
     </section>
   );
 };
