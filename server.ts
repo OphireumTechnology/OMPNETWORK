@@ -1,4 +1,5 @@
 import express, { Request, Response } from 'express';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -9,7 +10,32 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+
+export function resolveListenPort(rawPort?: string): number {
+  if (!rawPort) return 3000;
+  const trimmed = rawPort.trim();
+  if (!/^\d+$/.test(trimmed)) return 3000;
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+    return 3000;
+  }
+  return parsed;
+}
+
+const PORT = resolveListenPort(process.env.PORT);
+
+function resolveDistDirectory(): string | null {
+  const candidates = [
+    path.resolve(__dirname, 'dist'),
+    path.resolve(process.cwd(), 'dist'),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(path.join(candidate, 'index.html'))) {
+      return candidate;
+    }
+  }
+  return null;
+}
 
 async function startServer() {
   const { app, db, emailService } = createApp();
@@ -22,14 +48,32 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.resolve(__dirname, 'dist')));
-    app.get('*', (req: Request, res: Response) => {
-      if (req.path.startsWith('/api')) {
-        res.status(404).json({ success: false, error: 'API endpoint not found' });
-        return;
-      }
-      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
-    });
+    const distDir = resolveDistDirectory();
+    if (distDir) {
+      app.use(express.static(distDir));
+      app.get('*', (req: Request, res: Response) => {
+        if (req.path.startsWith('/api')) {
+          res.status(404).json({ success: false, error: 'API endpoint not found' });
+          return;
+        }
+        res.sendFile(path.join(distDir, 'index.html'));
+      });
+    } else {
+      // API-only production deployment (e.g., Railway backend serving GitHub Pages frontend)
+      app.get('/', (_req: Request, res: Response) => {
+        res.status(200).json({
+          success: true,
+          service: 'OPHIREUM NETWORK API Gateway',
+          healthEndpoint: '/api/health',
+        });
+      });
+      app.use((req: Request, res: Response) => {
+        res.status(404).json({
+          success: false,
+          error: req.path.startsWith('/api') ? 'API endpoint not found' : 'Not found on API host',
+        });
+      });
+    }
   }
 
   // Periodic background email outbox retry worker (only when both DB & email provider are configured)
@@ -52,7 +96,14 @@ async function startServer() {
   });
 }
 
-startServer().catch((err) => {
-  logStructured('error', 'server_boot_failed', { error: err?.message || String(err) });
-  process.exit(1);
-});
+// Guard auto-start when imported by unit tests
+const isDirectExecution =
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === path.resolve(__filename);
+
+if (isDirectExecution) {
+  startServer().catch((err) => {
+    logStructured('error', 'server_boot_failed', { error: err?.message || String(err) });
+    process.exit(1);
+  });
+}

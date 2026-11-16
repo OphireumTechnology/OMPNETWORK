@@ -57,10 +57,17 @@ jobs:
 
       - name: Build website
         env:
-          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || 'https://api.ophireummultimedia.com' }}
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
         run: npm run build
+
+      - name: Verify no server secrets leaked into frontend bundle
+        run: |
+          if grep -rnE "SUPABASE_SERVICE_ROLE_KEY|ADMIN_BOOTSTRAP_PASSWORD|ADMIN_SESSION_SECRET|RESEND_API_KEY|GOOGLE_SERVICE_ACCOUNT" dist/; then
+            echo "ERROR: Server secret identifier detected in built frontend bundle!"
+            exit 1
+          fi
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

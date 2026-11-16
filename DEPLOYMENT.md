@@ -22,13 +22,20 @@ Before deploying application traffic:
    ```
 3. Verify no public `USING (true)` policies remain on `client_profiles`, `ai_conversation_sessions`, `solution_requests`, or `consultation_appointments`.
 
-## 3. CORS & API Routing Configuration
+## 3. Railway Backend Connection, DNS/TLS & CORS Configuration
 
-- In GitHub Pages CI builds, pass `VITE_API_BASE_URL=https://api.ophireummultimedia.com` so browser requests target the external Express backend instead of failing against static GitHub Pages routes.
-- On the Node API server, set:
-  ```
-  ALLOWED_ORIGINS=https://ophireummultimedia.com,https://www.ophireummultimedia.com
-  ```
+- **GitHub Pages Build (`VITE_API_BASE_URL`)**:
+  - Local development leaves `VITE_API_BASE_URL` unset so all browser requests use same-origin `/api/*` routes on port `3000`.
+  - GitHub Pages builds pass `VITE_API_BASE_URL` (defaulting to `https://api.ophireummultimedia.com` on authorized GitHub Pages hostnames).
+- **Porkbun DNS & Railway Custom Domain Cutover**:
+  - Verify `api.ophireummultimedia.com` CNAME points to your Railway service's assigned `*.up.railway.app` target (not `uixie.porkbun.com` / Porkbun parking proxy) and confirm TLS is active.
+  - Verify live backend readiness via `curl -i https://api.ophireummultimedia.com/api/health` returning HTTP `200` with `dependencies.database.connected === true`.
+- **Backend CORS & Railway `PORT`**:
+  - Express binds `0.0.0.0:${PORT}` using Railway's injected `PORT` env variable (`resolveListenPort`).
+  - On Railway, set:
+    ```
+    ALLOWED_ORIGINS=https://ophireummultimedia.com,https://www.ophireummultimedia.com,https://ophireumtechnology.github.io
+    ```
 
 ## 4. Health & Readiness Verification
 

@@ -123,6 +123,7 @@ export function createApp(deps: AppDependencies = {}): {
 } {
   const app = express();
   app.disable('x-powered-by');
+  app.set('trust proxy', 1);
 
   const db = deps.db || new SupabaseDatabaseRepository();
   const emailService = new TransactionalEmailService(
@@ -160,9 +161,24 @@ export function createApp(deps: AppDependencies = {}): {
   // -----------------------------------------------------------------------
   // 1. SECURITY HEADERS, CORRELATION ID & CORS MIDDLEWARE
   // -----------------------------------------------------------------------
+  const railwayDomainOrigin = process.env.RAILWAY_PUBLIC_DOMAIN
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN.trim().replace(/^https?:\/\//, '').replace(/\/$/, '')}`
+    : '';
+
   const configuredOrigins = (
     process.env.ALLOWED_ORIGINS ||
-    'https://ophireummultimedia.com,https://www.ophireummultimedia.com,http://localhost:3000,http://127.0.0.1:3000'
+    [
+      'https://ophireummultimedia.com',
+      'https://www.ophireummultimedia.com',
+      'https://ophireumtechnology.github.io',
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      'http://localhost:5173',
+      'http://127.0.0.1:5173',
+      railwayDomainOrigin,
+    ]
+      .filter(Boolean)
+      .join(',')
   )
     .split(',')
     .map((o) => o.trim().replace(/\/$/, ''))
@@ -182,36 +198,34 @@ export function createApp(deps: AppDependencies = {}): {
       res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
     }
 
-    // Explicit CORS Allowlist on API routes
+    // Explicit CORS Allowlist on API & health routes
     const origin = req.headers.origin;
-    if (origin) {
+    const isCorsTarget = req.path.startsWith('/api') || req.path === '/health';
+    if (origin && isCorsTarget) {
+      res.setHeader('Vary', 'Origin');
       const cleanOrigin = origin.replace(/\/$/, '');
       const isAllowed =
         configuredOrigins.includes(cleanOrigin) ||
-        cleanOrigin.endsWith('.run.app') ||
-        cleanOrigin.endsWith('.github.io');
+        cleanOrigin.endsWith('.run.app');
 
-      if (req.path.startsWith('/api')) {
-        if (!isAllowed) {
-          logStructured('warn', 'cors_origin_blocked', {
-            correlationId,
-            origin: cleanOrigin,
-            path: req.path,
-          });
-          if (req.method === 'OPTIONS') {
-            res.status(403).json({ success: false, error: 'Origin not allowed by CORS policy.' });
-            return;
-          }
-        } else {
-          res.setHeader('Access-Control-Allow-Origin', origin);
-          res.setHeader('Vary', 'Origin');
-          res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
-          res.setHeader(
-            'Access-Control-Allow-Headers',
-            'Content-Type, Authorization, Idempotency-Key, X-Request-Id'
-          );
-          res.setHeader('Access-Control-Max-Age', '600');
+      if (!isAllowed) {
+        logStructured('warn', 'cors_origin_blocked', {
+          correlationId,
+          origin: cleanOrigin,
+          path: req.path,
+        });
+        if (req.method === 'OPTIONS') {
+          res.status(403).json({ success: false, error: 'Origin not allowed by CORS policy.' });
+          return;
         }
+      } else {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
+        res.setHeader(
+          'Access-Control-Allow-Headers',
+          'Content-Type, Authorization, Idempotency-Key, X-Request-Id'
+        );
+        res.setHeader('Access-Control-Max-Age', '600');
       }
     }
 
@@ -250,7 +264,7 @@ export function createApp(deps: AppDependencies = {}): {
   // -----------------------------------------------------------------------
   // 2. HEALTH & CATALOG ENDPOINTS
   // -----------------------------------------------------------------------
-  app.get('/api/health', async (req: Request & { correlationId?: string }, res: Response) => {
+  const healthHandler = async (req: Request & { correlationId?: string }, res: Response) => {
     const dbPing = await db.ping();
     const overallStatus = dbPing.ok ? 'healthy' : 'degraded_unconfigured';
 
@@ -287,7 +301,10 @@ export function createApp(deps: AppDependencies = {}): {
       catalogCount: SERVICE_CATALOG.length,
       categoryCount: CATALOG_CATEGORIES.filter((c) => c.id !== 'all').length,
     });
-  });
+  };
+
+  app.get('/api/health', healthHandler);
+  app.get('/health', healthHandler);
 
   app.get('/api/catalog', (_req: Request, res: Response) => {
     res.json({
