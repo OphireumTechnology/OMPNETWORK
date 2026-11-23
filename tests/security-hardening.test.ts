@@ -1,4 +1,5 @@
 import test from 'node:test';
+import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 import { AdminAuthService } from '../src/server/auth';
 import type { DatabaseRepository, AdminUserRecord } from '../src/server/db/types';
@@ -52,7 +53,6 @@ test('malformed and expired session claims are rejected', () => {
   const expiredPayload = Buffer.from(JSON.stringify({
     sub: activeAdmin.id, email: activeAdmin.email, role: 'admin', exp: 1,
   })).toString('base64url');
-  const crypto = require('node:crypto');
   const signature = crypto.createHmac('sha256', 'test-secret').update(expiredPayload).digest('base64url');
   assert.equal(service.verifySessionToken(`${expiredPayload}.${signature}`), null);
 });
