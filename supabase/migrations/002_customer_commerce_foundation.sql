@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS public.customer_orders (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_client_profiles_auth_user
-  ON public.client_profiles(auth_user_id) WHERE auth_user_id IS NOT NULL;
+  ON public.client_profiles(auth_user_id);
 
 ALTER TABLE public.client_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.customer_orders ENABLE ROW LEVEL SECURITY;
