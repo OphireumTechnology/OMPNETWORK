@@ -1,50 +1,67 @@
 # OMPNETWORK — Engineering Gap Register and Remediation Plan
 
 Date: 2026-11-23
-Baseline: `main` at `e9df3b940b1c8176d894577a7a6ad51c7a147f55`
+Source baseline: `main` at `e9df3b940b1c8176d894577a7a6ad51c7a147f55`
 
-## Scope and status
+## Applied in security repair PR #5
 
-This document records source-level findings and required verification. It does not certify the application, prove production deployment health, or imply that external services have been configured.
+- Signed admin sessions are bound to current active principal ID, normalized email and role.
+- Malformed and expired session claims are rejected.
+- Rate-limit identity no longer reads the raw first `X-Forwarded-For` value.
+- In-process rate-limiter key growth is bounded.
+- Focused authentication regression tests were added and the latest PR CI passed.
+- Legacy public session/appointment read-policy revocation migration from PR #2 is included for review; it has not been applied to any database.
+- Deployment documentation no longer recommends email-only super-admin promotion.
 
-## Findings requiring remediation
+## Pending source/release review
 
-| Priority | Finding | Required action | Verification |
-|---|---|---|---|
-| P0 | Signed admin sessions must bind subject, email, role and active status to the current admin record | Enforce principal claim matching | Security regression tests |
-| P1 | Rate-limit identity must not trust arbitrary forwarded headers | Derive IP from Express trusted proxy configuration | Proxy integration test |
-| P1 | In-memory rate limiter is process-local and unsuitable for multi-instance enforcement | Move enforcement to shared Redis/managed gateway before scaling | Multi-instance rate-limit test |
-| P1 | Public repository contains company and registration certificate imagery | Confirm authority to publish; remove sensitive registration data from public assets if not explicitly approved | Owner/legal review |
-| P1 | Deployment documentation contains a SQL snippet that promotes a known email to super-admin | Replace with controlled, one-time admin provisioning requiring identity binding and independent approval | Migration/provisioning review |
-| P1 | Appointment creation must be atomic and calendar-confirmed | Use backend transaction/unique constraint and real calendar provider; fail closed | Concurrency and calendar integration tests |
-| P1 | Existing booking/session RLS fixes are in unmerged PR #2 | Review schema and migration against the actual database before merge | Database policy inspection |
-| P1 | Principal binding fix exists in unmerged PR #3 | Integrate and test | Auth regression tests |
-| P2 | AI consultant can synthesize a project brief using placeholder identities when client data is incomplete | Label output as a draft and require explicit user data before creating a client-ready brief | UX and service tests |
-| P2 | Dependency and lockfile governance needs verification | Select one package manager and keep lockfile/CI commands consistent | Clean install and dependency scan |
-| P2 | Backend readiness must be checked against live database/email/calendar dependencies | Run authenticated operational readiness checks from deployed environment | Production smoke test |
+| Priority | Finding | Required action |
+|---|---|---|
+| P0 | PR #2 was created from an older base and is not mergeable | Do not merge wholesale. Its legacy frontend changes are superseded by newer main code using backend inquiry and appointment APIs. Review only the RLS migration carried into PR #5. |
+| P1 | PR #3 duplicates admin principal binding | Superseded by the stronger tested implementation in PR #5; close only after the consolidated PR is accepted. |
+| P1 | In-memory rate limiter remains process-local | Use shared Redis or gateway-level limits before multi-replica deployment. |
+| P1 | Existing production database policy state is unknown | Connect the dedicated OMPNETWORK Supabase project, inspect migration history/policies, back up, apply reviewed migration and run advisors. |
+| P1 | Deployment documentation previously included email-only super-admin promotion | Replaced with verified Auth UUID provisioning and separate approval for elevation. |
+| P1 | Production hosting project is not visible in the connected Railway account | Connect the correct Railway workspace/project. Do not touch the visible TaxGuard service. |
+| P1 | Production backend endpoint and DNS/TLS could not be verified | Verify from the actual OMPNETWORK Railway service after access is connected. |
+| P1 | Production email and calendar delivery remain unverified | Use synthetic test mailbox and dedicated test calendar after connecting the correct service. |
+| P1 | Public registration certificate imagery requires owner/legal review | Confirm publication authority and redact personal/confidential fields if needed. |
+| P2 | Project brief fallback content may contain assumed placeholder details | Ensure generated output is clearly marked draft and requires customer verification. |
+| P2 | Dependency/lockfile governance | Standardize package manager and lockfile; run dependency and supply-chain scans. |
+| P2 | Independent security assessment | Complete SAST, DAST, penetration testing and backup restoration exercise. |
 
-## Applied in this branch
+## PR consolidation decisions
 
-- Bind signed administrator session subject, normalized email and role to the currently active administrator record.
-- Reject malformed or expired session claims.
-- Bound in-memory rate-limiter key growth.
-- Derive rate-limit client address from Express's configured trusted-proxy boundary, not a raw forwarded header.
-- Add focused security regression tests.
+- PR #5 is the consolidation target for tested session hardening, rate-limit changes and security documentation.
+- PR #3 is duplicate session-auth work and should not be merged separately.
+- PR #2 must not be merged wholesale: it is based on an older main commit and includes older UI behavior that disables online appointment booking. The current main code has a newer server-side availability/booking API. Its narrowly scoped legacy RLS migration is carried separately for review.
+- PR #4 is an IP/provenance inventory and is outside this security consolidation.
+
+## Production verification status
+
+Read-only inspection of connected infrastructure found:
+- Railway exposes one production project named `jubilant-magic`, with one service named `taxguard`, sourced from `OphireumTechnology/taxguard`.
+- That Railway service is not OMPNETWORK and has a different custom domain.
+- Supabase exposes one healthy project named `TaxGuard`; no dedicated OMPNETWORK database is visible in the connected account.
+- GitHub Pages deployment workflow last succeeded on the `main` branch on 2026-11-16. The repair branch CI passed, but it has not been deployed.
+- Direct HTTP checks of the documented OMPNETWORK public endpoints were not available through the connected web retrieval path.
+
+Therefore no claim is made that OMPNETWORK production database, API, email, calendar, DNS or TLS has passed verification. No Railway variables, Supabase records/policies, DNS, live deployments or customer data were changed.
 
 ## Required before production
 
-1. Integrate and review open security PRs #2 and #3 without bypassing their database migration review.
-2. Verify stable `ADMIN_SESSION_SECRET` in production and rotate it through the approved secret manager.
-3. Remove email-only bootstrap super-admin promotion; provision administrators with verified identity binding and one-time authorization.
-4. Establish a shared rate limiter or gateway-enforced limits before running more than one backend instance.
-5. Review public assets for personal information and certificates; do not publish sensitive registration documents without explicit approval.
-6. Verify Supabase RLS against the deployed database, not only schema files.
-7. Verify actual Resend, Google Calendar and Gemini configuration without exposing secrets.
-8. Run clean lockfile install, typecheck, unit/integration/security tests, frontend build and server bundle build.
-9. Run SAST, dependency scanning, secret scanning, DAST and independent penetration testing.
-10. Complete production browser tests, health/readiness tests, backup restoration and rollback exercise.
-11. Review legal, privacy and third-party service terms before production.
+1. Connect the correct OMPNETWORK Railway project and dedicated Supabase project.
+2. Verify exact project/service IDs and production domains.
+3. Inspect database migrations, policies and RLS on the correct database.
+4. Take and verify a restorable backup before applying the included migration.
+5. Run Supabase security/performance advisors and verify the resulting policies.
+6. Verify stable admin session secret and eliminate any unsafe bootstrap identity fallback.
+7. Configure and verify shared rate limiting before horizontal scaling.
+8. Verify Resend, Google Calendar and Gemini integrations with controlled test resources.
+9. Run CI, SAST, dependency/secret scans, DAST and independent penetration tests.
+10. Verify GitHub Pages, backend health, CORS, DNS/TLS, logs and rollback path.
+11. Complete production browser testing and a documented release approval.
 
-## Important operational limitations
+## Change safety
 
-GitHub source changes cannot by themselves verify Railway, Supabase, DNS, email delivery, Calendar, or the live website. No production database, credentials, DNS records, provider settings or user data were changed as part of this remediation branch.
+The security repair branch and PR are isolated from `main`. No production database, Railway configuration, DNS record, provider credential, live deployment or customer record was changed.
