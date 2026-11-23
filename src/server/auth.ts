@@ -17,12 +17,12 @@ interface SessionTokenPayload {
 
 export class AdminAuthService {
   private readonly sessionSecret: string;
+  private readonly sessionSecretIsStable: boolean;
 
   constructor(private readonly db: DatabaseRepository, sessionSecret?: string) {
-    this.sessionSecret =
-      sessionSecret ||
-      process.env.ADMIN_SESSION_SECRET ||
-      crypto.randomBytes(32).toString('hex');
+    const configuredSecret = sessionSecret || process.env.ADMIN_SESSION_SECRET;
+    this.sessionSecretIsStable = Boolean(configuredSecret && configuredSecret.trim().length >= 32);
+    this.sessionSecret = configuredSecret || crypto.randomBytes(32).toString('hex');
   }
 
   public isBootstrapLoginConfigured(): boolean {
@@ -32,7 +32,9 @@ export class AdminAuthService {
   }
 
   public isSessionSecretConfigured(): boolean {
-    return Boolean((process.env.ADMIN_SESSION_SECRET || '').trim() || this.sessionSecret);
+    // The generated fallback is intentionally ephemeral for local development.
+    // Production must supply a stable secret so sessions survive restarts safely.
+    return this.sessionSecretIsStable;
   }
 
   public issueSessionToken(admin: AdminUserRecord, ttlSeconds = 3600): string {
