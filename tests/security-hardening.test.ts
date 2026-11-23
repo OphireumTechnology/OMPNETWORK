@@ -56,3 +56,21 @@ test('malformed and expired session claims are rejected', () => {
   const signature = crypto.createHmac('sha256', 'test-secret').update(expiredPayload).digest('base64url');
   assert.equal(service.verifySessionToken(`${expiredPayload}.${signature}`), null);
 });
+
+
+test('ephemeral fallback session secret is not reported as production-configured', () => {
+  const previous = process.env.ADMIN_SESSION_SECRET;
+  delete process.env.ADMIN_SESSION_SECRET;
+  try {
+    const service = new AdminAuthService(fakeDb(null));
+    assert.equal(service.isSessionSecretConfigured(), false);
+  } finally {
+    if (previous === undefined) delete process.env.ADMIN_SESSION_SECRET;
+    else process.env.ADMIN_SESSION_SECRET = previous;
+  }
+});
+
+test('explicit stable session secret is reported as configured', () => {
+  const service = new AdminAuthService(fakeDb(null), '0123456789abcdef0123456789abcdef');
+  assert.equal(service.isSessionSecretConfigured(), true);
+});
