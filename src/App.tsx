@@ -9,10 +9,12 @@ import { ContactSection } from './components/ContactSection';
 import { EnterpriseModal } from './components/EnterpriseModal';
 import { AIConsultantWidget } from './components/consultant/AIConsultantWidget';
 import { Footer } from './components/Footer';
+import { CustomerCommercePortal } from './components/CustomerCommercePortal';
 
 export default function App() {
   const [activeSection, setActiveSection] = useState('hero');
   const [isEnterpriseModalOpen, setIsEnterpriseModalOpen] = useState(false);
+  const [isCustomerCenterOpen, setIsCustomerCenterOpen] = useState(false);
   const [enterpriseModalTab, setEnterpriseModalTab] = useState<'portal' | 'studio' | 'agents' | 'admin'>('portal');
   const [selectedServiceIdForInquiry, setSelectedServiceIdForInquiry] = useState<string>('multimedia-production');
   const [consultantOpenRequest, setConsultantOpenRequest] = useState<{
@@ -81,6 +83,7 @@ export default function App() {
       {/* Sticky Top Bar Contract */}
       <Header
         onOpenPortal={() => handleOpenEnterpriseModal('portal')}
+        onOpenCustomerCenter={() => setIsCustomerCenterOpen(true)}
         onNavigate={handleNavigate}
         activeSection={activeSection}
       />
@@ -124,6 +127,8 @@ export default function App() {
         onClose={() => setIsEnterpriseModalOpen(false)}
         defaultTab={enterpriseModalTab}
       />
+
+      <CustomerCommercePortal isOpen={isCustomerCenterOpen} onClose={() => setIsCustomerCenterOpen(false)} />
 
       {/* Corporate Footer */}
       <Footer

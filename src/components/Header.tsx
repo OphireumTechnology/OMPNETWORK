@@ -4,11 +4,12 @@ import { COMPANY_CONFIG } from '../data/companyConfig';
 
 interface HeaderProps {
   onOpenPortal: () => void;
+  onOpenCustomerCenter: () => void;
   onNavigate: (sectionId: string) => void;
   activeSection: string;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onOpenPortal, onNavigate, activeSection }) => {
+export const Header: React.FC<HeaderProps> = ({ onOpenPortal, onOpenCustomerCenter, onNavigate, activeSection }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const navItems = [
@@ -114,6 +115,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenPortal, onNavigate, active
 
         {/* Zone 3: Primary Action Buttons (aligned vertically) */}
         <div className="hidden sm:flex items-center gap-3 shrink-0">
+          <button onClick={onOpenCustomerCenter} className="flex items-center gap-2 px-3.5 py-2.5 text-[12.5px] font-semibold text-[#00C2C7] hover:text-white border border-[#00C2C7]/50 rounded-lg transition-all bg-[#111827]/80 whitespace-nowrap cursor-pointer hover:bg-slate-800"><span>Customer Account</span></button>
           <button
             onClick={onOpenPortal}
             className="flex items-center gap-2 px-3.5 py-2.5 text-[12.5px] font-semibold text-slate-200 hover:text-white border border-slate-700/80 hover:border-[#00C2C7]/50 rounded-lg transition-all bg-[#111827]/80 whitespace-nowrap cursor-pointer hover:bg-slate-800"
@@ -180,6 +182,15 @@ export const Header: React.FC<HeaderProps> = ({ onOpenPortal, onNavigate, active
           </div>
 
           <div className="pt-3 border-t border-slate-800 flex flex-col gap-2.5">
+            <button
+              onClick={() => {
+                setMobileMenuOpen(false);
+                onOpenCustomerCenter();
+              }}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-[#00C2C7] border border-[#00C2C7]/50 rounded-lg hover:bg-slate-900"
+            >
+              <span>Customer Account / Checkout</span>
+            </button>
             <button
               onClick={() => {
                 setMobileMenuOpen(false);
