@@ -34,7 +34,7 @@ LANGUAGE SQL
 STABLE
 SECURITY DEFINER
 SET search_path = public
-AS $
+AS $fn$
   SELECT auth.uid() IS NOT NULL
     AND EXISTS (
       SELECT 1
@@ -42,7 +42,7 @@ AS $
       WHERE au.is_active = TRUE
         AND au.auth_user_id = auth.uid()
     );
-$;
+$fn$;
 
 -- The helper is callable by authenticated users for RLS evaluation only.
 -- It grants no row access by itself; each table's RLS policy remains authoritative.
