@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { AdminAuthService } from '../src/server/auth';
+import { SupabaseDatabaseRepository } from '../src/server/db/supabaseRepository';
 import type { DatabaseRepository, AdminUserRecord } from '../src/server/db/types';
 
 const activeAdmin: AdminUserRecord = {
@@ -177,4 +178,71 @@ test('schema and forward migration authorize RLS administrators by Auth UUID onl
   }
   assert.ok(forwardMigration.includes('REVOKE ALL ON FUNCTION public.is_ophireum_admin() FROM PUBLIC'));
   assert.ok(forwardMigration.includes('GRANT EXECUTE ON FUNCTION public.is_ophireum_admin() TO authenticated, service_role'));
+});
+
+
+test('Supabase repository filters administrator rows by exact Auth UUID and normalized email', async () => {
+  const repository = new SupabaseDatabaseRepository(
+    'https://example.supabase.co',
+    'test-service-role-key'
+  );
+  const filters: Array<[string, unknown]> = [];
+  const query = {
+    select() { return this; },
+    eq(column: string, value: unknown) { filters.push([column, value]); return this; },
+    async maybeSingle() {
+      return {
+        data: {
+          id: 'admin-row-1',
+          auth_user_id: 'auth-uuid-verified',
+          email: 'admin@example.com',
+          full_name: 'Test Admin',
+          role: 'admin',
+          is_active: true,
+        },
+        error: null,
+      };
+    },
+  };
+  (repository as any).client = { from: (table: string) => {
+    assert.equal(table, 'admin_users');
+    return query;
+  } };
+
+  const result = await repository.findActiveAdminByEmail(' ADMIN@example.com ', 'auth-uuid-verified');
+  assert.equal(result?.authUserId, 'auth-uuid-verified');
+  assert.deepEqual(filters, [
+    ['is_active', true],
+    ['auth_user_id', 'auth-uuid-verified'],
+    ['email', 'admin@example.com'],
+  ]);
+});
+
+test('server email allowlist cannot satisfy a Supabase Auth UUID lookup', async () => {
+  const previousAllowlist = process.env.ADMIN_ALLOWLIST_EMAILS;
+  const previousBootstrapEmail = process.env.ADMIN_BOOTSTRAP_EMAIL;
+  const previousUrl = process.env.SUPABASE_URL;
+  const previousViteUrl = process.env.VITE_SUPABASE_URL;
+  const previousKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  try {
+    process.env.ADMIN_ALLOWLIST_EMAILS = 'admin@example.com';
+    process.env.ADMIN_BOOTSTRAP_EMAIL = 'admin@example.com';
+    delete process.env.SUPABASE_URL;
+    delete process.env.VITE_SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const repository = new SupabaseDatabaseRepository();
+    const result = await repository.findActiveAdminByEmail('admin@example.com', 'auth-uuid-verified');
+    assert.equal(result, null);
+  } finally {
+    if (previousAllowlist === undefined) delete process.env.ADMIN_ALLOWLIST_EMAILS;
+    else process.env.ADMIN_ALLOWLIST_EMAILS = previousAllowlist;
+    if (previousBootstrapEmail === undefined) delete process.env.ADMIN_BOOTSTRAP_EMAIL;
+    else process.env.ADMIN_BOOTSTRAP_EMAIL = previousBootstrapEmail;
+    if (previousUrl === undefined) delete process.env.SUPABASE_URL;
+    else process.env.SUPABASE_URL = previousUrl;
+    if (previousViteUrl === undefined) delete process.env.VITE_SUPABASE_URL;
+    else process.env.VITE_SUPABASE_URL = previousViteUrl;
+    if (previousKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = previousKey;
+  }
 });
