@@ -55,6 +55,7 @@ function createBackingStore(): BackingStore {
     admins: [
       {
         id: 'adm-1',
+        authUserId: 'uid-admin',
         email: 'admin@ophireum.com',
         fullName: 'Dhenze Languisan',
         role: 'super_admin',
@@ -302,10 +303,14 @@ class TestDatabaseRepository implements DatabaseRepository {
     };
   }
 
-  async findActiveAdminByEmail(email: string): Promise<AdminUserRecord | null> {
+  async findActiveAdminByEmail(email: string, authUserId?: string): Promise<AdminUserRecord | null> {
     return (
-      this.store.admins.find((a) => a.isActive && a.email.toLowerCase() === email.toLowerCase()) ||
-      null
+      this.store.admins.find(
+        (a) =>
+          a.isActive &&
+          a.email.toLowerCase() === email.toLowerCase() &&
+          (!authUserId || a.authUserId === authUserId)
+      ) || null
     );
   }
 
