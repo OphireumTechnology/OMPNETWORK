@@ -317,6 +317,7 @@ export function createApp(deps: AppDependencies = {}): {
         },
         adminAuth: {
           bootstrapConfigured: authService.isBootstrapLoginConfigured(),
+          sessionSecretConfigured: authService.isSessionSecretConfigured(),
           supabaseConfigured: dbPing.configured,
         },
       },
@@ -363,6 +364,15 @@ export function createApp(deps: AppDependencies = {}): {
       res.status(400).json({
         success: false,
         error: 'Administrator email and password are required.',
+      });
+      return;
+    }
+
+    if (!authService.isSessionSecretConfigured()) {
+      res.status(503).json({
+        success: false,
+        code: 'SESSION_SECRET_NOT_CONFIGURED',
+        error: 'A stable ADMIN_SESSION_SECRET of at least 32 characters must be configured on the server.',
       });
       return;
     }
