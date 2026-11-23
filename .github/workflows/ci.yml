@@ -10,8 +10,10 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout source
+      - name: Checkout source with full history for secret scanning
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js 22
         uses: actions/setup-node@v4
@@ -22,8 +24,19 @@ jobs:
       - name: Install dependencies cleanly from lockfile
         run: npm ci --no-audit --no-fund
 
+      - name: Audit all direct and transitive npm dependencies
+        run: npm audit --audit-level=low
+
+      - name: Scan repository history for exposed secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: TypeScript typecheck & lint
         run: npm run lint
+
+      - name: Check first-party source copyright headers
+        run: npm run check:copyright
 
       - name: Run unit, integration & security regression suite
         run: npm test
