@@ -570,7 +570,7 @@ export class SupabaseDatabaseRepository implements DatabaseRepository {
 
   async findActiveAdminByEmail(email: string, authUserId?: string): Promise<AdminUserRecord | null> {
     const normalized = email.trim().toLowerCase();
-    // Allowlist bootstrap admin email from server-only env when matching admin_users table or configured env bootstrap
+
     if (this.client) {
       let query = this.client
         .from('admin_users')
@@ -578,15 +578,19 @@ export class SupabaseDatabaseRepository implements DatabaseRepository {
         .eq('is_active', true);
 
       if (authUserId) {
-        query = query.or(`auth_user_id.eq.${authUserId},email.ilike.${normalized}`);
+        // A Supabase JWT is privileged only when its verified Auth UUID is explicitly
+        // bound to the active admin row. Email is an additional consistency check,
+        // never an alternate identity or account-recovery mechanism.
+        query = query.eq('auth_user_id', authUserId).eq('email', normalized);
       } else {
-        query = query.ilike('email', normalized);
+        query = query.eq('email', normalized);
       }
 
       const { data, error } = await query.maybeSingle();
       if (!error && data) {
         return {
           id: String(data.id),
+          authUserId: data.auth_user_id ? String(data.auth_user_id) : undefined,
           email: String(data.email),
           fullName: String(data.full_name),
           role: data.role === 'super_admin' ? 'super_admin' : 'admin',
@@ -595,23 +599,28 @@ export class SupabaseDatabaseRepository implements DatabaseRepository {
       }
     }
 
-    const bootstrapEmail = (process.env.ADMIN_BOOTSTRAP_EMAIL || '').trim().toLowerCase();
-    const envAllowlist = (process.env.ADMIN_ALLOWLIST_EMAILS || '')
-      .split(',')
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean);
+    // Server bootstrap/allowlist identities are intentionally available only to
+    // the separate bootstrap/signed-session path. They must never satisfy a
+    // Supabase Auth UUID lookup, even when the email matches.
+    if (!authUserId) {
+      const bootstrapEmail = (process.env.ADMIN_BOOTSTRAP_EMAIL || '').trim().toLowerCase();
+      const envAllowlist = (process.env.ADMIN_ALLOWLIST_EMAILS || '')
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
 
-    if (
-      normalized &&
-      ((bootstrapEmail && normalized === bootstrapEmail) || envAllowlist.includes(normalized))
-    ) {
-      return {
-        id: 'env-bootstrap-admin',
-        email: normalized,
-        fullName: 'OPHIRIUM Administrator',
-        role: 'super_admin',
-        isActive: true,
-      };
+      if (
+        normalized &&
+        ((bootstrapEmail && normalized === bootstrapEmail) || envAllowlist.includes(normalized))
+      ) {
+        return {
+          id: 'env-bootstrap-admin',
+          email: normalized,
+          fullName: 'OPHIRIUM Administrator',
+          role: 'super_admin',
+          isActive: true,
+        };
+      }
     }
 
     return null;
