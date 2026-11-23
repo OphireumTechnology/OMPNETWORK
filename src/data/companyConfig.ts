@@ -46,7 +46,7 @@ export const COMPANY_CONFIG: CompanyConfig = {
   founderCeo: 'Dhenze Languisan',
   mobile: '+63 917 966 8814',
   mobileLink: 'tel:+639179668814',
-  configurableEmail: 'contact@ophireum.network',
+  configurableEmail: 'contact@ophireummultimedia.com',
   logoUrl: LOGO_URL,
   brandBoardUrl: BRAND_BOARD_URL,
   dtiCertificateUrl: DTI_CERTIFICATE_URL,
