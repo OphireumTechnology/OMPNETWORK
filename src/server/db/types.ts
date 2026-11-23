@@ -140,6 +140,8 @@ export interface AuditLogRecord {
 
 export interface AdminUserRecord {
   id: string;
+  /** Supabase Auth UUID bound to this administrator; absent for local/bootstrap-only identities. */
+  authUserId?: string;
   email: string;
   fullName: string;
   role: 'admin' | 'super_admin';
