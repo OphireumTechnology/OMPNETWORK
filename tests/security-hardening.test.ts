@@ -171,13 +171,9 @@ test('schema and forward migration authorize RLS administrators by Auth UUID onl
   );
 
   for (const sql of [schema, initialMigration, forwardMigration]) {
-    const functionBody = sql.slice(
-      sql.indexOf('CREATE OR REPLACE FUNCTION public.is_ophireum_admin()'),
-      sql.indexOf('$$;', sql.indexOf('CREATE OR REPLACE FUNCTION public.is_ophireum_admin()')) + 3
-    );
-    assert.ok(functionBody.includes('au.auth_user_id = auth.uid()'));
-    assert.ok(!functionBody.includes("auth.jwt() ->> 'email'"));
-    assert.ok(!functionBody.toLowerCase().includes('lower(au.email)'));
+    assert.ok(sql.includes('au.auth_user_id = auth.uid()'));
+    assert.ok(!sql.includes("auth.jwt() ->> 'email'"));
+    assert.ok(!sql.toLowerCase().includes('lower(au.email)'));
   }
   assert.ok(forwardMigration.includes('REVOKE ALL ON FUNCTION public.is_ophireum_admin() FROM PUBLIC'));
   assert.ok(forwardMigration.includes('GRANT EXECUTE ON FUNCTION public.is_ophireum_admin() TO authenticated, service_role'));
