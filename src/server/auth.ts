@@ -128,7 +128,9 @@ export class AdminAuthService {
     const supaUser = await this.db.verifySupabaseUserToken(token);
     if (supaUser) {
       const adminRecord = await this.db.findActiveAdminByEmail(supaUser.email, supaUser.id);
-      if (adminRecord && adminRecord.isActive) {
+      // Defense in depth: the repository must return the row bound to this exact
+      // verified Supabase Auth UUID, not merely a row sharing the email address.
+      if (adminRecord && adminRecord.isActive && adminRecord.authUserId === supaUser.id) {
         return { authenticated: true, adminUser: adminRecord, identityEmail: supaUser.email };
       }
       return { authenticated: true, identityEmail: supaUser.email };
