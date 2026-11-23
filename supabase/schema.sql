@@ -34,17 +34,20 @@ LANGUAGE SQL
 STABLE
 SECURITY DEFINER
 SET search_path = public
-AS $$
-  SELECT EXISTS (
-    SELECT 1
-    FROM public.admin_users au
-    WHERE au.is_active = TRUE
-      AND (
-        au.auth_user_id = auth.uid()
-        OR LOWER(au.email) = LOWER(COALESCE(auth.jwt() ->> 'email', ''))
-      )
-  );
-$$;
+AS $
+  SELECT auth.uid() IS NOT NULL
+    AND EXISTS (
+      SELECT 1
+      FROM public.admin_users au
+      WHERE au.is_active = TRUE
+        AND au.auth_user_id = auth.uid()
+    );
+$;
+
+-- The helper is callable by authenticated users for RLS evaluation only.
+-- It grants no row access by itself; each table's RLS policy remains authoritative.
+REVOKE ALL ON FUNCTION public.is_ophireum_admin() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.is_ophireum_admin() TO authenticated, service_role;
 
 -- 3. Client Profiles Table
 CREATE TABLE IF NOT EXISTS public.client_profiles (
