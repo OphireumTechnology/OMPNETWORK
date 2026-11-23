@@ -10,6 +10,8 @@ Third-party materials, dependencies, and separately licensed components remain s
 import test from 'node:test';
 import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { AdminAuthService } from '../src/server/auth';
 import type { DatabaseRepository, AdminUserRecord } from '../src/server/db/types';
 
@@ -82,4 +84,101 @@ test('ephemeral fallback session secret is not reported as production-configured
 test('explicit stable session secret is reported as configured', () => {
   const service = new AdminAuthService(fakeDb(null), '0123456789abcdef0123456789abcdef');
   assert.equal(service.isSessionSecretConfigured(), true);
+});
+
+
+test('Supabase administrator access requires an exact verified Auth UUID binding', async () => {
+  const supabaseUser = { id: 'auth-uuid-verified', email: 'admin@example.com' };
+  let requestedAuthUserId: string | undefined;
+  const matchingDb = {
+    findActiveAdminByEmail: async (_email: string, authUserId?: string) => {
+      requestedAuthUserId = authUserId;
+      return { ...activeAdmin, authUserId: 'auth-uuid-verified' };
+    },
+    verifySupabaseUserToken: async () => supabaseUser,
+  } as unknown as DatabaseRepository;
+
+  const service = new AdminAuthService(matchingDb, 'test-secret-that-is-long-enough');
+  const accepted = await service.resolveAuthenticatedPrincipal({
+    headers: { authorization: 'Bearer verified-supabase-jwt' },
+  } as any);
+  assert.equal(requestedAuthUserId, supabaseUser.id);
+  assert.equal(accepted.adminUser?.authUserId, supabaseUser.id);
+
+  const mismatchedDb = {
+    findActiveAdminByEmail: async (_email: string, authUserId?: string) => {
+      requestedAuthUserId = authUserId;
+      // Same email, different Auth UUID: account replacement must not inherit access.
+      return { ...activeAdmin, authUserId: 'attacker-replacement-uuid' };
+    },
+    verifySupabaseUserToken: async () => supabaseUser,
+  } as unknown as DatabaseRepository;
+  const denied = await new AdminAuthService(mismatchedDb, 'test-secret-that-is-long-enough')
+    .resolveAuthenticatedPrincipal({
+      headers: { authorization: 'Bearer verified-supabase-jwt' },
+    } as any);
+  assert.equal(requestedAuthUserId, supabaseUser.id);
+  assert.equal(denied.authenticated, true);
+  assert.equal(denied.adminUser, undefined);
+});
+
+test('Supabase administrator access rejects records without an Auth UUID binding', async () => {
+  const db = {
+    findActiveAdminByEmail: async () => activeAdmin,
+    verifySupabaseUserToken: async () => ({ id: 'auth-uuid-verified', email: activeAdmin.email }),
+  } as unknown as DatabaseRepository;
+  const result = await new AdminAuthService(db, 'test-secret-that-is-long-enough')
+    .resolveAuthenticatedPrincipal({
+      headers: { authorization: 'Bearer verified-supabase-jwt' },
+    } as any);
+  assert.equal(result.adminUser, undefined);
+});
+
+test('bootstrap credentials require an explicitly configured email and sufficiently strong password', () => {
+  const previousEmail = process.env.ADMIN_BOOTSTRAP_EMAIL;
+  const previousPassword = process.env.ADMIN_BOOTSTRAP_PASSWORD;
+  try {
+    process.env.ADMIN_BOOTSTRAP_EMAIL = ' Bootstrap.Admin@example.com ';
+    process.env.ADMIN_BOOTSTRAP_PASSWORD = 'correct-horse-battery-staple';
+    const service = new AdminAuthService(fakeDb(null), 'test-secret-that-is-long-enough');
+    assert.equal(service.isBootstrapLoginConfigured(), true);
+    assert.equal(service.verifyBootstrapCredentials('bootstrap.admin@example.com', 'correct-horse-battery-staple'), true);
+    assert.equal(service.verifyBootstrapCredentials('bootstrap.admin@example.com', 'incorrect-password'), false);
+    assert.equal(service.verifyBootstrapCredentials('other@example.com', 'correct-horse-battery-staple'), false);
+
+    process.env.ADMIN_BOOTSTRAP_PASSWORD = 'short';
+    assert.equal(service.isBootstrapLoginConfigured(), false);
+    assert.equal(service.verifyBootstrapCredentials('bootstrap.admin@example.com', 'short'), false);
+    delete process.env.ADMIN_BOOTSTRAP_EMAIL;
+    assert.equal(service.isBootstrapLoginConfigured(), false);
+  } finally {
+    if (previousEmail === undefined) delete process.env.ADMIN_BOOTSTRAP_EMAIL;
+    else process.env.ADMIN_BOOTSTRAP_EMAIL = previousEmail;
+    if (previousPassword === undefined) delete process.env.ADMIN_BOOTSTRAP_PASSWORD;
+    else process.env.ADMIN_BOOTSTRAP_PASSWORD = previousPassword;
+  }
+});
+
+test('schema and forward migration authorize RLS administrators by Auth UUID only', () => {
+  const schema = fs.readFileSync(path.resolve('supabase/schema.sql'), 'utf8');
+  const initialMigration = fs.readFileSync(
+    path.resolve('supabase/migrations/001_phase1_security_and_persistence.sql'),
+    'utf8'
+  );
+  const forwardMigration = fs.readFileSync(
+    path.resolve('supabase/migrations/20261124_uuid_bound_admin_rls.sql'),
+    'utf8'
+  );
+
+  for (const sql of [schema, initialMigration, forwardMigration]) {
+    const functionBody = sql.slice(
+      sql.indexOf('CREATE OR REPLACE FUNCTION public.is_ophireum_admin()'),
+      sql.indexOf('$$;', sql.indexOf('CREATE OR REPLACE FUNCTION public.is_ophireum_admin()')) + 3
+    );
+    assert.ok(functionBody.includes('au.auth_user_id = auth.uid()'));
+    assert.ok(!functionBody.includes("auth.jwt() ->> 'email'"));
+    assert.ok(!functionBody.toLowerCase().includes('lower(au.email)'));
+  }
+  assert.ok(forwardMigration.includes('REVOKE ALL ON FUNCTION public.is_ophireum_admin() FROM PUBLIC'));
+  assert.ok(forwardMigration.includes('GRANT EXECUTE ON FUNCTION public.is_ophireum_admin() TO authenticated, service_role'));
 });
