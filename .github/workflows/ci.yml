@@ -25,6 +25,9 @@ jobs:
       - name: TypeScript typecheck & lint
         run: npm run lint
 
+      - name: Check first-party source copyright headers
+        run: npm run check:copyright
+
       - name: Run unit, integration & security regression suite
         run: npm test
 
