@@ -12,7 +12,7 @@ Configure these variables on the API service (Railway), never in the browser bun
 
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY` (server-side secret only)
-- `SUPABASE_PUBLISHABLE_KEY` or `SUPABASE_ANON_KEY` for password sign-in requests; the adapter currently has a service-key fallback for environments that have not yet configured a public key
+- `SUPABASE_PUBLISHABLE_KEY` (recommended) or `SUPABASE_ANON_KEY` for password sign-in requests. The service-role key is never used as the client sign-in API key.
 - `RESEND_API_KEY`
 - `EMAIL_FROM` set to a sender/domain verified in Resend
 - `PORTAL_PUBLIC_URL=https://ophireummultimedia.com`
