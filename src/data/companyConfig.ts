@@ -1,3 +1,5 @@
+import { BRAND_ASSETS } from './brandAssets';
+
 export interface DtiRegistration {
   businessName: string;
   registrationNo: string;
@@ -36,7 +38,7 @@ const baseUrl = (typeof import.meta !== 'undefined' && import.meta.env && import
   ? (import.meta.env.BASE_URL.endsWith('/') ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`)
   : './';
 
-export const LOGO_URL = `${baseUrl}assets/aistudio/OPHIREUM_Logo_6504e623.png`;
+export const LOGO_URL = BRAND_ASSETS.primaryLogo;
 export const BRAND_BOARD_URL = `${baseUrl}assets/aistudio/Ophireum_Multimedia_Tech_Brand_Board_aa50d48b.png`;
 export const DTI_CERTIFICATE_URL = `${baseUrl}images/dti-business-registration.png`;
 

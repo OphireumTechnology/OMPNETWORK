@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ArrowLeft, CheckCircle2, Lock, Mail, ShieldCheck } from 'lucide-react';
-import { OphireumBrandMark } from '../components/PortalLayout';
+import { BrandLogo } from '../../components/BrandLogo';
 import { usePortalAuth } from '../PortalAuthContext';
 import { usePortalRouter } from '../PortalRouter';
 import { portalRequest } from '../portalApi';
@@ -24,12 +24,16 @@ const AuthShell: React.FC<{
             <ArrowLeft className="w-3.5 h-3.5" />
             <span>Return to Ophireum Website</span>
           </button>
-          <div className="flex items-center gap-3 mb-8">
-            <OphireumBrandMark />
-            <div>
-              <div className="text-base font-bold text-white tracking-tight">Ophireum Multimedia</div>
-              <div className="text-xs text-[#D9B664]">Client Operations Portal</div>
-            </div>
+          <div className="mb-8">
+            <BrandLogo
+              variant="horizontal"
+              theme="portal-dark"
+              size="lg"
+              ring="gold"
+              title="Ophireum Multimedia"
+              subtitle="Client Operations Portal"
+              eager
+            />
           </div>
           <h2 className="text-2xl font-bold text-white leading-snug tracking-tight">
             One calm workspace for your services, projects, billing, and deliverables.
@@ -51,11 +55,16 @@ const AuthShell: React.FC<{
       {/* Right Form Area */}
       <main className="flex flex-col justify-center px-5 py-10 sm:px-10">
         <div className="w-full max-w-md mx-auto">
-          <div className="lg:hidden mb-6 flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <OphireumBrandMark size="sm" />
-              <span className="text-sm font-bold text-[#0F1D36]">Ophireum Client Portal</span>
-            </div>
+          <div className="lg:hidden mb-6 flex items-center justify-between gap-3">
+            <BrandLogo
+              variant="horizontal"
+              theme="light"
+              size="md"
+              ring="gold"
+              title="Ophireum Multimedia"
+              subtitle="Client Portal"
+              eager
+            />
             <button
               onClick={exitToPublicSite}
               className="text-xs font-medium text-[#0F4C3A] hover:underline cursor-pointer"

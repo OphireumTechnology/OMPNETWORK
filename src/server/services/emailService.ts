@@ -2,6 +2,29 @@ import { DatabaseRepository, SolutionRequestRecord, AppointmentRecord, EmailOutb
 import { escapeHtml } from '../validation';
 import { logStructured } from '../logger';
 import { COMPANY_CONFIG } from '../../data/companyConfig';
+import { BRAND_ASSETS } from '../../data/brandAssets';
+
+function renderOfficialEmailHeader(subtitle: string): string {
+  return `
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-bottom:1px solid #1E293B;padding-bottom:16px;margin-bottom:20px;">
+      <tr>
+        <td width="56" valign="middle" style="padding-right:12px;">
+          <img
+            src="${escapeHtml(BRAND_ASSETS.hostedPrimaryLogoUrl)}"
+            alt="${escapeHtml(BRAND_ASSETS.altText)}"
+            width="48"
+            height="48"
+            style="display:block;width:48px;height:48px;border-radius:9999px;border:1.5px solid #D4AF37;object-fit:cover;background:#ffffff;"
+          />
+        </td>
+        <td valign="middle">
+          <div style="font-size:16px;font-weight:700;letter-spacing:0.04em;color:#FFFFFF;margin:0;">OPHIREUM MULTIMEDIA PRODUCTION</div>
+          <div style="font-size:12px;color:#00C2C7;margin-top:2px;">${escapeHtml(subtitle)}</div>
+        </td>
+      </tr>
+    </table>
+  `;
+}
 
 export interface EmailSendResult {
   status: 'sent' | 'failed' | 'unconfigured';
@@ -232,7 +255,7 @@ export class TransactionalEmailService {
 
     const customerHtml = `
       <div style="font-family:Inter,Arial,sans-serif;background:#0B1220;color:#E2E8F0;padding:24px;border-radius:12px;">
-        <h2 style="color:#00C2C7;margin-top:0;">OPHIREUM MULTIMEDIA PRODUCTION</h2>
+        ${renderOfficialEmailHeader('Official Solution Request Confirmation')}
         <p>Dear ${safeName},</p>
         <p>Your preliminary project summary has been registered with reference <strong>${escapeHtml(requestRecord.referenceCode)}</strong>.</p>
         <h4 style="color:#fff;">Selected Services</h4>
@@ -285,7 +308,7 @@ export class TransactionalEmailService {
 
     const adminHtml = `
       <div style="font-family:Inter,Arial,sans-serif;background:#0F172A;color:#E2E8F0;padding:24px;border-radius:12px;">
-        <h2 style="color:#D4AF37;margin-top:0;">New Client Solution Request: ${escapeHtml(requestRecord.referenceCode)}</h2>
+        ${renderOfficialEmailHeader(`New Client Solution Request: ${requestRecord.referenceCode}`)}
         <p><strong>Name:</strong> ${safeName}<br/>
         <strong>Email:</strong> ${safeEmail}<br/>
         <strong>Phone:</strong> ${safePhone}<br/>
@@ -347,7 +370,7 @@ export class TransactionalEmailService {
     const subject = `Ophireum Consultation (${statusLabel}) [${appointment.referenceCode}]`;
     const htmlBody = `
       <div style="font-family:Inter,Arial,sans-serif;background:#0B1220;color:#E2E8F0;padding:24px;border-radius:12px;">
-        <h2 style="color:#00C2C7;margin-top:0;">${escapeHtml(statusLabel)}</h2>
+        ${renderOfficialEmailHeader(statusLabel)}
         <p>Reference Code: <strong>${escapeHtml(appointment.referenceCode)}</strong></p>
         <p>Client: ${escapeHtml(appointment.fullName)} (${escapeHtml(appointment.companyName)})<br/>
         Date: ${escapeHtml(appointment.scheduledDate)}<br/>

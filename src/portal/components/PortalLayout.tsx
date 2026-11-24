@@ -24,39 +24,13 @@ import {
   ArrowLeft,
   ChevronDown,
 } from 'lucide-react';
-import { COMPANY_CONFIG } from '../../data/companyConfig';
+import { BrandLogo } from '../../components/BrandLogo';
 import { usePortalAuth } from '../PortalAuthContext';
 import { usePortalRouter } from '../PortalRouter';
 
-export const OphireumBrandMark: React.FC<{ size?: 'sm' | 'md' }> = ({ size = 'md' }) => {
-  const [imgError, setImgError] = useState(false);
-  const dim = size === 'sm' ? 'w-8 h-8' : 'w-9 h-9';
-
-  if (imgError) {
-    return (
-      <div
-        className={`${dim} rounded-lg bg-[#162847] border border-[#B8923A]/50 flex items-center justify-center shrink-0`}
-        aria-hidden="true"
-      >
-        <span className="font-mono text-xs font-bold text-[#D9B664]">OM</span>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      className={`${dim} rounded-lg bg-[#162847] border border-[#B8923A]/40 p-1 flex items-center justify-center shrink-0 overflow-hidden`}
-    >
-      <img
-        src={COMPANY_CONFIG.logoUrl}
-        alt="Ophireum Multimedia"
-        referrerPolicy="no-referrer"
-        onError={() => setImgError(true)}
-        className="w-full h-full object-contain"
-      />
-    </div>
-  );
-};
+export const OphireumBrandMark: React.FC<{ size?: 'sm' | 'md' | 'lg' }> = ({ size = 'md' }) => (
+  <BrandLogo variant="emblem" size={size} ring="gold" eager decorative />
+);
 
 interface SidebarItem {
   label: string;
@@ -157,13 +131,15 @@ export const PortalLayout: React.FC<{
           }}
           className="flex items-center gap-3 text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#B8923A] rounded-lg"
         >
-          <OphireumBrandMark />
-          <div className="min-w-0">
-            <div className="text-sm font-semibold tracking-tight text-white truncate">
-              Ophireum Multimedia
-            </div>
-            <div className="text-[11px] text-[#C8A95C] tracking-wide">Client Portal</div>
-          </div>
+          <BrandLogo
+            variant="horizontal"
+            theme="portal-dark"
+            size="md"
+            ring="gold"
+            title="Ophireum Multimedia"
+            subtitle="Client Portal"
+            eager
+          />
         </button>
         <button
           onClick={() => setMobileNavOpen(false)}
@@ -287,6 +263,13 @@ export const PortalLayout: React.FC<{
                 aria-label="Open navigation menu"
               >
                 <Menu className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => navigate('/portal/dashboard')}
+                className="lg:hidden shrink-0 cursor-pointer rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#B8923A]"
+                aria-label="Ophireum Multimedia Client Portal Dashboard"
+              >
+                <BrandLogo variant="emblem" size="sm" ring="gold" eager decorative />
               </button>
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-[#0F1D36] truncate">

@@ -6,6 +6,7 @@ import {
   Square, AlertCircle, Sparkles, CheckCircle2
 } from 'lucide-react';
 import { COMPANY_CONFIG } from '../../data/companyConfig';
+import { BrandLogo } from '../BrandLogo';
 import { 
   aiConsultantService, 
   ChatMessage, 
@@ -438,14 +439,7 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
             <div className="absolute -inset-0.5 rounded-2xl bg-gradient-to-r from-[#00C2C7] via-[#D4AF37] to-[#00C2C7] opacity-25 group-hover:opacity-60 blur transition duration-300" />
 
             <div className="relative flex items-center gap-2.5">
-              <div className="w-10 h-10 rounded-xl bg-[#0B1220] border border-[#00C2C7]/40 flex items-center justify-center p-1.5 shadow-inner">
-                <img
-                  src={COMPANY_CONFIG.logoUrl}
-                  alt=""
-                  aria-hidden="true"
-                  className="w-full h-full object-contain rounded-full"
-                />
-              </div>
+              <BrandLogo variant="emblem" size="md" ring="brand" decorative />
 
               <div className="text-left hidden sm:block">
                 <div className="flex items-center gap-1.5">
@@ -477,13 +471,8 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
           {/* Top Header */}
           <div className="px-4 py-3 bg-[#111827] border-b border-slate-800 flex items-center justify-between gap-2 select-none">
             <div className="flex items-center gap-2.5">
-              <div className="relative w-9 h-9 rounded-xl p-0.5 bg-gradient-to-tr from-[#D4AF37] via-[#00C2C7] to-slate-400">
-                <img
-                  src={COMPANY_CONFIG.logoUrl}
-                  alt=""
-                  aria-hidden="true"
-                  className="w-full h-full object-contain rounded-[10px] bg-[#111827]"
-                />
+              <div className="relative shrink-0">
+                <BrandLogo variant="emblem" size="sm" ring="brand" decorative />
                 <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-[#111827] ${
                   isVoiceActive ? 'bg-[#00C2C7] animate-pulse' : 'bg-emerald-400'
                 }`} />
@@ -999,14 +988,7 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
           <div className="relative w-full max-w-lg bg-[#0B1220] border border-[#00C2C7]/40 rounded-2xl shadow-2xl overflow-hidden p-6">
             <div className="flex items-center justify-between pb-4 border-b border-slate-800">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[#111827] border border-[#D4AF37]/40 p-1 flex items-center justify-center">
-                  <img
-                    src={COMPANY_CONFIG.logoUrl}
-                    alt=""
-                    aria-hidden="true"
-                    className="w-full h-full object-contain rounded-lg"
-                  />
-                </div>
+                <BrandLogo variant="emblem" size="md" ring="gold" decorative />
                 <div>
                   <h3 className="text-sm font-bold text-white uppercase tracking-wider">Executive Escalation Channel</h3>
                   <p className="text-xs text-slate-400">Direct leadership communication</p>

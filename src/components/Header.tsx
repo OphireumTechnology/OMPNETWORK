@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Menu, X, ArrowUpRight, Shield, Phone, MapPin } from 'lucide-react';
 import { COMPANY_CONFIG } from '../data/companyConfig';
+import { BrandLogo } from './BrandLogo';
 
 interface HeaderProps {
   onOpenPortal: () => void;
@@ -68,16 +69,15 @@ export const Header: React.FC<HeaderProps> = ({ onOpenPortal, onNavigate, active
           className="flex items-center gap-3.5 sm:gap-4 group text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00C2C7] shrink-0"
           aria-label={`${COMPANY_CONFIG.name} Homepage`}
         >
-          {/* Logo container: 54px on desktop, 44px on mobile */}
-          <div className="relative w-[44px] h-[44px] sm:w-[54px] sm:h-[54px] rounded-full p-[2px] bg-gradient-to-tr from-[#D4AF37] via-[#00C2C7] to-[#C0C7D1] shadow-md shadow-[#00C2C7]/20 group-hover:shadow-[#00C2C7]/40 transition-all shrink-0">
-            <img
-              src={COMPANY_CONFIG.logoUrl}
-              alt=""
-              aria-hidden="true"
-              className="w-full h-full object-contain rounded-full bg-[#111827]"
-              loading="eager"
-            />
-          </div>
+          {/* Official Logo: 54px on desktop, 44px on mobile */}
+          <BrandLogo
+            variant="emblem"
+            size="header"
+            ring="brand"
+            eager
+            decorative
+            className="group-hover:shadow-[#00C2C7]/40 transition-all"
+          />
 
           <div className="flex flex-col justify-center">
             {/* Main company name: 16-18px Plus Jakarta Sans bold */}

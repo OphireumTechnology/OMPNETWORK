@@ -1,6 +1,7 @@
 import React from 'react';
 import { Building, Shield, MapPin, ArrowUpRight, Phone, Mail, ExternalLink, User } from 'lucide-react';
 import { COMPANY_CONFIG } from '../data/companyConfig';
+import { BrandLogo } from './BrandLogo';
 
 interface FooterProps {
   onNavigate: (sectionId: string) => void;
@@ -20,15 +21,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenPortal }) => {
           {/* Brand & Executive Lockup (Cols 1-4) */}
           <div className="lg:col-span-4 space-y-4">
             <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-full p-0.5 bg-gradient-to-tr from-[#D4AF37] via-[#00C2C7] to-[#C0C7D1] shrink-0">
-                <img
-                  src={COMPANY_CONFIG.logoUrl}
-                  alt=""
-                  aria-hidden="true"
-                  className="w-full h-full object-contain rounded-full bg-[#111827]"
-                  loading="lazy"
-                />
-              </div>
+              <BrandLogo variant="emblem" size="md" ring="brand" decorative />
               <div>
                 <span className="text-sm font-extrabold tracking-wider text-white uppercase block">
                   {COMPANY_CONFIG.name}

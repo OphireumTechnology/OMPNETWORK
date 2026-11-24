@@ -3,6 +3,7 @@ import { ArrowUpRight, Shield, MapPin, Sparkles, Phone, CheckCircle, ExternalLin
 import { BlockchainNetworkCanvas } from './animations/BlockchainNetworkCanvas';
 import { FloatingTechnologyIcons } from './animations/FloatingTechnologyIcons';
 import { COMPANY_CONFIG } from '../data/companyConfig';
+import { BrandLogo } from './BrandLogo';
 
 interface HeroProps {
   onNavigate: (sectionId: string) => void;
@@ -116,16 +117,15 @@ export const Hero: React.FC<HeroProps> = ({ onNavigate, onOpenPortal }) => {
               {/* Clean Corporate Identity Card */}
               <div className="relative rounded-2xl bg-[#111827] border border-slate-700/80 p-7 sm:p-8 shadow-2xl flex flex-col items-center text-center">
                 
-                {/* Official Circular Logo with 180-220px dimensions, centered, with no text inside */}
-                <div className="relative w-[190px] h-[190px] sm:w-[210px] sm:h-[210px] rounded-full p-[3px] bg-gradient-to-tr from-[#D4AF37] via-[#00C2C7] to-[#C0C7D1] shadow-xl transition-transform duration-500 group-hover:scale-[1.02] flex items-center justify-center shrink-0">
-                  <img
-                    src={COMPANY_CONFIG.logoUrl}
-                    alt=""
-                    aria-hidden="true"
-                    className="w-full h-full object-contain rounded-full bg-[#111827]"
-                    loading="eager"
-                  />
-                </div>
+                {/* Official Circular Logo with 190-210px dimensions, centered */}
+                <BrandLogo
+                  variant="emblem"
+                  size="hero"
+                  ring="brand"
+                  eager
+                  decorative
+                  className="transition-transform duration-500 group-hover:scale-[1.02]"
+                />
 
                 {/* Corporate Branding cleanly beneath the logo */}
                 <div className="mt-6 space-y-1 w-full">

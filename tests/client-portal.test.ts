@@ -775,3 +775,69 @@ test('Phase 2 Audit: Static guards verify no localStorage session tokens and esc
   assert.equal(ordersPageSrc.includes('Content-Security-Policy'), true);
 });
 
+test('Official Brand Identity Standardization: centralized assets, favicons, BrandLogo adoption, and zero OM fallback', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const root = process.cwd();
+
+  // 1. Official master-derived branding assets and browser icons must exist and be non-empty
+  const requiredAssets = [
+    'public/branding/ophireum-logo.png',
+    'public/branding/ophireum-logo-1024.png',
+    'public/branding/ophireum-logo-512.png',
+    'public/branding/ophireum-logo-192.png',
+    'public/branding/apple-touch-icon.png',
+    'public/branding/favicon-32x32.png',
+    'public/branding/favicon-16x16.png',
+    'public/favicon.ico',
+    'public/site.webmanifest',
+  ];
+  for (const rel of requiredAssets) {
+    const fullPath = path.resolve(root, rel);
+    assert.equal(fs.existsSync(fullPath), true, `Missing required brand asset: ${rel}`);
+    assert.ok(fs.statSync(fullPath).size > 0, `Empty brand asset: ${rel}`);
+  }
+
+  // 2. Web manifest must parse cleanly and reference the official branding icons
+  const manifest = JSON.parse(fs.readFileSync(path.resolve(root, 'public/site.webmanifest'), 'utf8'));
+  assert.equal(manifest.name, 'Ophireum Multimedia Production');
+  assert.ok(
+    Array.isArray(manifest.icons) &&
+      manifest.icons.some((icon: any) => String(icon.src).includes('ophireum-logo-192.png')) &&
+      manifest.icons.some((icon: any) => String(icon.src).includes('ophireum-logo-512.png'))
+  );
+
+  // 3. index.html must link official favicon, apple-touch-icon, webmanifest, and OG/JSON-LD logo
+  const indexHtml = fs.readFileSync(path.resolve(root, 'index.html'), 'utf8');
+  assert.equal(indexHtml.includes('favicon.ico'), true);
+  assert.equal(indexHtml.includes('branding/favicon-32x32.png'), true);
+  assert.equal(indexHtml.includes('branding/apple-touch-icon.png'), true);
+  assert.equal(indexHtml.includes('site.webmanifest'), true);
+  assert.equal(indexHtml.includes('branding/ophireum-logo-1024.png'), true);
+
+  // 4. Standardized BrandLogo must be used across public site, client portal, auth, loading screens, and invoices
+  const brandLogoConsumers = [
+    'src/components/Header.tsx',
+    'src/components/Hero.tsx',
+    'src/components/Footer.tsx',
+    'src/components/EnterpriseModal.tsx',
+    'src/components/consultant/AIConsultantWidget.tsx',
+    'src/portal/components/PortalLayout.tsx',
+    'src/portal/pages/AuthPages.tsx',
+    'src/portal/pages/OrdersAndFinancePages.tsx',
+    'src/portal/ClientPortalApp.tsx',
+    'src/App.tsx',
+  ];
+  for (const rel of brandLogoConsumers) {
+    const src = fs.readFileSync(path.resolve(root, rel), 'utf8');
+    assert.equal(src.includes('BrandLogo'), true, `${rel} must use centralized BrandLogo`);
+    assert.equal(src.includes('>OM<'), false, `${rel} must not contain invented OM initials fallback`);
+  }
+
+  // 5. Invoices & emails must embed the official logo
+  const ordersSrc = fs.readFileSync(path.resolve(root, 'src/portal/pages/OrdersAndFinancePages.tsx'), 'utf8');
+  assert.equal(ordersSrc.includes('resolveAbsoluteLogoUrl'), true);
+
+  const emailSrc = fs.readFileSync(path.resolve(root, 'src/server/services/emailService.ts'), 'utf8');
+  assert.equal(emailSrc.includes('BRAND_ASSETS.hostedPrimaryLogoUrl'), true);
+});

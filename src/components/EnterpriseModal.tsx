@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { aiAgentsData } from '../data/aiAgentsData';
+import { BrandLogo } from './BrandLogo';
 import {
   X,
   Shield,
@@ -189,14 +190,7 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({
         {/* Top Bar */}
         <div className="px-5 py-4 bg-[#111827] border-b border-slate-800 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full p-0.5 bg-gradient-to-tr from-[#D4AF37] via-[#00C2C7] to-[#C0C7D1]">
-              <img
-                src={COMPANY_CONFIG.logoUrl}
-                alt=""
-                aria-hidden="true"
-                className="w-full h-full object-contain rounded-full bg-[#111827]"
-              />
-            </div>
+            <BrandLogo variant="emblem" size="sm" ring="brand" decorative />
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold text-white uppercase tracking-wider">

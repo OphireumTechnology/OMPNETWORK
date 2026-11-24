@@ -1,0 +1,23 @@
+{
+  "name": "Ophireum Multimedia Production",
+  "short_name": "Ophireum",
+  "description": "Ophireum Multimedia Production & Ophireum Network — Creative Media, AI Agents, Enterprise Software & Client Portal.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0B1220",
+  "theme_color": "#0F1D36",
+  "icons": [
+    {
+      "src": "./branding/ophireum-logo-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./branding/ophireum-logo-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

@@ -14,6 +14,8 @@ import {
   Search,
 } from 'lucide-react';
 import { PortalLayout } from '../components/PortalLayout';
+import { BrandLogo } from '../../components/BrandLogo';
+import { resolveAbsoluteLogoUrl } from '../../data/brandAssets';
 import { portalRequest } from '../portalApi';
 import { usePortalAuth } from '../PortalAuthContext';
 import { usePortalRouter } from '../PortalRouter';
@@ -784,11 +786,17 @@ export const PortalInvoicesPage: React.FC = () => {
 
   const downloadInvoiceHtml = (inv: any) => {
     const safeInvoiceNum = escapeHtml(inv.invoiceNumber);
-    const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';"><title>${safeInvoiceNum}</title>
-<style>body{font-family:system-ui,sans-serif;color:#0F1D36;padding:40px;max-width:800px;margin:auto}table{width:100%;border-collapse:collapse;margin:24px 0}th,td{padding:10px;border-bottom:1px solid #E6E2D8;text-align:left}.num{text-align:right;font-family:monospace}</style>
+    const safeLogoUrl = escapeHtml(resolveAbsoluteLogoUrl());
+    const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src https: http: data:;"><title>${safeInvoiceNum}</title>
+<style>body{font-family:system-ui,sans-serif;color:#0F1D36;padding:40px;max-width:800px;margin:auto}.brand-header{display:flex;align-items:center;gap:16px;margin-bottom:16px}.brand-logo{width:56px;height:56px;border-radius:9999px;object-fit:cover;border:1.5px solid #D9B664;flex-shrink:0}table{width:100%;border-collapse:collapse;margin:24px 0}th,td{padding:10px;border-bottom:1px solid #E6E2D8;text-align:left}.num{text-align:right;font-family:monospace}</style>
 </head><body>
-<h1>${escapeHtml(inv.issuingCompany?.name)}</h1>
-<p>${escapeHtml(inv.issuingCompany?.registrationNo)} &middot; ${escapeHtml(inv.issuingCompany?.address)} &middot; ${escapeHtml(inv.issuingCompany?.email)}</p>
+<div class="brand-header">
+  <img src="${safeLogoUrl}" alt="Ophireum Multimedia Production Official Logo" class="brand-logo" />
+  <div>
+    <h1 style="margin:0;font-size:20px;">${escapeHtml(inv.issuingCompany?.name)}</h1>
+    <p style="margin:4px 0 0;font-size:12px;color:#475569;">${escapeHtml(inv.issuingCompany?.registrationNo)} &middot; ${escapeHtml(inv.issuingCompany?.address)} &middot; ${escapeHtml(inv.issuingCompany?.email)}</p>
+  </div>
+</div>
 <hr/>
 <h2>Invoice ${safeInvoiceNum}</h2>
 <p>Order: ${escapeHtml(inv.orderNumber)} | Issued: ${escapeHtml(formatPortalDate(inv.issuedAt))} | Status: ${escapeHtml(formatStatusLabel(inv.paymentStatus))}</p>
@@ -888,14 +896,17 @@ ${(inv.lineItems || [])
         <div className="fixed inset-0 z-50 bg-[#0F1D36]/60 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white border border-[#E6E2D8] rounded-xl max-w-2xl w-full p-6 space-y-5 my-8">
             <div className="flex items-start justify-between gap-4 border-b border-[#E6E2D8] pb-4">
-              <div>
-                <p className="text-xs font-mono text-[#B8923A]">{selectedInvoice.issuingCompany.name}</p>
-                <h3 className="text-lg font-bold text-[#0F1D36] mt-0.5">
-                  Invoice {selectedInvoice.invoiceNumber}
-                </h3>
-                <p className="text-xs text-[#64748B]">
-                  {selectedInvoice.issuingCompany.registrationNo} · {selectedInvoice.issuingCompany.address}
-                </p>
+              <div className="flex items-start gap-3.5">
+                <BrandLogo variant="emblem" size="lg" ring="subtle" />
+                <div>
+                  <p className="text-xs font-mono text-[#B8923A]">{selectedInvoice.issuingCompany.name}</p>
+                  <h3 className="text-lg font-bold text-[#0F1D36] mt-0.5">
+                    Invoice {selectedInvoice.invoiceNumber}
+                  </h3>
+                  <p className="text-xs text-[#64748B]">
+                    {selectedInvoice.issuingCompany.registrationNo} · {selectedInvoice.issuingCompany.address}
+                  </p>
+                </div>
               </div>
               <button
                 type="button"
