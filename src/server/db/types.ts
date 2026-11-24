@@ -1,3 +1,12 @@
+/*
+Copyright (c) 2026 Ophireum Multimedia Production. All rights reserved.
+Developer and claimed rights holder: Ophireum Multimedia Production
+DTI-registered business, Philippines | Registration No. 7567003
+SPDX-FileCopyrightText: 2026 Ophireum Multimedia Production
+SPDX-License-Identifier: LicenseRef-Ophireum-Proprietary
+Third-party materials, dependencies, and separately licensed components remain subject to their respective rights and licenses.
+*/
+
 export class DatabaseUnavailableError extends Error {
   public readonly statusCode = 503;
   public readonly code = 'DATABASE_UNAVAILABLE';
@@ -131,6 +140,8 @@ export interface AuditLogRecord {
 
 export interface AdminUserRecord {
   id: string;
+  /** Supabase Auth UUID bound to this administrator; absent for local/bootstrap-only identities. */
+  authUserId?: string;
   email: string;
   fullName: string;
   role: 'admin' | 'super_admin';
