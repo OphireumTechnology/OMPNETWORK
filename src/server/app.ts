@@ -146,6 +146,13 @@ function hashToken(raw: string): string {
   return crypto.createHash('sha256').update(raw).digest('hex');
 }
 
+function safelyMatchesTokenHash(rawToken: string, expectedHash: string): boolean {
+  if (!rawToken || !/^[a-f0-9]{64}$/i.test(expectedHash || '')) return false;
+  const candidate = Buffer.from(hashToken(rawToken), 'hex');
+  const expected = Buffer.from(expectedHash, 'hex');
+  return candidate.length === expected.length && crypto.timingSafeEqual(candidate, expected);
+}
+
 export function createApp(deps: AppDependencies = {}): {
   app: Express;
   db: DatabaseRepository;
@@ -187,6 +194,10 @@ export function createApp(deps: AppDependencies = {}): {
   const adminLoginLimiter = new SlidingWindowRateLimiter(
     15 * 60 * 1000,
     deps.rateLimitMaxOverride ?? 10
+  );
+  const appointmentManageLimiter = new SlidingWindowRateLimiter(
+    15 * 60 * 1000,
+    deps.rateLimitMaxOverride ?? 8
   );
 
   // -----------------------------------------------------------------------
@@ -874,23 +885,27 @@ export function createApp(deps: AppDependencies = {}): {
   app.patch(
     '/api/appointments/:referenceCode',
     async (req: AuthenticatedAdminRequest, res: Response, next: NextFunction) => {
+      const clientIp = getClientIp(req);
+      if (!appointmentManageLimiter.check(clientIp)) {
+        res.status(429).json({ success: false, error: 'Too many appointment management attempts. Please try again later.' });
+        return;
+      }
       try {
         const referenceCode = sanitizePlainText(req.params.referenceCode, 60);
+        const resolvedAdmin = await authService.resolveAuthenticatedPrincipal(req);
         const existing = await db.getAppointmentByReference(referenceCode);
         if (!existing) {
-          res.status(404).json({ success: false, error: 'Appointment reference not found.' });
+          res.status(resolvedAdmin.adminUser ? 404 : 401).json({
+            success: false,
+            error: resolvedAdmin.adminUser ? 'Appointment reference not found.' : 'Valid management token or administrator authorization required.',
+          });
           return;
         }
-
-        const resolvedAdmin = await authService.resolveAuthenticatedPrincipal(req);
         const token = typeof req.body?.managementToken === 'string' ? req.body.managementToken.trim() : '';
         const providedEmail = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
-
         const tokenAuthorized =
-          Boolean(token && existing.managementTokenHash) &&
-          hashToken(token) === existing.managementTokenHash &&
+          safelyMatchesTokenHash(token, existing.managementTokenHash || '') &&
           (!providedEmail || providedEmail === existing.email.toLowerCase());
-
         if (!resolvedAdmin.adminUser && !tokenAuthorized) {
           res.status(401).json({
             success: false,
@@ -898,7 +913,6 @@ export function createApp(deps: AppDependencies = {}): {
           });
           return;
         }
-
         const action = typeof req.body?.action === 'string' ? req.body.action.trim() : '';
         if (action === 'cancel') {
           const updated = await db.updateAppointment(referenceCode, { status: 'cancelled' });
@@ -906,12 +920,19 @@ export function createApp(deps: AppDependencies = {}): {
           res.json({ success: true, appointment: safeUpdated });
           return;
         }
-
         if (action === 'reschedule') {
           const newDate = typeof req.body?.scheduledDate === 'string' ? req.body.scheduledDate.trim() : '';
           const newSlot = typeof req.body?.scheduledTimeSlot === 'string' ? req.body.scheduledTimeSlot.trim() : '';
           if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate) || !(ALLOWED_APPOINTMENT_SLOTS as readonly string[]).includes(newSlot)) {
             res.status(400).json({ success: false, error: 'Valid replacement date and slot are required.' });
+            return;
+          }
+          const parsedDate = new Date(`${newDate}T00:00:00+08:00`);
+          const normalizedDate = Number.isNaN(parsedDate.getTime()) ? '' :
+            new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(parsedDate);
+          const todayManila = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+          if (!normalizedDate || normalizedDate !== newDate || newDate <= todayManila || [0, 6].includes(parsedDate.getUTCDay())) {
+            res.status(400).json({ success: false, error: 'Replacement appointments must be on a future weekday in Asia/Manila.' });
             return;
           }
           const booked = await db.getBookedSlotsForDate(newDate);
@@ -924,12 +945,13 @@ export function createApp(deps: AppDependencies = {}): {
             scheduledTimeSlot: newSlot,
             status: 'pending_review',
             calendarSyncStatus: 'pending',
+            calendarEventId: undefined,
+            meetingLink: undefined,
           });
           const { managementTokenHash: _hidden, ...safeUpdated } = updated;
           res.json({ success: true, appointment: safeUpdated });
           return;
         }
-
         res.status(400).json({ success: false, error: 'Unsupported action. Use cancel or reschedule.' });
       } catch (err) {
         next(err);
@@ -937,7 +959,6 @@ export function createApp(deps: AppDependencies = {}): {
     }
   );
 
-  // -----------------------------------------------------------------------
   // 6. HARDENED AI SOLUTIONS CONSULTANT & VOICE ENDPOINTS (BLOCK 8)
   // -----------------------------------------------------------------------
   app.post('/api/consultant/chat', async (req: Request & { correlationId?: string }, res: Response) => {
