@@ -741,3 +741,39 @@ test('13-14. AI Consultant deterministic grounding without GEMINI_API_KEY, input
   assert.ok(schemaContent.includes('solution_requests'), 'schema.sql must define solution_requests');
   assert.ok(schemaContent.includes('admin_users'), 'schema.sql must define admin_users');
 });
+
+
+test('security: arbitrary run.app origins are rejected by the exact CORS allowlist', async () => {
+  const previous = process.env.ALLOWED_ORIGINS;
+  process.env.ALLOWED_ORIGINS = 'https://ophireummultimedia.com';
+  const srv = await startTestServer({ db: new TestDatabaseRepository(createBackingStore()) });
+  try {
+    const response = await fetch(`${srv.baseUrl}/api/inquiries`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://untrusted-origin.run.app',
+        'Access-Control-Request-Method': 'POST',
+      },
+    });
+    assert.equal(response.status, 403);
+    assert.equal(response.headers.get('access-control-allow-origin'), null);
+  } finally {
+    await srv.close();
+    if (previous === undefined) delete process.env.ALLOWED_ORIGINS;
+    else process.env.ALLOWED_ORIGINS = previous;
+  }
+});
+
+test('security: health endpoint returns 503 when database dependency is unavailable', async () => {
+  const store = createBackingStore();
+  store.failNextWrite = true;
+  const srv = await startTestServer({ db: new TestDatabaseRepository(store) });
+  try {
+    const response = await fetch(`${srv.baseUrl}/api/health`);
+    const body = await response.json();
+    assert.equal(response.status, 503);
+    assert.equal(body.dependencies.database.connected, false);
+  } finally {
+    await srv.close();
+  }
+});
