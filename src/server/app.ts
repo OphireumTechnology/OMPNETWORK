@@ -797,25 +797,15 @@ export function createApp(deps: AppDependencies = {}): {
             ? 'KMC | One West Aeropark, 5th Floor & Penthouse, Clark Freeport Zone, Mabalacat City, 2010 Pampanga, Philippines'
             : undefined;
 
-        const calResult = await calendarService.createConsultationEvent({
-          referenceCode,
-          fullName: data.fullName,
-          email: data.email,
-          companyName: data.companyName,
-          consultationType: data.consultationType,
-          scheduledDate: data.scheduledDate,
-          scheduledTimeSlot: data.scheduledTimeSlot,
-          clientTimezone: data.clientTimezone,
-          location: officeLocation,
-          correlationId: req.correlationId,
-        });
+        // Persist the appointment before creating an external calendar event.
+        // A database conflict/failure must never leave an orphaned calendar invitation.
+        const idempotencyHeader = req.headers['idempotency-key'];
+        const idempotencyKey = data.idempotencyKey ||
+          (typeof idempotencyHeader === 'string' ? idempotencyHeader.trim() : undefined);
 
-        // Strictly reflect real integration status: never confirm calendar or fabricate Meet links when unconfigured!
-        const status: 'confirmed' | 'pending_review' = calResult.synced ? 'confirmed' : 'pending_review';
-
-        const { record, created } = await db.createAppointment({
+        const createdResult = await db.createAppointment({
           referenceCode,
-          idempotencyKey: data.idempotencyKey,
+          idempotencyKey,
           fullName: data.fullName,
           email: data.email,
           phone: data.phone,
@@ -826,15 +816,44 @@ export function createApp(deps: AppDependencies = {}): {
           scheduledTimeSlot: data.scheduledTimeSlot,
           durationMinutes: 30,
           clientTimezone: data.clientTimezone,
-          meetingLink: calResult.synced ? calResult.meetingLink : undefined,
           meetingLocation: officeLocation,
           assignedConsultant: 'Dhenze Languisan (Founder & CEO)',
-          status,
-          calendarSyncStatus: calResult.calendarSyncStatus,
-          calendarEventId: calResult.eventId,
+          status: 'pending_review',
+          calendarSyncStatus: calendarService.isConfigured() ? 'pending' : 'unconfigured',
           managementTokenHash,
           notes: data.notes,
         });
+
+        let record = createdResult.record;
+        const created = createdResult.created;
+        let calResult = {
+          synced: record.calendarSyncStatus === 'synced',
+          calendarSyncStatus: record.calendarSyncStatus as 'synced' | 'failed' | 'unconfigured',
+          eventId: record.calendarEventId,
+          meetingLink: record.meetingLink,
+        };
+
+        if (created) {
+          calResult = await calendarService.createConsultationEvent({
+            referenceCode,
+            fullName: data.fullName,
+            email: data.email,
+            companyName: data.companyName,
+            consultationType: data.consultationType,
+            scheduledDate: data.scheduledDate,
+            scheduledTimeSlot: data.scheduledTimeSlot,
+            clientTimezone: data.clientTimezone,
+            location: officeLocation,
+            correlationId: req.correlationId,
+          });
+
+          record = await db.updateAppointment(referenceCode, {
+            status: calResult.synced ? 'confirmed' : 'pending_review',
+            calendarSyncStatus: calResult.calendarSyncStatus,
+            calendarEventId: calResult.eventId,
+            meetingLink: calResult.meetingLink,
+          });
+        }
 
         let emailOutcome = { customerStatus: 'unconfigured', adminStatus: 'unconfigured' };
         if (created) {
