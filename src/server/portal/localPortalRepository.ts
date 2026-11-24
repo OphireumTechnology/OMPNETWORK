@@ -193,6 +193,7 @@ export class LocalPortalRepository implements PortalRepository {
     companyName?: string;
     phone?: string;
     verificationTokenHash: string;
+    verificationTokenExpiresAt?: string;
   }): Promise<{ user: PortalUserRecord; profile: PortalProfileRecord }> {
     const ts = this.now();
     const userId = crypto.randomUUID();
@@ -207,6 +208,8 @@ export class LocalPortalRepository implements PortalRepository {
       passwordHash: input.passwordHash,
       emailVerified: false,
       verificationTokenHash: input.verificationTokenHash,
+      verificationTokenExpiresAt:
+        input.verificationTokenExpiresAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       accountStatus: 'active',
       createdAt: ts,
       updatedAt: ts,
@@ -272,8 +275,12 @@ export class LocalPortalRepository implements PortalRepository {
   async verifyEmailByTokenHash(tokenHash: string): Promise<PortalUserRecord | null> {
     const user = this.state.users.find((u) => u.verificationTokenHash === tokenHash);
     if (!user) return null;
+    if (user.verificationTokenExpiresAt && Date.parse(user.verificationTokenExpiresAt) < Date.now()) {
+      return null;
+    }
     user.emailVerified = true;
     user.verificationTokenHash = undefined;
+    user.verificationTokenExpiresAt = undefined;
     user.updatedAt = this.now();
     await this.addActivity({
       userId: user.id,
@@ -286,10 +293,12 @@ export class LocalPortalRepository implements PortalRepository {
     return user;
   }
 
-  async setVerificationToken(userId: string, tokenHash: string): Promise<void> {
+  async setVerificationToken(userId: string, tokenHash: string, expiresAt?: string): Promise<void> {
     const user = this.state.users.find((u) => u.id === userId);
     if (!user) return;
     user.verificationTokenHash = tokenHash;
+    user.verificationTokenExpiresAt =
+      expiresAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     user.updatedAt = this.now();
     this.persist();
   }
@@ -326,11 +335,13 @@ export class LocalPortalRepository implements PortalRepository {
     this.persist();
   }
 
-  async requestEmailChange(userId: string, newEmail: string, tokenHash: string): Promise<void> {
+  async requestEmailChange(userId: string, newEmail: string, tokenHash: string, expiresAt?: string): Promise<void> {
     const user = this.state.users.find((u) => u.id === userId);
     if (!user) return;
     user.pendingEmail = newEmail.trim().toLowerCase();
     user.pendingEmailTokenHash = tokenHash;
+    user.pendingEmailTokenExpiresAt =
+      expiresAt || new Date(Date.now() + 60 * 60 * 1000).toISOString();
     user.updatedAt = this.now();
     this.persist();
   }
@@ -338,10 +349,14 @@ export class LocalPortalRepository implements PortalRepository {
   async confirmEmailChange(userId: string, tokenHash: string): Promise<PortalUserRecord | null> {
     const user = this.state.users.find((u) => u.id === userId && u.pendingEmailTokenHash === tokenHash);
     if (!user || !user.pendingEmail) return null;
+    if (user.pendingEmailTokenExpiresAt && Date.parse(user.pendingEmailTokenExpiresAt) < Date.now()) {
+      return null;
+    }
     user.email = user.pendingEmail;
     user.emailVerified = true;
     user.pendingEmail = undefined;
     user.pendingEmailTokenHash = undefined;
+    user.pendingEmailTokenExpiresAt = undefined;
     user.updatedAt = this.now();
     const profile = this.state.profiles.find((p) => p.userId === userId);
     if (profile) {
@@ -419,6 +434,16 @@ export class LocalPortalRepository implements PortalRepository {
     const ts = this.now();
     for (const s of this.state.sessions) {
       if (s.userId === userId && !s.revokedAt) {
+        s.revokedAt = ts;
+      }
+    }
+    this.persist();
+  }
+
+  async revokeOtherUserSessions(userId: string, keepTokenHash: string): Promise<void> {
+    const ts = this.now();
+    for (const s of this.state.sessions) {
+      if (s.userId === userId && !s.revokedAt && s.tokenHash !== keepTokenHash) {
         s.revokedAt = ts;
       }
     }
@@ -697,13 +722,14 @@ export class LocalPortalRepository implements PortalRepository {
     this.state.invoices.push(invoice);
     this.state.payments.push(payment);
 
-    // If order includes subscriptions, record pending subscription awaiting verified payment
+    // If order includes subscriptions, record pending subscription bound strictly to this orderId
     for (const item of order.items) {
       if (item.billingType === 'subscription_monthly') {
         const pkgInfo = await this.getPackageById(item.packageId);
         this.state.subscriptions.push({
           id: crypto.randomUUID(),
           userId: input.userId,
+          orderId,
           productId: item.productId,
           packageId: item.packageId,
           planName: item.packageName,
@@ -875,12 +901,41 @@ export class LocalPortalRepository implements PortalRepository {
       throw new Error('Payment webhook amount or currency does not match authoritative order total');
     }
 
+    // Enforce providerTransactionId uniqueness across different orders
+    if (input.providerTransactionId) {
+      const duplicateTxn = this.state.payments.find(
+        (p) =>
+          p.provider === input.provider &&
+          p.providerTransactionId === input.providerTransactionId &&
+          p.orderId !== order.id
+      );
+      if (duplicateTxn) {
+        webhookRecord.processingStatus = 'failed';
+        webhookRecord.errorMessage = 'Duplicate providerTransactionId already bound to another order';
+        this.persist();
+        throw new Error('Provider transaction ID is already associated with a different order');
+      }
+    }
+
     const payment = this.state.payments.find((p) => p.orderId === order.id);
     const invoice = this.state.invoices.find((i) => i.orderId === order.id);
     let creditsAllocated = 0;
     let projectCreated: ProjectRecord | undefined;
 
-    if (input.eventStatus === 'paid' && order.paymentStatus !== 'paid') {
+    if (input.eventStatus === 'paid') {
+      if (order.paymentStatus === 'paid') {
+        webhookRecord.processingStatus = 'ignored_duplicate';
+        webhookRecord.processedAt = this.now();
+        this.persist();
+        return { deduplicated: true, order, creditsAllocated: 0 };
+      }
+      if (!['unpaid', 'pending', 'processing'].includes(order.paymentStatus)) {
+        webhookRecord.processingStatus = 'failed';
+        webhookRecord.errorMessage = `Illegal state transition from ${order.paymentStatus} to paid`;
+        this.persist();
+        throw new Error(`Order in status "${order.paymentStatus}" cannot transition to paid`);
+      }
+
       order.paymentStatus = 'paid';
       order.paymentReference = input.providerTransactionId;
       order.fulfillmentStatus = order.projectRequirements?.instructions ? 'confirmed' : 'awaiting_project_brief';
@@ -920,9 +975,9 @@ export class LocalPortalRepository implements PortalRepository {
         creditsAllocated = totalCredits;
       }
 
-      // Activate pending subscriptions for this order
+      // Activate ONLY pending subscriptions belonging strictly to THIS order
       for (const sub of this.state.subscriptions) {
-        if (sub.userId === order.userId && sub.status === 'pending') {
+        if (sub.userId === order.userId && sub.status === 'pending' && sub.orderId === order.id) {
           sub.status = 'active';
           sub.currentPeriodStart = ts;
           sub.currentPeriodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
@@ -961,8 +1016,24 @@ export class LocalPortalRepository implements PortalRepository {
         linkPath: `/portal/orders/${order.id}`,
       });
     } else if (input.eventStatus === 'failed') {
+      if (!['unpaid', 'pending', 'processing'].includes(order.paymentStatus)) {
+        webhookRecord.processingStatus = 'failed';
+        webhookRecord.errorMessage = `Illegal state transition from ${order.paymentStatus} to failed`;
+        this.persist();
+        throw new Error(`Order in status "${order.paymentStatus}" cannot transition to failed`);
+      }
+
       order.paymentStatus = 'failed';
       order.updatedAt = ts;
+
+      // Release pending credits cleanly on failed payment
+      const pendingCreditsTotal = order.items.reduce((sum, i) => sum + i.creditsAllocated * i.quantity, 0);
+      if (pendingCreditsTotal > 0) {
+        const wallet = await this.getWallet(order.userId);
+        wallet.pendingCredits = Math.max(0, wallet.pendingCredits - pendingCreditsTotal);
+        wallet.updatedAt = ts;
+      }
+
       if (payment) {
         payment.status = 'failed';
         payment.failureReason = 'Reported failed by provider webhook';
@@ -977,6 +1048,13 @@ export class LocalPortalRepository implements PortalRepository {
         linkPath: `/portal/orders/${order.id}`,
       });
     } else if (input.eventStatus === 'refunded') {
+      if (order.paymentStatus !== 'paid') {
+        webhookRecord.processingStatus = 'failed';
+        webhookRecord.errorMessage = `Illegal state transition from ${order.paymentStatus} to refunded`;
+        this.persist();
+        throw new Error(`Only paid orders can transition to refunded (current status: "${order.paymentStatus}")`);
+      }
+
       order.paymentStatus = 'refunded';
       order.fulfillmentStatus = 'cancelled';
       order.updatedAt = ts;
@@ -1197,7 +1275,7 @@ export class LocalPortalRepository implements PortalRepository {
         .filter((m) => m.projectId === projectId)
         .sort((a, b) => a.sortOrder - b.sortOrder),
       messages: this.state.projectMessages
-        .filter((m) => m.projectId === projectId && m.userId === userId)
+        .filter((m) => m.projectId === projectId && m.userId === userId && !m.isInternal)
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
       attachments: this.state.attachments
         .filter((a) => a.projectId === projectId && a.userId === userId)
@@ -1263,7 +1341,7 @@ export class LocalPortalRepository implements PortalRepository {
       this.state.projects.filter((p) => p.userId === userId).map((p) => [p.id, p])
     );
     return this.state.projectMessages
-      .filter((m) => m.userId === userId && projectMap.has(m.projectId))
+      .filter((m) => m.userId === userId && !m.isInternal && projectMap.has(m.projectId))
       .map((m) => {
         const prj = projectMap.get(m.projectId)!;
         return {
@@ -1368,17 +1446,27 @@ export class LocalPortalRepository implements PortalRepository {
   ): Promise<ProjectAttachmentRecord> {
     const ts = this.now();
     const id = crypto.randomUUID();
+    const safeStoredName = path.basename(record.storedFileName);
+    if (!safeStoredName || safeStoredName === '.' || safeStoredName === '..') {
+      throw new Error('Invalid stored file name');
+    }
     const saved: ProjectAttachmentRecord = {
       ...record,
+      storedFileName: safeStoredName,
       id,
       uploadedAt: ts,
     };
 
     if (this.filesDir) {
-      fs.mkdirSync(this.filesDir, { recursive: true });
-      fs.writeFileSync(path.join(this.filesDir, record.storedFileName), buffer);
+      const baseDir = path.resolve(this.filesDir);
+      fs.mkdirSync(baseDir, { recursive: true });
+      const resolvedPath = path.resolve(baseDir, safeStoredName);
+      if (!resolvedPath.startsWith(baseDir + path.sep)) {
+        throw new Error('Refusing to write attachment outside private storage directory');
+      }
+      fs.writeFileSync(resolvedPath, buffer);
     } else {
-      this.memoryFileBlobs.set(record.storedFileName, buffer);
+      this.memoryFileBlobs.set(safeStoredName, buffer);
     }
 
     this.state.attachments.push(saved);
@@ -1405,12 +1493,15 @@ export class LocalPortalRepository implements PortalRepository {
   ): Promise<{ record: ProjectAttachmentRecord; buffer: Buffer } | null> {
     const record = this.state.attachments.find((a) => a.id === fileId && a.userId === userId);
     if (!record) return null;
+    const safeStoredName = path.basename(record.storedFileName);
     if (this.filesDir) {
-      const fullPath = path.join(this.filesDir, path.basename(record.storedFileName));
-      if (!fs.existsSync(fullPath)) return null;
-      return { record, buffer: fs.readFileSync(fullPath) };
+      const baseDir = path.resolve(this.filesDir);
+      const resolvedPath = path.resolve(baseDir, safeStoredName);
+      if (!resolvedPath.startsWith(baseDir + path.sep)) return null;
+      if (!fs.existsSync(resolvedPath)) return null;
+      return { record, buffer: fs.readFileSync(resolvedPath) };
     }
-    const buf = this.memoryFileBlobs.get(record.storedFileName);
+    const buf = this.memoryFileBlobs.get(safeStoredName);
     if (!buf) return null;
     return { record, buffer: buf };
   }

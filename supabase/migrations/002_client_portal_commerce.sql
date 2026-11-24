@@ -6,10 +6,11 @@
 
 BEGIN;
 
--- Generic updated_at trigger helper
+-- Generic updated_at trigger helper (pinned search_path)
 CREATE OR REPLACE FUNCTION public.set_portal_updated_at()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = public, pg_temp
 AS $$
 BEGIN
   NEW.updated_at = NOW();
@@ -17,15 +18,45 @@ BEGIN
 END;
 $$;
 
--- Append-only ledger / audit immutability guard
+-- Append-only ledger / audit immutability guard (pinned search_path)
 CREATE OR REPLACE FUNCTION public.prevent_immutable_mutation()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = public, pg_temp
 AS $$
 BEGIN
   RAISE EXCEPTION 'Table %.% is append-only; UPDATE and DELETE are prohibited', TG_TABLE_SCHEMA, TG_TABLE_NAME;
 END;
 $$;
+
+-- Invoice accounting immutability guard (blocks DELETE and prevents mutating historical amounts/line items)
+CREATE OR REPLACE FUNCTION public.prevent_invoice_tampering()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'Issued invoices cannot be deleted';
+  END IF;
+  IF NEW.invoice_number IS DISTINCT FROM OLD.invoice_number
+     OR NEW.order_id IS DISTINCT FROM OLD.order_id
+     OR NEW.user_id IS DISTINCT FROM OLD.user_id
+     OR NEW.currency IS DISTINCT FROM OLD.currency
+     OR NEW.subtotal_minor IS DISTINCT FROM OLD.subtotal_minor
+     OR NEW.discount_minor IS DISTINCT FROM OLD.discount_minor
+     OR NEW.tax_minor IS DISTINCT FROM OLD.tax_minor
+     OR NEW.total_minor IS DISTINCT FROM OLD.total_minor
+     OR NEW.line_items IS DISTINCT FROM OLD.line_items THEN
+    RAISE EXCEPTION 'Issued invoice financial fields are immutable';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+-- Race-free PostgreSQL sequences for sequential order & invoice numbering
+CREATE SEQUENCE IF NOT EXISTS public.portal_order_seq START WITH 1001 INCREMENT BY 1;
+CREATE SEQUENCE IF NOT EXISTS public.portal_invoice_seq START WITH 1001 INCREMENT BY 1;
 
 -- 1. profiles (client portal identity linked strictly to auth.users)
 CREATE TABLE IF NOT EXISTS public.profiles (
@@ -271,6 +302,7 @@ CREATE TABLE IF NOT EXISTS public.credit_transactions (
 CREATE TABLE IF NOT EXISTS public.subscriptions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
+  order_id UUID REFERENCES public.orders(id) ON DELETE SET NULL,
   product_id UUID NOT NULL REFERENCES public.products(id) ON DELETE RESTRICT,
   package_id UUID NOT NULL REFERENCES public.product_packages(id) ON DELETE RESTRICT,
   plan_name TEXT NOT NULL,
@@ -278,6 +310,7 @@ CREATE TABLE IF NOT EXISTS public.subscriptions (
   currency TEXT NOT NULL CHECK (currency IN ('USD', 'PHP')),
   amount_minor BIGINT NOT NULL CHECK (amount_minor >= 0),
   credits_per_cycle INTEGER NOT NULL DEFAULT 0 CHECK (credits_per_cycle >= 0),
+  inclusions JSONB NOT NULL DEFAULT '[]'::jsonb,
   current_period_start TIMESTAMPTZ,
   current_period_end TIMESTAMPTZ,
   cancel_requested_at TIMESTAMPTZ,
@@ -346,6 +379,7 @@ CREATE TABLE IF NOT EXISTS public.project_messages (
   sender_name TEXT NOT NULL,
   body TEXT NOT NULL,
   attachment_ids UUID[] NOT NULL DEFAULT '{}'::uuid[],
+  is_internal BOOLEAN NOT NULL DEFAULT FALSE,
   is_read BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -458,11 +492,21 @@ CREATE INDEX IF NOT EXISTS idx_support_tickets_user ON public.support_tickets(us
 CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON public.notifications(user_id, is_read, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_activity_logs_user ON public.client_activity_logs(user_id, created_at DESC);
 
--- Immutability triggers on financial ledger & webhook audit tables
+-- Immutability triggers on financial ledger, webhook audit, and issued invoices
 DROP TRIGGER IF EXISTS trg_credit_transactions_immutable ON public.credit_transactions;
 CREATE TRIGGER trg_credit_transactions_immutable
   BEFORE UPDATE OR DELETE ON public.credit_transactions
   FOR EACH ROW EXECUTE FUNCTION public.prevent_immutable_mutation();
+
+DROP TRIGGER IF EXISTS trg_payment_webhooks_no_delete ON public.payment_webhook_events;
+CREATE TRIGGER trg_payment_webhooks_no_delete
+  BEFORE DELETE ON public.payment_webhook_events
+  FOR EACH ROW EXECUTE FUNCTION public.prevent_immutable_mutation();
+
+DROP TRIGGER IF EXISTS trg_invoices_immutable ON public.invoices;
+CREATE TRIGGER trg_invoices_immutable
+  BEFORE UPDATE OR DELETE ON public.invoices
+  FOR EACH ROW EXECUTE FUNCTION public.prevent_invoice_tampering();
 
 -- Updated-at triggers
 DROP TRIGGER IF EXISTS trg_profiles_updated_at ON public.profiles;
@@ -475,10 +519,9 @@ DROP TRIGGER IF EXISTS trg_support_tickets_updated_at ON public.support_tickets;
 CREATE TRIGGER trg_support_tickets_updated_at BEFORE UPDATE ON public.support_tickets FOR EACH ROW EXECUTE FUNCTION public.set_portal_updated_at();
 
 -- ============================================================================
--- ROW LEVEL SECURITY (RLS) — STRICT CLIENT DATA ISOLATION
--- Financial tables (orders, order_items, payments, payment_webhook_events,
--- invoices, credit_wallets, credit_transactions, subscriptions) permit SELECT
--- only for the owning client; ALL writes MUST execute server-side via service_role.
+-- ROW LEVEL SECURITY (RLS) & LEAST-PRIVILEGE GRANTS
+-- Financial tables permit SELECT only for the owning client; ALL writes MUST
+-- execute server-side via service_role. PUBLIC and anon receive zero privileges.
 -- ============================================================================
 
 DO $$
@@ -494,44 +537,81 @@ BEGIN
   ]
   LOOP
     EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY;', tbl);
+    EXECUTE format('REVOKE ALL ON TABLE public.%I FROM PUBLIC, anon, authenticated;', tbl);
+    IF tbl <> 'payment_webhook_events' THEN
+      EXECUTE format('GRANT SELECT ON TABLE public.%I TO authenticated;', tbl);
+    END IF;
+    EXECUTE format('GRANT ALL ON TABLE public.%I TO service_role;', tbl);
   END LOOP;
 END $$;
 
--- Catalog: authenticated read-only
+REVOKE ALL ON SEQUENCE public.portal_order_seq FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON SEQUENCE public.portal_invoice_seq FROM PUBLIC, anon, authenticated;
+GRANT USAGE, SELECT ON SEQUENCE public.portal_order_seq TO service_role;
+GRANT USAGE, SELECT ON SEQUENCE public.portal_invoice_seq TO service_role;
+
+-- Catalog: authenticated read-only (idempotent policies)
+DROP POLICY IF EXISTS "Authenticated read product_categories" ON public.product_categories;
 CREATE POLICY "Authenticated read product_categories" ON public.product_categories FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Authenticated read active products" ON public.products;
 CREATE POLICY "Authenticated read active products" ON public.products FOR SELECT TO authenticated USING (is_active = true);
+DROP POLICY IF EXISTS "Authenticated read product_packages" ON public.product_packages;
 CREATE POLICY "Authenticated read product_packages" ON public.product_packages FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Authenticated read product_features" ON public.product_features;
 CREATE POLICY "Authenticated read product_features" ON public.product_features FOR SELECT TO authenticated USING (true);
 
 -- Profiles & addresses: strict owner isolation (no client DELETE on profiles)
+DROP POLICY IF EXISTS "Client reads own profile" ON public.profiles;
 CREATE POLICY "Client reads own profile" ON public.profiles FOR SELECT TO authenticated USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Client reads own addresses" ON public.client_addresses;
 CREATE POLICY "Client reads own addresses" ON public.client_addresses FOR SELECT TO authenticated USING (auth.uid() = user_id);
 
 -- Financial & Commerce: owner SELECT ONLY (server service_role handles ALL writes)
+DROP POLICY IF EXISTS "Client reads own cart" ON public.shopping_carts;
 CREATE POLICY "Client reads own cart" ON public.shopping_carts FOR SELECT TO authenticated USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Client reads own cart items" ON public.cart_items;
 CREATE POLICY "Client reads own cart items" ON public.cart_items FOR SELECT TO authenticated
   USING (EXISTS (SELECT 1 FROM public.shopping_carts c WHERE c.id = cart_id AND c.user_id = auth.uid()));
+DROP POLICY IF EXISTS "Client reads own orders" ON public.orders;
 CREATE POLICY "Client reads own orders" ON public.orders FOR SELECT TO authenticated USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Client reads own order items" ON public.order_items;
 CREATE POLICY "Client reads own order items" ON public.order_items FOR SELECT TO authenticated
   USING (EXISTS (SELECT 1 FROM public.orders o WHERE o.id = order_id AND o.user_id = auth.uid()));
+DROP POLICY IF EXISTS "Client reads own payments" ON public.payments;
 CREATE POLICY "Client reads own payments" ON public.payments FOR SELECT TO authenticated USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Client reads own invoices" ON public.invoices;
 CREATE POLICY "Client reads own invoices" ON public.invoices FOR SELECT TO authenticated USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Client reads own credit wallet" ON public.credit_wallets;
 CREATE POLICY "Client reads own credit wallet" ON public.credit_wallets FOR SELECT TO authenticated USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Client reads own credit ledger" ON public.credit_transactions;
 CREATE POLICY "Client reads own credit ledger" ON public.credit_transactions FOR SELECT TO authenticated USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Client reads own subscriptions" ON public.subscriptions;
 CREATE POLICY "Client reads own subscriptions" ON public.subscriptions FOR SELECT TO authenticated USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Client reads own subscription tx" ON public.subscription_transactions;
 CREATE POLICY "Client reads own subscription tx" ON public.subscription_transactions FOR SELECT TO authenticated USING (auth.uid() = user_id);
 
 -- Projects, Files, Deliverables, Revisions, Support, Notifications, Activities: strict owner SELECT
+DROP POLICY IF EXISTS "Client reads own projects" ON public.projects;
 CREATE POLICY "Client reads own projects" ON public.projects FOR SELECT TO authenticated USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Client reads own milestones" ON public.project_milestones;
 CREATE POLICY "Client reads own milestones" ON public.project_milestones FOR SELECT TO authenticated
   USING (EXISTS (SELECT 1 FROM public.projects p WHERE p.id = project_id AND p.user_id = auth.uid()));
-CREATE POLICY "Client reads own project messages" ON public.project_messages FOR SELECT TO authenticated USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Client reads own project messages" ON public.project_messages;
+CREATE POLICY "Client reads own project messages" ON public.project_messages FOR SELECT TO authenticated
+  USING (auth.uid() = user_id AND is_internal = FALSE);
+DROP POLICY IF EXISTS "Client reads own attachments" ON public.project_attachments;
 CREATE POLICY "Client reads own attachments" ON public.project_attachments FOR SELECT TO authenticated USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Client reads own deliverables" ON public.project_deliverables;
 CREATE POLICY "Client reads own deliverables" ON public.project_deliverables FOR SELECT TO authenticated USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Client reads own revisions" ON public.revision_requests;
 CREATE POLICY "Client reads own revisions" ON public.revision_requests FOR SELECT TO authenticated USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Client reads own support tickets" ON public.support_tickets;
 CREATE POLICY "Client reads own support tickets" ON public.support_tickets FOR SELECT TO authenticated USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Client reads own support messages" ON public.support_messages;
 CREATE POLICY "Client reads own support messages" ON public.support_messages FOR SELECT TO authenticated USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Client reads own notifications" ON public.notifications;
 CREATE POLICY "Client reads own notifications" ON public.notifications FOR SELECT TO authenticated USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Client reads own activities" ON public.client_activity_logs;
 CREATE POLICY "Client reads own activities" ON public.client_activity_logs FOR SELECT TO authenticated USING (auth.uid() = user_id);
 
 -- payment_webhook_events: zero access for authenticated/anon clients (server service_role only)
@@ -554,5 +634,16 @@ VALUES (
   ]
 )
 ON CONFLICT (id) DO NOTHING;
+
+-- Private Storage object isolation: authenticated clients may only read objects under their own user_id/ prefix
+DROP POLICY IF EXISTS "Client reads own private portal files" ON storage.objects;
+CREATE POLICY "Client reads own private portal files"
+  ON storage.objects
+  FOR SELECT
+  TO authenticated
+  USING (
+    bucket_id = 'portal-private-files'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+  );
 
 COMMIT;

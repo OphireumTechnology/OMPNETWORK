@@ -774,34 +774,43 @@ export const PortalInvoicesPage: React.FC = () => {
     };
   }, []);
 
+  const escapeHtml = (value: unknown): string =>
+    String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
   const downloadInvoiceHtml = (inv: any) => {
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${inv.invoiceNumber}</title>
+    const safeInvoiceNum = escapeHtml(inv.invoiceNumber);
+    const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';"><title>${safeInvoiceNum}</title>
 <style>body{font-family:system-ui,sans-serif;color:#0F1D36;padding:40px;max-width:800px;margin:auto}table{width:100%;border-collapse:collapse;margin:24px 0}th,td{padding:10px;border-bottom:1px solid #E6E2D8;text-align:left}.num{text-align:right;font-family:monospace}</style>
 </head><body>
-<h1>${inv.issuingCompany.name}</h1>
-<p>${inv.issuingCompany.registrationNo} · ${inv.issuingCompany.address} · ${inv.issuingCompany.email}</p>
+<h1>${escapeHtml(inv.issuingCompany?.name)}</h1>
+<p>${escapeHtml(inv.issuingCompany?.registrationNo)} &middot; ${escapeHtml(inv.issuingCompany?.address)} &middot; ${escapeHtml(inv.issuingCompany?.email)}</p>
 <hr/>
-<h2>Invoice ${inv.invoiceNumber}</h2>
-<p>Order: ${inv.orderNumber} | Issued: ${formatPortalDate(inv.issuedAt)} | Status: ${formatStatusLabel(inv.paymentStatus)}</p>
-<p><strong>Billed To:</strong> ${inv.clientBilling.fullName} ${inv.clientBilling.companyName ? `(${inv.clientBilling.companyName})` : ''} · ${inv.clientBilling.email}</p>
+<h2>Invoice ${safeInvoiceNum}</h2>
+<p>Order: ${escapeHtml(inv.orderNumber)} | Issued: ${escapeHtml(formatPortalDate(inv.issuedAt))} | Status: ${escapeHtml(formatStatusLabel(inv.paymentStatus))}</p>
+<p><strong>Billed To:</strong> ${escapeHtml(inv.clientBilling?.fullName)}${inv.clientBilling?.companyName ? ` (${escapeHtml(inv.clientBilling.companyName)})` : ''} &middot; ${escapeHtml(inv.clientBilling?.email)}</p>
 <table><thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Unit</th><th class="num">Total</th></tr></thead><tbody>
-${inv.lineItems
+${(inv.lineItems || [])
   .map(
     (li: any) =>
-      `<tr><td>${li.description}</td><td class="num">${li.quantity}</td><td class="num">${formatMoney(li.unitPriceMinor, inv.currency)}</td><td class="num">${formatMoney(li.lineTotalMinor, inv.currency)}</td></tr>`
+      `<tr><td>${escapeHtml(li.description)}</td><td class="num">${escapeHtml(li.quantity)}</td><td class="num">${escapeHtml(formatMoney(li.unitPriceMinor, inv.currency))}</td><td class="num">${escapeHtml(formatMoney(li.lineTotalMinor, inv.currency))}</td></tr>`
   )
   .join('')}
 </tbody></table>
-<p class="num">Subtotal: ${formatMoney(inv.subtotalMinor, inv.currency)}</p>
-<p class="num">Discount: -${formatMoney(inv.discountMinor, inv.currency)}</p>
-<p class="num">Tax: ${formatMoney(inv.taxMinor, inv.currency)}</p>
-<h3 class="num">Total (${inv.currency}): ${formatMoney(inv.totalMinor, inv.currency)}</h3>
+<p class="num">Subtotal: ${escapeHtml(formatMoney(inv.subtotalMinor, inv.currency))}</p>
+<p class="num">Discount: -${escapeHtml(formatMoney(inv.discountMinor, inv.currency))}</p>
+<p class="num">Tax: ${escapeHtml(formatMoney(inv.taxMinor, inv.currency))}</p>
+<h3 class="num">Total (${escapeHtml(inv.currency)}): ${escapeHtml(formatMoney(inv.totalMinor, inv.currency))}</h3>
 </body></html>`;
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${inv.invoiceNumber}.html`;
+    a.download = `${String(inv.invoiceNumber || 'invoice').replace(/[^A-Za-z0-9_-]/g, '_')}.html`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

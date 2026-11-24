@@ -1,6 +1,8 @@
 # Ophireum Multimedia Client Portal — Deployment, Migration & Rollback Guide
 
 > **Operational Notice:** No production database migration or production deployment is executed automatically. Review and approve each checklist item before applying to staging or production.
+>
+> **Production Readiness Gate (Phase 2 Audit):** See `docs/audit/CLIENT_PORTAL_PRODUCTION_READINESS.md`. Before deploying the Client Portal to production, `src/server/portal/supabasePortalRepository.ts` must be upgraded from catalog-only reads to full Supabase PostgreSQL + Storage write persistence, and `002_client_portal_commerce.sql` must pass live staging RLS verification.
 
 ---
 
@@ -21,9 +23,9 @@
 3. Apply `002_client_portal_commerce.sql` in **staging** first.
 4. Verify RLS and table integrity:
    - Confirm `rowsecurity = true` on all 27 tables (`pg_tables` in `public` schema).
-   - Confirm private bucket `portal-private-files` exists with `public = false`.
-   - Confirm `credit_transactions` rejects `UPDATE` and `DELETE` via trigger `credit_transactions_no_mutation`.
-   - Confirm client JWTs can only read/write rows where `user_id = auth.uid()` and cannot directly mutate `orders`, `payments`, `invoices`, `credit_wallets`, or `credit_transactions`.
+   - Confirm private bucket `portal-private-files` exists with `public = false` and owner-folder RLS policy `portal_private_files_owner_select`.
+   - Confirm `credit_transactions` rejects `UPDATE` and `DELETE` via trigger `trg_credit_transactions_immutable` and `invoices` enforces immutability via `trg_invoices_no_tamper`.
+   - Confirm client JWTs can only read/write rows where `user_id = auth.uid()`, cannot access `payment_webhook_events`, and cannot directly mutate `orders`, `payments`, `invoices`, `credit_wallets`, or `credit_transactions`.
 
 ---
 
@@ -90,4 +92,4 @@ Configure these variables in your Node.js host (Railway) and frontend build (Git
 
 1. **Application Rollback**: Revert the Railway deployment and GitHub Pages artifact to the previous release commit. Because the public website code is untouched and portal routes are isolated under `/portal/*` and `/api/portal/*`, rolling back immediately restores the prior runtime with zero impact on existing inquiry/appointment/admin tables.
 2. **Database Rollback (Staging Only)**: Drop the newly added 27 portal tables (which are strictly isolated from legacy `inquiries`, `appointments`, `audit_logs`, and `admin_*` tables) or restore the pre-migration Supabase snapshot.
-3. **Emergency Payment Kill-Switch**: Set `<PROVIDER>_MODE=disabled` and remove provider webhook secret in Railway to immediately freeze automated payment acceptance without taking the portal offline.
+3. **Emergency Payment Kill-Switch**: Remove the provider's `*_SECRET_KEY_TEST` / `*_WEBHOOK_SECRET_TEST` (or `XENDIT_WEBHOOK_TOKEN_TEST` / `PAYPAL_WEBHOOK_SECRET_SANDBOX`) environment variables in Railway and restart to immediately revert that adapter to `disabled` and reject automated webhooks without taking the portal offline.

@@ -213,7 +213,7 @@ export function createApp(deps: AppDependencies = {}): {
       const cleanOrigin = origin.replace(/\/$/, '');
       const isAllowed =
         configuredOrigins.includes(cleanOrigin) ||
-        cleanOrigin.endsWith('.run.app');
+        (process.env.NODE_ENV !== 'production' && cleanOrigin.endsWith('.run.app'));
 
       if (!isAllowed) {
         logStructured('warn', 'cors_origin_blocked', {
@@ -227,10 +227,11 @@ export function createApp(deps: AppDependencies = {}): {
         }
       } else {
         res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
         res.setHeader(
           'Access-Control-Allow-Headers',
-          'Content-Type, Authorization, Idempotency-Key, X-Request-Id'
+          'Content-Type, Authorization, Idempotency-Key, X-Request-Id, X-Requested-With'
         );
         res.setHeader('Access-Control-Max-Age', '600');
       }
@@ -278,6 +279,20 @@ export function createApp(deps: AppDependencies = {}): {
     return strictJsonParser(req, res, next);
   });
 
+  // Initialize Portal Repository upfront so /api/health reports accurate persistence mode
+  const supaUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
+  const supaServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+  const portalRepo: PortalRepository =
+    deps.portalRepo ||
+    (supaUrl && supaServiceKey
+      ? new SupabasePortalRepository(supaUrl, supaServiceKey)
+      : new LocalPortalRepository({
+          persistDir:
+            process.env.NODE_ENV === 'test'
+              ? null
+              : path.resolve(process.cwd(), '.portal-data'),
+        }));
+
   // -----------------------------------------------------------------------
   // 2. HEALTH & CATALOG ENDPOINTS
   // -----------------------------------------------------------------------
@@ -298,6 +313,10 @@ export function createApp(deps: AppDependencies = {}): {
           connected: dbPing.ok,
           latencyMs: dbPing.latencyMs ?? null,
           status: dbPing.ok ? 'up' : dbPing.configured ? 'error' : 'unconfigured',
+        },
+        portalPersistence: {
+          mode: portalRepo.mode,
+          supabaseWritePersistenceImplemented: false,
         },
         email: {
           configured: emailService.isConfigured(),
@@ -1270,19 +1289,6 @@ Tone & Voice Rules:
   // -----------------------------------------------------------------------
   // 6B. CLIENT PORTAL API ROUTER (/api/portal/*)
   // -----------------------------------------------------------------------
-  const supaUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
-  const supaServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
-  const portalRepo: PortalRepository =
-    deps.portalRepo ||
-    (supaUrl && supaServiceKey
-      ? new SupabasePortalRepository(supaUrl, supaServiceKey)
-      : new LocalPortalRepository({
-          persistDir:
-            process.env.NODE_ENV === 'test'
-              ? null
-              : path.resolve(process.cwd(), '.portal-data'),
-        }));
-
   app.use(
     '/api/portal',
     createPortalRouter({

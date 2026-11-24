@@ -123,6 +123,47 @@ class BoundedRateLimiter {
   }
 }
 
+const PORTAL_SESSION_COOKIE = 'opm_portal_session';
+
+function parseCookies(cookieHeader?: string): Record<string, string> {
+  if (!cookieHeader) return {};
+  const result: Record<string, string> = {};
+  for (const part of cookieHeader.split(';')) {
+    const eqIdx = part.indexOf('=');
+    if (eqIdx <= 0) continue;
+    const key = part.slice(0, eqIdx).trim();
+    const val = part.slice(eqIdx + 1).trim();
+    if (key) result[key] = decodeURIComponent(val);
+  }
+  return result;
+}
+
+function setPortalSessionCookie(res: Response, rawToken: string): void {
+  const attributes = [
+    `${PORTAL_SESSION_COOKIE}=${encodeURIComponent(rawToken)}`,
+    'HttpOnly',
+    'Path=/api/portal',
+    'SameSite=None',
+    'Secure',
+    'Partitioned',
+    `Max-Age=${7 * 24 * 60 * 60}`,
+  ];
+  res.setHeader('Set-Cookie', attributes.join('; '));
+}
+
+function clearPortalSessionCookie(res: Response): void {
+  const attributes = [
+    `${PORTAL_SESSION_COOKIE}=`,
+    'HttpOnly',
+    'Path=/api/portal',
+    'SameSite=None',
+    'Secure',
+    'Partitioned',
+    'Max-Age=0',
+  ];
+  res.setHeader('Set-Cookie', attributes.join('; '));
+}
+
 export function createPortalRouter(options: {
   repo: PortalRepository;
   paymentRegistry?: PaymentGatewayRegistry;
@@ -131,13 +172,22 @@ export function createPortalRouter(options: {
   const router = Router();
   const repo = options.repo;
   const paymentRegistry = options.paymentRegistry || new PaymentGatewayRegistry();
-  const signingSecret =
+  const configuredSigningSecret = (
     options.signingSecret ||
     process.env.PORTAL_SIGNING_SECRET ||
     process.env.ADMIN_SESSION_SECRET ||
-    crypto.randomBytes(32).toString('hex');
+    ''
+  ).trim();
+  const isProd = process.env.NODE_ENV === 'production';
+  const hasStrongSigningSecret = configuredSigningSecret.length >= 32;
+  if (isProd && !hasStrongSigningSecret) {
+    logStructured('warn', 'portal_signing_secret_missing_in_production', {
+      message: 'PORTAL_SIGNING_SECRET (32+ chars) is required in production for signed file downloads.',
+    });
+  }
+  const signingSecret = configuredSigningSecret || crypto.randomBytes(32).toString('hex');
 
-  const isDevHelperEnabled = process.env.NODE_ENV !== 'production';
+  const isDevHelperEnabled = !isProd;
   const authLimiter = new BoundedRateLimiter(15 * 60 * 1000, 30);
   const writeLimiter = new BoundedRateLimiter(15 * 60 * 1000, 120);
 
@@ -149,6 +199,7 @@ export function createPortalRouter(options: {
   }
 
   function verifyDownloadUrlToken(fileId: string, userId: string, expUnix: number, sig: string): boolean {
+    if (isProd && !hasStrongSigningSecret) return false;
     if (!Number.isFinite(expUnix) || expUnix < Math.floor(Date.now() / 1000)) return false;
     const expected = signDownloadUrlToken(fileId, userId, expUnix);
     const a = Buffer.from(expected, 'utf8');
@@ -157,17 +208,65 @@ export function createPortalRouter(options: {
     return crypto.timingSafeEqual(a, b);
   }
 
+  async function verifyOwnedAttachmentIds(userId: string, attachmentIds: string[]): Promise<boolean> {
+    if (attachmentIds.length === 0) return true;
+    const owned = await repo.listAttachments(userId);
+    const ownedSet = new Set(owned.map((a) => a.id));
+    return attachmentIds.every((id) => ownedSet.has(id));
+  }
+
+  function isCsrfSafeForCookieAuth(req: Request): boolean {
+    if (!['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method.toUpperCase())) {
+      return true;
+    }
+    const xrw = String(req.headers['x-requested-with'] || '').trim();
+    if (xrw === 'XMLHttpRequest' || xrw === 'fetch') {
+      return true;
+    }
+    const origin = String(req.headers.origin || '').trim().replace(/\/$/, '');
+    if (!origin) return false;
+    const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').trim();
+    if (host && (origin === `https://${host}` || origin === `http://${host}`)) {
+      return true;
+    }
+    const allowed = (process.env.ALLOWED_ORIGINS || '')
+      .split(',')
+      .map((s) => s.trim().replace(/\/$/, ''))
+      .filter(Boolean);
+    return allowed.includes(origin);
+  }
+
   async function requirePortalClient(req: PortalAuthenticatedRequest, res: Response, next: NextFunction) {
     const authHeader = req.headers.authorization || '';
-    if (!authHeader.startsWith('Bearer ')) {
+    let rawToken = '';
+    let authSource: 'bearer' | 'cookie' | null = null;
+
+    if (authHeader.startsWith('Bearer ')) {
+      rawToken = authHeader.slice(7).trim();
+      if (rawToken) authSource = 'bearer';
+    }
+    if (!rawToken) {
+      const cookies = parseCookies(req.headers.cookie);
+      if (cookies[PORTAL_SESSION_COOKIE]) {
+        rawToken = cookies[PORTAL_SESSION_COOKIE].trim();
+        if (rawToken) authSource = 'cookie';
+      }
+    }
+
+    if (!rawToken || !authSource) {
       res.status(401).json({ success: false, code: 'UNAUTHORIZED', error: 'Authentication required. Please sign in to the Client Portal.' });
       return;
     }
-    const rawToken = authHeader.slice(7).trim();
-    if (!rawToken) {
-      res.status(401).json({ success: false, code: 'UNAUTHORIZED', error: 'Missing bearer token.' });
+
+    if (authSource === 'cookie' && !isCsrfSafeForCookieAuth(req)) {
+      res.status(403).json({
+        success: false,
+        code: 'CSRF_CHECK_FAILED',
+        error: 'State-changing cookie request failed CSRF validation.',
+      });
       return;
     }
+
     const tokenHash = sha256Hex(rawToken);
     const session = await repo.findActiveSessionByTokenHash(tokenHash);
     if (!session) {
@@ -313,6 +412,7 @@ export function createPortalRouter(options: {
     }
 
     const verificationToken = crypto.randomBytes(24).toString('hex');
+    const verificationExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     const { user, profile } = await repo.createUser({
       email,
       passwordHash: hashPassword(password),
@@ -321,6 +421,7 @@ export function createPortalRouter(options: {
       companyName,
       phone,
       verificationTokenHash: sha256Hex(verificationToken),
+      verificationTokenExpiresAt: verificationExpiresAt,
     });
 
     const rawSessionToken = crypto.randomBytes(32).toString('hex');
@@ -332,6 +433,7 @@ export function createPortalRouter(options: {
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
     });
 
+    setPortalSessionCookie(res, rawSessionToken);
     logStructured('info', 'portal_client_registered', { userId: user.id, mode: repo.mode });
 
     res.status(201).json({
@@ -383,6 +485,7 @@ export function createPortalRouter(options: {
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
     });
 
+    setPortalSessionCookie(res, rawSessionToken);
     const profile = await repo.getProfile(user.id);
     res.status(200).json({
       success: true,
@@ -422,7 +525,8 @@ export function createPortalRouter(options: {
       return;
     }
     const token = crypto.randomBytes(24).toString('hex');
-    await repo.setVerificationToken(user.id, sha256Hex(token));
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    await repo.setVerificationToken(user.id, sha256Hex(token), expiresAt);
     res.status(200).json({
       success: true,
       message: 'A new verification link has been issued.',
@@ -476,11 +580,13 @@ export function createPortalRouter(options: {
     if (req.portalSessionTokenHash) {
       await repo.revokeSessionByTokenHash(req.portalSessionTokenHash);
     }
+    clearPortalSessionCookie(res);
     res.status(200).json({ success: true });
   });
 
   router.post('/auth/logout-all', requirePortalClient, async (req: PortalAuthenticatedRequest, res: Response) => {
     await repo.revokeAllUserSessions(req.portalUser!.id);
+    clearPortalSessionCookie(res);
     res.status(200).json({ success: true });
   });
 
@@ -522,6 +628,14 @@ export function createPortalRouter(options: {
     const adapter = paymentRegistry.getAdapter(provider);
     if (!adapter) {
       res.status(404).json({ success: false, error: 'Provider adapter not found.' });
+      return;
+    }
+    const adapterConfig = adapter.getConfig();
+    if (isProd && adapterConfig.integrationStatus === 'deferred_merchant_onboarding') {
+      res.status(503).json({
+        success: false,
+        error: `${adapterConfig.displayName} is deferred and cannot process production webhooks.`,
+      });
       return;
     }
 
@@ -689,6 +803,14 @@ export function createPortalRouter(options: {
       res.status(400).json({
         success: false,
         error: 'Company name, contact person, valid email, and project description are required.',
+      });
+      return;
+    }
+
+    if (!(await verifyOwnedAttachmentIds(userId, supportingFileIds))) {
+      res.status(403).json({
+        success: false,
+        error: 'One or more referenced supporting files do not belong to your account.',
       });
       return;
     }
@@ -884,15 +1006,23 @@ export function createPortalRouter(options: {
     }
 
     const reqInfo = req.body?.projectRequirements || {};
+    const referenceFileIds = Array.isArray(reqInfo.referenceFileIds)
+      ? reqInfo.referenceFileIds.map((id: unknown) => sanitizeText(id, 80)).filter(Boolean)
+      : [];
+    if (!(await verifyOwnedAttachmentIds(userId, referenceFileIds))) {
+      res.status(403).json({
+        success: false,
+        error: 'One or more attached reference files do not belong to your account.',
+      });
+      return;
+    }
     const projectRequirements = {
       title: sanitizeText(reqInfo.title, 160),
       instructions: sanitizeText(reqInfo.instructions, 3000),
       deliveryExpectation: sanitizeText(reqInfo.deliveryExpectation, 160),
       creativeBrief: sanitizeText(reqInfo.creativeBrief, 3000),
       specialInstructions: sanitizeText(reqInfo.specialInstructions, 1500),
-      referenceFileIds: Array.isArray(reqInfo.referenceFileIds)
-        ? reqInfo.referenceFileIds.map((id: unknown) => sanitizeText(id, 80)).filter(Boolean)
-        : [],
+      referenceFileIds,
     };
 
     const ts = new Date().toISOString();
@@ -1044,6 +1174,13 @@ export function createPortalRouter(options: {
       res.status(400).json({ success: false, error: 'Valid positive credit amount and service description are required.' });
       return;
     }
+    if (relatedProjectId) {
+      const ownedProject = await repo.getProjectDetail(userId, relatedProjectId);
+      if (!ownedProject) {
+        res.status(403).json({ success: false, error: 'Referenced project does not belong to your account.' });
+        return;
+      }
+    }
 
     try {
       const result = await repo.applyCreditLedgerEntry({
@@ -1157,6 +1294,10 @@ export function createPortalRouter(options: {
       res.status(400).json({ success: false, error: 'Message text or an attachment is required.' });
       return;
     }
+    if (!(await verifyOwnedAttachmentIds(userId, attachmentIds))) {
+      res.status(403).json({ success: false, error: 'One or more attached files do not belong to your account.' });
+      return;
+    }
 
     const profile = await repo.getProfile(userId);
     const message = await repo.addProjectMessage({
@@ -1191,6 +1332,10 @@ export function createPortalRouter(options: {
 
     if (!description || description.length < 5) {
       res.status(400).json({ success: false, error: 'Please describe the requested changes clearly.' });
+      return;
+    }
+    if (!(await verifyOwnedAttachmentIds(userId, attachmentIds))) {
+      res.status(403).json({ success: false, error: 'One or more attached files do not belong to your account.' });
       return;
     }
 
@@ -1308,6 +1453,13 @@ export function createPortalRouter(options: {
   });
 
   router.post('/files/:fileId/sign', async (req: PortalAuthenticatedRequest, res: Response) => {
+    if (isProd && !hasStrongSigningSecret) {
+      res.status(503).json({
+        success: false,
+        error: 'Signed download service is unavailable until PORTAL_SIGNING_SECRET is configured.',
+      });
+      return;
+    }
     const userId = req.portalUser!.id;
     const fileId = sanitizeText(req.params.fileId, 80);
     const found = await repo.getAttachmentById(userId, fileId);
@@ -1343,6 +1495,27 @@ export function createPortalRouter(options: {
       res.status(400).json({ success: false, error: 'Category, subject, and issue description are required.' });
       return;
     }
+    if (!(await verifyOwnedAttachmentIds(userId, attachmentIds))) {
+      res.status(403).json({ success: false, error: 'One or more attached files do not belong to your account.' });
+      return;
+    }
+
+    const relatedOrderId = sanitizeText(req.body?.relatedOrderId, 80) || undefined;
+    const relatedProjectId = sanitizeText(req.body?.relatedProjectId, 80) || undefined;
+    if (relatedOrderId) {
+      const ownedOrder = await repo.getOrderById(userId, relatedOrderId);
+      if (!ownedOrder) {
+        res.status(403).json({ success: false, error: 'Referenced order does not belong to your account.' });
+        return;
+      }
+    }
+    if (relatedProjectId) {
+      const ownedProject = await repo.getProjectDetail(userId, relatedProjectId);
+      if (!ownedProject) {
+        res.status(403).json({ success: false, error: 'Referenced project does not belong to your account.' });
+        return;
+      }
+    }
 
     const profile = await repo.getProfile(userId);
     const ticket = await repo.createSupportTicket({
@@ -1352,8 +1525,8 @@ export function createPortalRouter(options: {
       subject,
       body,
       attachmentIds,
-      relatedOrderId: sanitizeText(req.body?.relatedOrderId, 80) || undefined,
-      relatedProjectId: sanitizeText(req.body?.relatedProjectId, 80) || undefined,
+      relatedOrderId,
+      relatedProjectId,
     });
 
     res.status(201).json({ success: true, ticket });
@@ -1368,6 +1541,10 @@ export function createPortalRouter(options: {
       : [];
     if (!body) {
       res.status(400).json({ success: false, error: 'Reply message is required.' });
+      return;
+    }
+    if (!(await verifyOwnedAttachmentIds(userId, attachmentIds))) {
+      res.status(403).json({ success: false, error: 'One or more attached files do not belong to your account.' });
       return;
     }
     const profile = await repo.getProfile(userId);
@@ -1513,7 +1690,13 @@ export function createPortalRouter(options: {
       return;
     }
     await repo.updatePassword(user.id, hashPassword(newPassword));
-    res.status(200).json({ success: true, message: 'Password updated successfully.' });
+    if (req.portalSessionTokenHash) {
+      await repo.revokeOtherUserSessions(user.id, req.portalSessionTokenHash);
+    }
+    res.status(200).json({
+      success: true,
+      message: 'Password updated successfully. All other active sessions have been signed out.',
+    });
   });
 
   router.post('/security/request-email-change', async (req: PortalAuthenticatedRequest, res: Response) => {
@@ -1534,7 +1717,8 @@ export function createPortalRouter(options: {
       return;
     }
     const token = crypto.randomBytes(24).toString('hex');
-    await repo.requestEmailChange(user.id, newEmail, sha256Hex(token));
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    await repo.requestEmailChange(user.id, newEmail, sha256Hex(token), expiresAt);
     res.status(200).json({
       success: true,
       message: 'Verification code issued to confirm your new email address.',

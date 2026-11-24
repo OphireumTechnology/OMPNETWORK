@@ -29,11 +29,12 @@ import {
 // =========================================================================
 
 export const PortalSupportPage: React.FC = () => {
+  const { query } = usePortalRouter();
   const [tickets, setTickets] = useState<any[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [createOpen, setCreateOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(() => query.get('new') === '1');
   const [error, setError] = useState('');
 
   // Create form

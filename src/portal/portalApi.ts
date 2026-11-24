@@ -1,28 +1,29 @@
 import { apiUrl, createIdempotencyKey } from '../lib/apiClient';
 
-const TOKEN_STORAGE_KEY = 'opm_portal_session_token';
+const LEGACY_TOKEN_STORAGE_KEY = 'opm_portal_session_token';
 
+// Store bearer token strictly in JS module memory (never localStorage) and rely on HttpOnly cookie across reloads.
+let memoryPortalToken: string | null = null;
 let onUnauthorizedHandler: (() => void) | null = null;
+
+try {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    window.localStorage.removeItem(LEGACY_TOKEN_STORAGE_KEY);
+  }
+} catch {
+  // Ignore storage access errors in sandboxed contexts
+}
 
 export function setPortalUnauthorizedHandler(fn: (() => void) | null) {
   onUnauthorizedHandler = fn;
 }
 
 export function getPortalToken(): string | null {
-  try {
-    return window.localStorage.getItem(TOKEN_STORAGE_KEY);
-  } catch {
-    return null;
-  }
+  return memoryPortalToken;
 }
 
 export function setPortalToken(token: string | null) {
-  try {
-    if (token) window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
-    else window.localStorage.removeItem(TOKEN_STORAGE_KEY);
-  } catch {
-    // Ignore storage errors in restricted environments
-  }
+  memoryPortalToken = token;
 }
 
 export class PortalApiError extends Error {
@@ -47,6 +48,7 @@ export async function portalRequest<T = any>(
 ): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',
   };
   const token = options?.skipAuth ? null : getPortalToken();
   if (token) {
@@ -58,6 +60,7 @@ export async function portalRequest<T = any>(
 
   const res = await fetch(apiUrl(`/api/portal${path.startsWith('/') ? path : `/${path}`}`), {
     method: options?.method || 'GET',
+    credentials: 'include',
     headers,
     body: options?.body !== undefined ? JSON.stringify(options.body) : undefined,
   });

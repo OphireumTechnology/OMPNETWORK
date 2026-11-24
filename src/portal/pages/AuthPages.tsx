@@ -84,7 +84,13 @@ export const PortalLoginPage: React.FC = () => {
   const [error, setError] = useState('');
 
   const nextPath = query.get('next');
-  const safeNext = nextPath && nextPath.startsWith('/portal/') ? nextPath : '/portal/dashboard';
+  const safeNext =
+    nextPath &&
+    nextPath.startsWith('/portal/') &&
+    !nextPath.startsWith('//') &&
+    !nextPath.includes('://')
+      ? nextPath
+      : '/portal/dashboard';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

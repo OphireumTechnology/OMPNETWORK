@@ -85,10 +85,12 @@ export interface PortalUserRecord {
   passwordHash?: string;
   emailVerified: boolean;
   verificationTokenHash?: string;
+  verificationTokenExpiresAt?: string;
   resetTokenHash?: string;
   resetTokenExpiresAt?: string;
   pendingEmail?: string;
   pendingEmailTokenHash?: string;
+  pendingEmailTokenExpiresAt?: string;
   accountStatus: 'active' | 'pending_closure' | 'closed';
   closureRequestedAt?: string;
   createdAt: string;
@@ -372,6 +374,7 @@ export interface CreditTransactionRecord {
 export interface SubscriptionRecord {
   id: string;
   userId: string;
+  orderId?: string;
   productId: string;
   packageId: string;
   planName: string;
@@ -423,6 +426,7 @@ export interface ProjectMessageRecord {
   senderName: string;
   body: string;
   attachmentIds: string[];
+  isInternal?: boolean;
   isRead: boolean;
   createdAt: string;
 }
@@ -567,13 +571,14 @@ export interface PortalRepository {
     companyName?: string;
     phone?: string;
     verificationTokenHash: string;
+    verificationTokenExpiresAt?: string;
   }): Promise<{ user: PortalUserRecord; profile: PortalProfileRecord }>;
   verifyEmailByTokenHash(tokenHash: string): Promise<PortalUserRecord | null>;
-  setVerificationToken(userId: string, tokenHash: string): Promise<void>;
+  setVerificationToken(userId: string, tokenHash: string, expiresAt?: string): Promise<void>;
   setResetToken(userId: string, tokenHash: string, expiresAt: string): Promise<void>;
   resetPasswordByTokenHash(tokenHash: string, newPasswordHash: string): Promise<PortalUserRecord | null>;
   updatePassword(userId: string, newPasswordHash: string): Promise<void>;
-  requestEmailChange(userId: string, newEmail: string, tokenHash: string): Promise<void>;
+  requestEmailChange(userId: string, newEmail: string, tokenHash: string, expiresAt?: string): Promise<void>;
   confirmEmailChange(userId: string, tokenHash: string): Promise<PortalUserRecord | null>;
   requestAccountClosure(userId: string, reason: string): Promise<PortalUserRecord>;
 
@@ -583,6 +588,7 @@ export interface PortalRepository {
   listUserSessions(userId: string): Promise<PortalSessionRecord[]>;
   revokeSessionById(userId: string, sessionId: string): Promise<boolean>;
   revokeSessionByTokenHash(tokenHash: string): Promise<void>;
+  revokeOtherUserSessions(userId: string, keepTokenHash: string): Promise<void>;
   revokeAllUserSessions(userId: string): Promise<void>;
 
   // Profile & Addresses

@@ -1,6 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import {
-  getPortalToken,
   portalRequest,
   setPortalToken,
   setPortalUnauthorizedHandler,
@@ -50,12 +49,6 @@ export const PortalAuthProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, []);
 
   const refreshSession = useCallback(async () => {
-    const token = getPortalToken();
-    if (!token) {
-      clearState();
-      setLoading(false);
-      return;
-    }
     try {
       const res = await portalRequest<{
         user: PortalUser;

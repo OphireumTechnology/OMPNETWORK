@@ -73,7 +73,11 @@ function getHeader(headers: Record<string, string | string[] | undefined>, name:
   return '';
 }
 
-function buildHmacWebhookVerifier(secretEnvVar: string, signatureHeader: string) {
+function buildWebhookVerifier(
+  secretEnvVar: string,
+  signatureHeader: string,
+  scheme: 'hmac_sha256' | 'static_token'
+) {
   return (
     headers: Record<string, string | string[] | undefined>,
     rawBody: string,
@@ -87,9 +91,16 @@ function buildHmacWebhookVerifier(secretEnvVar: string, signatureHeader: string)
     if (!provided) {
       return { verified: false, error: `Missing webhook signature header: ${signatureHeader}` };
     }
-    const expectedHmac = crypto.createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex');
-    const cleanProvided = provided.replace(/^sha256=/i, '');
-    const valid = constantTimeEquals(cleanProvided, expectedHmac) || constantTimeEquals(provided, secret);
+    let valid = false;
+    if (scheme === 'static_token') {
+      // Xendit callback verification uses a constant-time static x-callback-token header
+      valid = constantTimeEquals(provided, secret);
+    } else {
+      // Strictly require cryptographic HMAC-SHA256 digest over the exact raw request body
+      const expectedHmac = crypto.createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex');
+      const cleanProvided = provided.replace(/^sha256=/i, '');
+      valid = constantTimeEquals(cleanProvided, expectedHmac);
+    }
     if (!valid) {
       return { verified: false, error: 'Webhook signature verification failed.' };
     }
@@ -133,9 +144,14 @@ function createStandardAdapter(spec: {
   keyEnvVar: string;
   webhookSecretEnvVar: string;
   signatureHeader: string;
+  verificationScheme?: 'hmac_sha256' | 'static_token';
   deferred?: boolean;
 }): PaymentProviderAdapter {
-  const verifyWebhook = buildHmacWebhookVerifier(spec.webhookSecretEnvVar, spec.signatureHeader);
+  const verifyWebhook = buildWebhookVerifier(
+    spec.webhookSecretEnvVar,
+    spec.signatureHeader,
+    spec.verificationScheme || 'hmac_sha256'
+  );
 
   return {
     provider: spec.provider,
@@ -215,6 +231,7 @@ export class PaymentGatewayRegistry {
         keyEnvVar: 'XENDIT_SECRET_KEY_TEST',
         webhookSecretEnvVar: 'XENDIT_WEBHOOK_TOKEN_TEST',
         signatureHeader: 'x-callback-token',
+        verificationScheme: 'static_token',
       }),
       createStandardAdapter({
         provider: 'paypal',

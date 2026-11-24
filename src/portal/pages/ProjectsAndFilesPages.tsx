@@ -31,11 +31,11 @@ function formatBytes(bytes: number): string {
 }
 
 export const PortalProjectsPage: React.FC = () => {
-  const { navigate } = usePortalRouter();
+  const { navigate, query } = usePortalRouter();
   const [projects, setProjects] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [createOpen, setCreateOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(() => query.get('new') === '1');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
