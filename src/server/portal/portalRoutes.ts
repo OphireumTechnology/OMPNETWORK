@@ -379,6 +379,13 @@ export function createPortalRouter(options: {
   // =========================================================================
 
   router.post('/auth/register', async (req: Request, res: Response) => {
+    // Registration is an explicit opt-in. Keep disabled in every environment until
+    // staging Auth, persistence, email delivery and isolation acceptance tests pass.
+    if (process.env.PORTAL_REGISTRATION_ENABLED !== 'true') {
+      res.status(503).json({ success: false, code: 'REGISTRATION_DISABLED', error: 'Client registration is temporarily unavailable while account services complete verification.' });
+      return;
+    }
+
     const ip = req.ip || 'unknown';
     if (!authLimiter.allow(`reg:${ip}`)) {
       res.status(429).json({ success: false, error: 'Too many registration attempts. Please try again shortly.' });
@@ -1010,6 +1017,13 @@ export function createPortalRouter(options: {
 
   // Guided Checkout -> Server-Authoritative Order & Invoice Creation
   router.post('/checkout', async (req: PortalAuthenticatedRequest, res: Response) => {
+    // Checkout remains closed until provider sandbox sessions, webhook verification,
+    // refunds and atomic settlement have passed the staging acceptance suite.
+    if (process.env.PORTAL_CHECKOUT_ENABLED !== 'true') {
+      res.status(503).json({ success: false, code: 'CHECKOUT_DISABLED', error: 'Checkout is temporarily unavailable while payment processing completes verification.' });
+      return;
+    }
+
     const userId = req.portalUser!.id;
     if (!writeLimiter.allow(`checkout:${userId}`)) {
       res.status(429).json({ success: false, error: 'Too many checkout requests. Please wait briefly.' });
