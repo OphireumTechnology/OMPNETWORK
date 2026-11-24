@@ -42,8 +42,9 @@ INSERT INTO public.portal_auth_sessions (user_id, token_hash, expires_at) VALUES
 SET ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000001', false);
 DO $$
-DECLARE visible_profiles INTEGER;
-DECLARE visible_sessions INTEGER;
+DECLARE
+  visible_profiles INTEGER;
+  visible_sessions INTEGER;
 BEGIN
   SELECT count(*) INTO visible_profiles FROM public.profiles;
   IF visible_profiles <> 1 THEN
