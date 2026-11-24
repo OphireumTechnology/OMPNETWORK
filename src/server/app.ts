@@ -826,7 +826,12 @@ export function createApp(deps: AppDependencies = {}): {
 
         let record = createdResult.record;
         const created = createdResult.created;
-        let calResult = {
+        let calResult: {
+          synced: boolean;
+          calendarSyncStatus: 'synced' | 'failed' | 'unconfigured';
+          eventId?: string;
+          meetingLink?: string;
+        } = {
           synced: record.calendarSyncStatus === 'synced',
           calendarSyncStatus: record.calendarSyncStatus as 'synced' | 'failed' | 'unconfigured',
           eventId: record.calendarEventId,
