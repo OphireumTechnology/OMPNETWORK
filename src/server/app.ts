@@ -946,7 +946,7 @@ export function createApp(deps: AppDependencies = {}): {
             res.status(400).json({ success: false, error: 'Valid replacement date and slot are required.' });
             return;
           }
-          const parsedDate = new Date(`${newDate}T00:00:00+08:00`);
+          const parsedDate = new Date(`${newDate}T00:00:00Z`);
           const normalizedDate = Number.isNaN(parsedDate.getTime()) ? '' :
             new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(parsedDate);
           const todayManila = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
