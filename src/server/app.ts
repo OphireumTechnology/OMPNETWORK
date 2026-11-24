@@ -1,3 +1,12 @@
+/*
+Copyright (c) 2026 Ophireum Multimedia Production. All rights reserved.
+Developer and claimed rights holder: Ophireum Multimedia Production
+DTI-registered business, Philippines | Registration No. 7567003
+SPDX-FileCopyrightText: 2026 Ophireum Multimedia Production
+SPDX-License-Identifier: LicenseRef-Ophireum-Proprietary
+Third-party materials, dependencies, and separately licensed components remain subject to their respective rights and licenses.
+*/
+
 import crypto from 'crypto';
 import express, { Request, Response, NextFunction, Express } from 'express';
 import { GoogleGenAI, Type } from '@google/genai';
@@ -80,27 +89,49 @@ const findCatalogMatches = (query: string, limit = 3) => {
 
 class SlidingWindowRateLimiter {
   private readonly store = new Map<string, number[]>();
-  constructor(private readonly windowMs: number, private readonly maxRequests: number) {}
+  private checksSinceCleanup = 0;
+
+  constructor(
+    private readonly windowMs: number,
+    private readonly maxRequests: number,
+    private readonly maxKeys = 10_000
+  ) {}
 
   check(key: string): boolean {
     const now = Date.now();
-    const recent = (this.store.get(key) || []).filter((ts) => now - ts < this.windowMs);
+    const existing = this.store.get(key) || [];
+    const recent = existing.filter((ts) => now - ts < this.windowMs);
+
     if (recent.length >= this.maxRequests) {
       this.store.set(key, recent);
       return false;
     }
+
     recent.push(now);
     this.store.set(key, recent);
+
+    // Bound memory when attackers rotate client identifiers. Cleanup is amortized
+    // and evicts expired keys; if still full, evict the oldest insertion.
+    this.checksSinceCleanup += 1;
+    if (this.checksSinceCleanup >= 250 || this.store.size > this.maxKeys) {
+      this.checksSinceCleanup = 0;
+      for (const [storedKey, timestamps] of this.store) {
+        if (timestamps.every((ts) => now - ts >= this.windowMs)) this.store.delete(storedKey);
+      }
+      while (this.store.size > this.maxKeys) {
+        const oldestKey = this.store.keys().next().value;
+        if (!oldestKey) break;
+        this.store.delete(oldestKey);
+      }
+    }
     return true;
   }
 }
 
 function getClientIp(req: Request): string {
-  const fwd = req.headers['x-forwarded-for'];
-  if (typeof fwd === 'string' && fwd.trim()) {
-    return fwd.split(',')[0].trim();
-  }
-  return req.ip || 'unknown';
+  // Express req.ip is derived from the configured trusted-proxy boundary.
+  // Never trust arbitrary X-Forwarded-For values directly: clients can spoof them.
+  return req.ip || req.socket.remoteAddress || 'unknown';
 }
 
 function parsePagination(req: Request): { limit: number; offset: number } {
@@ -205,8 +236,7 @@ export function createApp(deps: AppDependencies = {}): {
       res.setHeader('Vary', 'Origin');
       const cleanOrigin = origin.replace(/\/$/, '');
       const isAllowed =
-        configuredOrigins.includes(cleanOrigin) ||
-        cleanOrigin.endsWith('.run.app');
+        configuredOrigins.includes(cleanOrigin);
 
       if (!isAllowed) {
         logStructured('warn', 'cors_origin_blocked', {
@@ -268,7 +298,7 @@ export function createApp(deps: AppDependencies = {}): {
     const dbPing = await db.ping();
     const overallStatus = dbPing.ok ? 'healthy' : 'degraded_unconfigured';
 
-    res.status(200).json({
+    res.status(dbPing.ok ? 200 : 503).json({
       status: overallStatus,
       platform: 'OPHIREUM NETWORK API Gateway',
       version: APP_VERSION,
@@ -295,6 +325,7 @@ export function createApp(deps: AppDependencies = {}): {
         },
         adminAuth: {
           bootstrapConfigured: authService.isBootstrapLoginConfigured(),
+          sessionSecretConfigured: authService.isSessionSecretConfigured(),
           supabaseConfigured: dbPing.configured,
         },
       },
@@ -341,6 +372,15 @@ export function createApp(deps: AppDependencies = {}): {
       res.status(400).json({
         success: false,
         error: 'Administrator email and password are required.',
+      });
+      return;
+    }
+
+    if (!authService.isSessionSecretConfigured()) {
+      res.status(503).json({
+        success: false,
+        code: 'SESSION_SECRET_NOT_CONFIGURED',
+        error: 'A stable ADMIN_SESSION_SECRET of at least 32 characters must be configured on the server.',
       });
       return;
     }
