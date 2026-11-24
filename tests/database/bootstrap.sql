@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS storage.objects (
 );
 CREATE OR REPLACE FUNCTION storage.foldername(name TEXT)
 RETURNS TEXT[] LANGUAGE SQL IMMUTABLE AS $$
-  SELECT string_to_array(name, '/')[1:array_length(string_to_array(name, '/'), 1)-1]
+  SELECT (string_to_array(name, '/'))[1:array_length(string_to_array(name, '/'), 1)-1]
 $$;
 GRANT USAGE ON SCHEMA storage TO anon, authenticated, service_role;
 
