@@ -21,7 +21,8 @@ export class SupabasePortalRepository extends LocalPortalRepository implements P
   constructor(supabaseUrl: string, serviceRoleKey: string) {
     super({ persistDir: null });
     this.supabaseUrl = supabaseUrl;
-    this.authApiKey = (process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY || serviceRoleKey).trim();
+    this.authApiKey = (process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY || '').trim();
+    if (!this.authApiKey) throw new Error('SUPABASE_PUBLISHABLE_KEY (or SUPABASE_ANON_KEY) is required for secure client password authentication.');
     this.supabase = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
