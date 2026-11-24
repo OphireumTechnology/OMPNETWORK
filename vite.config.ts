@@ -5,7 +5,10 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
-    base: './',
+    // OMPNETWORK is served from the root of its custom domain.
+    // Absolute asset paths are required so direct SPA routes such as
+    // /portal/login can load the app when GitHub Pages serves the SPA fallback.
+    base: '/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
