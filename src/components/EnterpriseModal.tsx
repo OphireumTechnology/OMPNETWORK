@@ -22,6 +22,7 @@ import {
 import { AIProcessingVisualizer } from './animations/AIProcessingVisualizer';
 import { COMPANY_CONFIG } from '../data/companyConfig';
 import { apiUrl } from '../lib/apiClient';
+import { navigateToPortalPath } from '../portal/PortalRouter';
 
 interface EnterpriseModalProps {
   isOpen: boolean;
@@ -287,9 +288,22 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({
                     Tenants log in with MFA-protected credentials to track deliverables, approve milestone sign-offs, inspect high-bitrate video review links, and communicate directly with project coordinators.
                   </p>
                 </div>
-                <div className="flex items-center gap-2 text-xs font-mono text-slate-400 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800">
-                  <Lock className="w-3.5 h-3.5 text-[#00C2C7]" />
-                  <span>Tenant Isolation: Active</span>
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <div className="flex items-center gap-2 text-xs font-mono text-slate-400 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800">
+                    <Lock className="w-3.5 h-3.5 text-[#00C2C7]" />
+                    <span>Tenant Isolation: Active</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      navigateToPortalPath('/portal/login');
+                    }}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#00C2C7] hover:bg-[#00d8de] text-[#0B1220] text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    <span>Open Client Portal</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
 

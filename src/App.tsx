@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { Header } from './components/Header';
 import { Hero } from './components/Hero';
 import { AboutSection } from './components/AboutSection';
@@ -9,8 +9,12 @@ import { ContactSection } from './components/ContactSection';
 import { EnterpriseModal } from './components/EnterpriseModal';
 import { AIConsultantWidget } from './components/consultant/AIConsultantWidget';
 import { Footer } from './components/Footer';
+import { isPortalRoute } from './portal/PortalRouter';
+
+const ClientPortalApp = lazy(() => import('./portal/ClientPortalApp'));
 
 export default function App() {
+  const [inPortal, setInPortal] = useState<boolean>(() => isPortalRoute());
   const [activeSection, setActiveSection] = useState('hero');
   const [isEnterpriseModalOpen, setIsEnterpriseModalOpen] = useState(false);
   const [enterpriseModalTab, setEnterpriseModalTab] = useState<'portal' | 'studio' | 'agents' | 'admin'>('portal');
@@ -19,6 +23,18 @@ export default function App() {
     nonce: number;
     initialPrompt?: string;
   } | null>(null);
+
+  useEffect(() => {
+    const syncPortalRoute = () => setInPortal(isPortalRoute());
+    window.addEventListener('popstate', syncPortalRoute);
+    window.addEventListener('hashchange', syncPortalRoute);
+    window.addEventListener('opm:routechange', syncPortalRoute);
+    return () => {
+      window.removeEventListener('popstate', syncPortalRoute);
+      window.removeEventListener('hashchange', syncPortalRoute);
+      window.removeEventListener('opm:routechange', syncPortalRoute);
+    };
+  }, []);
 
   // Handle smooth navigation
   const handleNavigate = (sectionId: string) => {
@@ -75,6 +91,23 @@ export default function App() {
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
+
+  if (inPortal) {
+    return (
+      <Suspense
+        fallback={
+          <div className="min-h-screen bg-[#FAF8F4] text-[#0F1D36] flex items-center justify-center p-6">
+            <div className="text-center space-y-2">
+              <div className="w-8 h-8 rounded-full border-2 border-[#0F4C3A] border-t-transparent animate-spin mx-auto" />
+              <p className="text-xs font-medium text-[#64748B]">Loading Ophireum Client Portal...</p>
+            </div>
+          </div>
+        }
+      >
+        <ClientPortalApp />
+      </Suspense>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0B1220] text-slate-100 flex flex-col selection:bg-[#00C2C7]/20 selection:text-[#00C2C7]">

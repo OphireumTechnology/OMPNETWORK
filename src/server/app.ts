@@ -29,8 +29,15 @@ import {
   validateInquiryPayload,
 } from './validation';
 
+import path from 'path';
+import { PortalRepository } from './portal/types';
+import { LocalPortalRepository } from './portal/localPortalRepository';
+import { SupabasePortalRepository } from './portal/supabasePortalRepository';
+import { createPortalRouter } from './portal/portalRoutes';
+
 export interface AppDependencies {
   db?: DatabaseRepository;
+  portalRepo?: PortalRepository;
   emailTransport?: EmailTransport;
   calendarService?: GoogleCalendarService;
   geminiClient?: GoogleGenAI | null;
@@ -220,7 +227,7 @@ export function createApp(deps: AppDependencies = {}): {
         }
       } else {
         res.setHeader('Access-Control-Allow-Origin', origin);
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
         res.setHeader(
           'Access-Control-Allow-Headers',
           'Content-Type, Authorization, Idempotency-Key, X-Request-Id'
@@ -251,10 +258,20 @@ export function createApp(deps: AppDependencies = {}): {
   });
 
   // Strict per-endpoint JSON body limits (never blanket 25MB on JSON routes)
-  const strictJsonParser = express.json({ limit: '100kb' });
+  const strictJsonParser = express.json({
+    limit: '100kb',
+    verify: (req: any, _res, buf) => {
+      if (req.originalUrl && req.originalUrl.startsWith('/api/portal/webhooks/')) {
+        req.rawBody = buf.toString('utf8');
+      }
+    },
+  });
   const audioJsonParser = express.json({ limit: '10mb' });
 
   app.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.path === '/api/portal/files/upload') {
+      return next();
+    }
     if (req.path === '/api/voice/transcribe') {
       return audioJsonParser(req, res, next);
     }
@@ -1249,6 +1266,30 @@ Tone & Voice Rules:
       res.status(500).json({ error: 'Transcription failed' });
     }
   });
+
+  // -----------------------------------------------------------------------
+  // 6B. CLIENT PORTAL API ROUTER (/api/portal/*)
+  // -----------------------------------------------------------------------
+  const supaUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
+  const supaServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+  const portalRepo: PortalRepository =
+    deps.portalRepo ||
+    (supaUrl && supaServiceKey
+      ? new SupabasePortalRepository(supaUrl, supaServiceKey)
+      : new LocalPortalRepository({
+          persistDir:
+            process.env.NODE_ENV === 'test'
+              ? null
+              : path.resolve(process.cwd(), '.portal-data'),
+        }));
+
+  app.use(
+    '/api/portal',
+    createPortalRouter({
+      repo: portalRepo,
+      signingSecret: deps.sessionSecret,
+    })
+  );
 
   // -----------------------------------------------------------------------
   // 7. SAFE CENTRALIZED ERROR HANDLER (Never leak stack traces to clients)
