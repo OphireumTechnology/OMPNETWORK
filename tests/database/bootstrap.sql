@@ -23,8 +23,12 @@ CREATE OR REPLACE FUNCTION auth.uid()
 RETURNS UUID LANGUAGE SQL STABLE AS $$
   SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::UUID
 $$;
-GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;
-CREATE OR REPLACE FUNCTION auth.jwt()\nRETURNS JSONB LANGUAGE SQL STABLE AS $\n  SELECT COALESCE(NULLIF(current_setting('request.jwt.claims', true), ''), '{}')::JSONB\n$;\nGRANT EXECUTE ON FUNCTION auth.uid() TO anon, authenticated, service_role;\nGRANT EXECUTE ON FUNCTION auth.jwt() TO anon, authenticated, service_role;
+CREATE OR REPLACE FUNCTION auth.jwt()
+RETURNS JSONB LANGUAGE SQL STABLE AS $$
+  SELECT COALESCE(NULLIF(current_setting('request.jwt.claims', true), ''), '{}')::JSONB
+$$;
+GRANT EXECUTE ON FUNCTION auth.uid() TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION auth.jwt() TO anon, authenticated, service_role;
 
 CREATE SCHEMA IF NOT EXISTS storage;
 CREATE TABLE IF NOT EXISTS storage.buckets (
