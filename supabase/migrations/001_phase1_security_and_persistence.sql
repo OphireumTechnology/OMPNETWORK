@@ -1,3 +1,10 @@
+-- Copyright (c) 2026 Ophireum Multimedia Production. All rights reserved.
+-- Developer and claimed rights holder: Ophireum Multimedia Production
+-- DTI-registered business, Philippines | Registration No. 7567003
+-- SPDX-FileCopyrightText: 2026 Ophireum Multimedia Production
+-- SPDX-License-Identifier: LicenseRef-Ophireum-Proprietary
+-- Third-party materials, dependencies, and separately licensed components remain subject to their respective rights and licenses.
+
 -- ==============================================================================
 -- OPHIREUM MULTIMEDIA PRODUCTION (OPHIREUM NETWORK)
 -- MIGRATION 001: PHASE 1 CRITICAL SECURITY, RLS & DURABLE PERSISTENCE REPAIR
@@ -38,17 +45,20 @@ LANGUAGE SQL
 STABLE
 SECURITY DEFINER
 SET search_path = public
-AS $$
-  SELECT EXISTS (
-    SELECT 1
-    FROM public.admin_users au
-    WHERE au.is_active = TRUE
-      AND (
-        au.auth_user_id = auth.uid()
-        OR LOWER(au.email) = LOWER(COALESCE(auth.jwt() ->> 'email', ''))
-      )
-  );
-$$;
+AS $fn$
+  SELECT auth.uid() IS NOT NULL
+    AND EXISTS (
+      SELECT 1
+      FROM public.admin_users au
+      WHERE au.is_active = TRUE
+        AND au.auth_user_id = auth.uid()
+    );
+$fn$;
+
+-- The helper is callable by authenticated users for RLS evaluation only.
+-- It grants no row access by itself; each table's RLS policy remains authoritative.
+REVOKE ALL ON FUNCTION public.is_ophireum_admin() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.is_ophireum_admin() TO authenticated, service_role;
 
 -- 3. Add durable solution_requests table
 CREATE TABLE IF NOT EXISTS public.solution_requests (

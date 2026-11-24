@@ -1,3 +1,12 @@
+/*
+Copyright (c) 2026 Ophireum Multimedia Production. All rights reserved.
+Developer and claimed rights holder: Ophireum Multimedia Production
+DTI-registered business, Philippines | Registration No. 7567003
+SPDX-FileCopyrightText: 2026 Ophireum Multimedia Production
+SPDX-License-Identifier: LicenseRef-Ophireum-Proprietary
+Third-party materials, dependencies, and separately licensed components remain subject to their respective rights and licenses.
+*/
+
 import crypto from 'crypto';
 import express, { Request, Response, NextFunction, Express } from 'express';
 import { GoogleGenAI, Type } from '@google/genai';
@@ -80,27 +89,49 @@ const findCatalogMatches = (query: string, limit = 3) => {
 
 class SlidingWindowRateLimiter {
   private readonly store = new Map<string, number[]>();
-  constructor(private readonly windowMs: number, private readonly maxRequests: number) {}
+  private checksSinceCleanup = 0;
+
+  constructor(
+    private readonly windowMs: number,
+    private readonly maxRequests: number,
+    private readonly maxKeys = 10_000
+  ) {}
 
   check(key: string): boolean {
     const now = Date.now();
-    const recent = (this.store.get(key) || []).filter((ts) => now - ts < this.windowMs);
+    const existing = this.store.get(key) || [];
+    const recent = existing.filter((ts) => now - ts < this.windowMs);
+
     if (recent.length >= this.maxRequests) {
       this.store.set(key, recent);
       return false;
     }
+
     recent.push(now);
     this.store.set(key, recent);
+
+    // Bound memory when attackers rotate client identifiers. Cleanup is amortized
+    // and evicts expired keys; if still full, evict the oldest insertion.
+    this.checksSinceCleanup += 1;
+    if (this.checksSinceCleanup >= 250 || this.store.size > this.maxKeys) {
+      this.checksSinceCleanup = 0;
+      for (const [storedKey, timestamps] of this.store) {
+        if (timestamps.every((ts) => now - ts >= this.windowMs)) this.store.delete(storedKey);
+      }
+      while (this.store.size > this.maxKeys) {
+        const oldestKey = this.store.keys().next().value;
+        if (!oldestKey) break;
+        this.store.delete(oldestKey);
+      }
+    }
     return true;
   }
 }
 
 function getClientIp(req: Request): string {
-  const fwd = req.headers['x-forwarded-for'];
-  if (typeof fwd === 'string' && fwd.trim()) {
-    return fwd.split(',')[0].trim();
-  }
-  return req.ip || 'unknown';
+  // Express req.ip is derived from the configured trusted-proxy boundary.
+  // Never trust arbitrary X-Forwarded-For values directly: clients can spoof them.
+  return req.ip || req.socket.remoteAddress || 'unknown';
 }
 
 function parsePagination(req: Request): { limit: number; offset: number } {
@@ -113,6 +144,13 @@ function parsePagination(req: Request): { limit: number; offset: number } {
 
 function hashToken(raw: string): string {
   return crypto.createHash('sha256').update(raw).digest('hex');
+}
+
+function safelyMatchesTokenHash(rawToken: string, expectedHash: string): boolean {
+  if (!rawToken || !/^[a-f0-9]{64}$/i.test(expectedHash || '')) return false;
+  const candidate = Buffer.from(hashToken(rawToken), 'hex');
+  const expected = Buffer.from(expectedHash, 'hex');
+  return candidate.length === expected.length && crypto.timingSafeEqual(candidate, expected);
 }
 
 export function createApp(deps: AppDependencies = {}): {
@@ -156,6 +194,10 @@ export function createApp(deps: AppDependencies = {}): {
   const adminLoginLimiter = new SlidingWindowRateLimiter(
     15 * 60 * 1000,
     deps.rateLimitMaxOverride ?? 10
+  );
+  const appointmentManageLimiter = new SlidingWindowRateLimiter(
+    15 * 60 * 1000,
+    deps.rateLimitMaxOverride ?? 8
   );
 
   // -----------------------------------------------------------------------
@@ -205,8 +247,7 @@ export function createApp(deps: AppDependencies = {}): {
       res.setHeader('Vary', 'Origin');
       const cleanOrigin = origin.replace(/\/$/, '');
       const isAllowed =
-        configuredOrigins.includes(cleanOrigin) ||
-        cleanOrigin.endsWith('.run.app');
+        configuredOrigins.includes(cleanOrigin);
 
       if (!isAllowed) {
         logStructured('warn', 'cors_origin_blocked', {
@@ -268,7 +309,7 @@ export function createApp(deps: AppDependencies = {}): {
     const dbPing = await db.ping();
     const overallStatus = dbPing.ok ? 'healthy' : 'degraded_unconfigured';
 
-    res.status(200).json({
+    res.status(dbPing.ok ? 200 : 503).json({
       status: overallStatus,
       platform: 'OPHIREUM NETWORK API Gateway',
       version: APP_VERSION,
@@ -295,6 +336,7 @@ export function createApp(deps: AppDependencies = {}): {
         },
         adminAuth: {
           bootstrapConfigured: authService.isBootstrapLoginConfigured(),
+          sessionSecretConfigured: authService.isSessionSecretConfigured(),
           supabaseConfigured: dbPing.configured,
         },
       },
@@ -341,6 +383,15 @@ export function createApp(deps: AppDependencies = {}): {
       res.status(400).json({
         success: false,
         error: 'Administrator email and password are required.',
+      });
+      return;
+    }
+
+    if (!authService.isSessionSecretConfigured()) {
+      res.status(503).json({
+        success: false,
+        code: 'SESSION_SECRET_NOT_CONFIGURED',
+        error: 'A stable ADMIN_SESSION_SECRET of at least 32 characters must be configured on the server.',
       });
       return;
     }
@@ -746,25 +797,15 @@ export function createApp(deps: AppDependencies = {}): {
             ? 'KMC | One West Aeropark, 5th Floor & Penthouse, Clark Freeport Zone, Mabalacat City, 2010 Pampanga, Philippines'
             : undefined;
 
-        const calResult = await calendarService.createConsultationEvent({
-          referenceCode,
-          fullName: data.fullName,
-          email: data.email,
-          companyName: data.companyName,
-          consultationType: data.consultationType,
-          scheduledDate: data.scheduledDate,
-          scheduledTimeSlot: data.scheduledTimeSlot,
-          clientTimezone: data.clientTimezone,
-          location: officeLocation,
-          correlationId: req.correlationId,
-        });
+        // Persist the appointment before creating an external calendar event.
+        // A database conflict/failure must never leave an orphaned calendar invitation.
+        const idempotencyHeader = req.headers['idempotency-key'];
+        const idempotencyKey = data.idempotencyKey ||
+          (typeof idempotencyHeader === 'string' ? idempotencyHeader.trim() : undefined);
 
-        // Strictly reflect real integration status: never confirm calendar or fabricate Meet links when unconfigured!
-        const status: 'confirmed' | 'pending_review' = calResult.synced ? 'confirmed' : 'pending_review';
-
-        const { record, created } = await db.createAppointment({
+        const createdResult = await db.createAppointment({
           referenceCode,
-          idempotencyKey: data.idempotencyKey,
+          idempotencyKey,
           fullName: data.fullName,
           email: data.email,
           phone: data.phone,
@@ -775,15 +816,49 @@ export function createApp(deps: AppDependencies = {}): {
           scheduledTimeSlot: data.scheduledTimeSlot,
           durationMinutes: 30,
           clientTimezone: data.clientTimezone,
-          meetingLink: calResult.synced ? calResult.meetingLink : undefined,
           meetingLocation: officeLocation,
           assignedConsultant: 'Dhenze Languisan (Founder & CEO)',
-          status,
-          calendarSyncStatus: calResult.calendarSyncStatus,
-          calendarEventId: calResult.eventId,
+          status: 'pending_review',
+          calendarSyncStatus: calendarService.isConfigured() ? 'pending' : 'unconfigured',
           managementTokenHash,
           notes: data.notes,
         });
+
+        let record = createdResult.record;
+        const created = createdResult.created;
+        let calResult: {
+          synced: boolean;
+          calendarSyncStatus: 'synced' | 'failed' | 'unconfigured';
+          eventId?: string;
+          meetingLink?: string;
+        } = {
+          synced: record.calendarSyncStatus === 'synced',
+          calendarSyncStatus: record.calendarSyncStatus as 'synced' | 'failed' | 'unconfigured',
+          eventId: record.calendarEventId,
+          meetingLink: record.meetingLink,
+        };
+
+        if (created) {
+          calResult = await calendarService.createConsultationEvent({
+            referenceCode,
+            fullName: data.fullName,
+            email: data.email,
+            companyName: data.companyName,
+            consultationType: data.consultationType,
+            scheduledDate: data.scheduledDate,
+            scheduledTimeSlot: data.scheduledTimeSlot,
+            clientTimezone: data.clientTimezone,
+            location: officeLocation,
+            correlationId: req.correlationId,
+          });
+
+          record = await db.updateAppointment(referenceCode, {
+            status: calResult.synced ? 'confirmed' : 'pending_review',
+            calendarSyncStatus: calResult.calendarSyncStatus,
+            calendarEventId: calResult.eventId,
+            meetingLink: calResult.meetingLink,
+          });
+        }
 
         let emailOutcome = { customerStatus: 'unconfigured', adminStatus: 'unconfigured' };
         if (created) {
@@ -834,23 +909,27 @@ export function createApp(deps: AppDependencies = {}): {
   app.patch(
     '/api/appointments/:referenceCode',
     async (req: AuthenticatedAdminRequest, res: Response, next: NextFunction) => {
+      const clientIp = getClientIp(req);
+      if (!appointmentManageLimiter.check(clientIp)) {
+        res.status(429).json({ success: false, error: 'Too many appointment management attempts. Please try again later.' });
+        return;
+      }
       try {
         const referenceCode = sanitizePlainText(req.params.referenceCode, 60);
+        const resolvedAdmin = await authService.resolveAuthenticatedPrincipal(req);
         const existing = await db.getAppointmentByReference(referenceCode);
         if (!existing) {
-          res.status(404).json({ success: false, error: 'Appointment reference not found.' });
+          res.status(resolvedAdmin.adminUser ? 404 : 401).json({
+            success: false,
+            error: resolvedAdmin.adminUser ? 'Appointment reference not found.' : 'Valid management token or administrator authorization required.',
+          });
           return;
         }
-
-        const resolvedAdmin = await authService.resolveAuthenticatedPrincipal(req);
         const token = typeof req.body?.managementToken === 'string' ? req.body.managementToken.trim() : '';
         const providedEmail = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
-
         const tokenAuthorized =
-          Boolean(token && existing.managementTokenHash) &&
-          hashToken(token) === existing.managementTokenHash &&
+          safelyMatchesTokenHash(token, existing.managementTokenHash || '') &&
           (!providedEmail || providedEmail === existing.email.toLowerCase());
-
         if (!resolvedAdmin.adminUser && !tokenAuthorized) {
           res.status(401).json({
             success: false,
@@ -858,7 +937,6 @@ export function createApp(deps: AppDependencies = {}): {
           });
           return;
         }
-
         const action = typeof req.body?.action === 'string' ? req.body.action.trim() : '';
         if (action === 'cancel') {
           const updated = await db.updateAppointment(referenceCode, { status: 'cancelled' });
@@ -866,12 +944,19 @@ export function createApp(deps: AppDependencies = {}): {
           res.json({ success: true, appointment: safeUpdated });
           return;
         }
-
         if (action === 'reschedule') {
           const newDate = typeof req.body?.scheduledDate === 'string' ? req.body.scheduledDate.trim() : '';
           const newSlot = typeof req.body?.scheduledTimeSlot === 'string' ? req.body.scheduledTimeSlot.trim() : '';
           if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate) || !(ALLOWED_APPOINTMENT_SLOTS as readonly string[]).includes(newSlot)) {
             res.status(400).json({ success: false, error: 'Valid replacement date and slot are required.' });
+            return;
+          }
+          const parsedDate = new Date(`${newDate}T00:00:00Z`);
+          const normalizedDate = Number.isNaN(parsedDate.getTime()) ? '' :
+            new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(parsedDate);
+          const todayManila = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+          if (!normalizedDate || normalizedDate !== newDate || newDate <= todayManila || [0, 6].includes(parsedDate.getUTCDay())) {
+            res.status(400).json({ success: false, error: 'Replacement appointments must be on a future weekday in Asia/Manila.' });
             return;
           }
           const booked = await db.getBookedSlotsForDate(newDate);
@@ -884,12 +969,13 @@ export function createApp(deps: AppDependencies = {}): {
             scheduledTimeSlot: newSlot,
             status: 'pending_review',
             calendarSyncStatus: 'pending',
+            calendarEventId: undefined,
+            meetingLink: undefined,
           });
           const { managementTokenHash: _hidden, ...safeUpdated } = updated;
           res.json({ success: true, appointment: safeUpdated });
           return;
         }
-
         res.status(400).json({ success: false, error: 'Unsupported action. Use cancel or reschedule.' });
       } catch (err) {
         next(err);
@@ -897,7 +983,6 @@ export function createApp(deps: AppDependencies = {}): {
     }
   );
 
-  // -----------------------------------------------------------------------
   // 6. HARDENED AI SOLUTIONS CONSULTANT & VOICE ENDPOINTS (BLOCK 8)
   // -----------------------------------------------------------------------
   app.post('/api/consultant/chat', async (req: Request & { correlationId?: string }, res: Response) => {

@@ -1,3 +1,12 @@
+/*
+Copyright (c) 2026 Ophireum Multimedia Production. All rights reserved.
+Developer and claimed rights holder: Ophireum Multimedia Production
+DTI-registered business, Philippines | Registration No. 7567003
+SPDX-FileCopyrightText: 2026 Ophireum Multimedia Production
+SPDX-License-Identifier: LicenseRef-Ophireum-Proprietary
+Third-party materials, dependencies, and separately licensed components remain subject to their respective rights and licenses.
+*/
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -46,6 +55,7 @@ function createBackingStore(): BackingStore {
     admins: [
       {
         id: 'adm-1',
+        authUserId: 'uid-admin',
         email: 'admin@ophireum.com',
         fullName: 'Dhenze Languisan',
         role: 'super_admin',
@@ -293,10 +303,14 @@ class TestDatabaseRepository implements DatabaseRepository {
     };
   }
 
-  async findActiveAdminByEmail(email: string): Promise<AdminUserRecord | null> {
+  async findActiveAdminByEmail(email: string, authUserId?: string): Promise<AdminUserRecord | null> {
     return (
-      this.store.admins.find((a) => a.isActive && a.email.toLowerCase() === email.toLowerCase()) ||
-      null
+      this.store.admins.find(
+        (a) =>
+          a.isActive &&
+          a.email.toLowerCase() === email.toLowerCase() &&
+          (!authUserId || a.authUserId === authUserId)
+      ) || null
     );
   }
 
@@ -726,4 +740,40 @@ test('13-14. AI Consultant deterministic grounding without GEMINI_API_KEY, input
   assert.ok(!schemaContent.includes('USING (true)'), 'schema.sql must not contain USING (true)');
   assert.ok(schemaContent.includes('solution_requests'), 'schema.sql must define solution_requests');
   assert.ok(schemaContent.includes('admin_users'), 'schema.sql must define admin_users');
+});
+
+
+test('security: arbitrary run.app origins are rejected by the exact CORS allowlist', async () => {
+  const previous = process.env.ALLOWED_ORIGINS;
+  process.env.ALLOWED_ORIGINS = 'https://ophireummultimedia.com';
+  const srv = await startTestServer({ db: new TestDatabaseRepository(createBackingStore()) });
+  try {
+    const response = await fetch(`${srv.baseUrl}/api/inquiries`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://untrusted-origin.run.app',
+        'Access-Control-Request-Method': 'POST',
+      },
+    });
+    assert.equal(response.status, 403);
+    assert.equal(response.headers.get('access-control-allow-origin'), null);
+  } finally {
+    await srv.close();
+    if (previous === undefined) delete process.env.ALLOWED_ORIGINS;
+    else process.env.ALLOWED_ORIGINS = previous;
+  }
+});
+
+test('security: health endpoint returns 503 when database dependency is unavailable', async () => {
+  const store = createBackingStore();
+  store.failNextWrite = true;
+  const srv = await startTestServer({ db: new TestDatabaseRepository(store) });
+  try {
+    const response = await fetch(`${srv.baseUrl}/api/health`);
+    const body = await response.json();
+    assert.equal(response.status, 503);
+    assert.equal(body.dependencies.database.connected, false);
+  } finally {
+    await srv.close();
+  }
 });
