@@ -21,8 +21,8 @@ test('Supabase production portal authentication is backed by Auth, Resend, Postg
   assert.match(routes, /repo\.authenticateUser\(email, password\)/);
   assert.match(routes, /setPortalSessionCookie\(res, rawSessionToken\)/);
   assert.match(app, /Production Client Portal requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY/);
-  assert.match(commerceMigration, /ALTER TABLE public\.profiles ENABLE ROW LEVEL SECURITY/);
-  assert.match(commerceMigration, /auth\.uid\(\) = user_id/);
+  assert.match(commerceMigration, /'profiles'.*'client_addresses'/s);
+  assert.match(commerceMigration, /CREATE POLICY "Client reads own profile" ON public\.profiles FOR SELECT TO authenticated USING \(auth\.uid\(\) = user_id\)/);
   assert.match(migration, /ALTER TABLE public\.portal_auth_sessions ENABLE ROW LEVEL SECURITY/);
   assert.match(migration, /GRANT SELECT ON TABLE public\.portal_auth_sessions TO authenticated/);
   assert.match(migration, /auth\.uid\(\)\) = user_id/);
