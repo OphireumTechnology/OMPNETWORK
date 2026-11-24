@@ -16,13 +16,11 @@ export class SupabasePortalRepository extends LocalPortalRepository implements P
   public readonly supabase: SupabaseClient;
   public readonly storageBucket = 'portal-private-files';
   private readonly supabaseUrl: string;
-  private readonly serviceRoleKey: string;
   private readonly authApiKey: string;
 
   constructor(supabaseUrl: string, serviceRoleKey: string) {
     super({ persistDir: null });
     this.supabaseUrl = supabaseUrl;
-    this.serviceRoleKey = serviceRoleKey;
     this.authApiKey = (process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY || serviceRoleKey).trim();
     this.supabase = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
@@ -71,7 +69,7 @@ export class SupabasePortalRepository extends LocalPortalRepository implements P
 
   override async findUserByEmail(email: string): Promise<PortalUserRecord | null> {
     const cleanEmail = email.trim().toLowerCase();
-    const { data, error } = await this.supabase.from('profiles').select('user_id').ilike('email', cleanEmail).maybeSingle();
+    const { data, error } = await this.supabase.from('profiles').select('user_id').eq('email', cleanEmail).maybeSingle();
     if (error) throw new Error(`Unable to check registered email: ${error.message}`);
     if (!data?.user_id) return null;
     return this.findUserById(String(data.user_id));
@@ -93,6 +91,9 @@ export class SupabasePortalRepository extends LocalPortalRepository implements P
       auth: { autoRefreshToken: false, persistSession: false },
     });
     const { data, error } = await authClient.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
+    if (error && /email not confirmed|not confirmed/i.test(error.message)) {
+      throw new Error('Please verify your email address before signing in.');
+    }
     if (error || !data.user) return null;
     if (!data.user.email_confirmed_at && !data.user.confirmed_at) {
       throw new Error('Please verify your email address before signing in.');
@@ -115,7 +116,7 @@ export class SupabasePortalRepository extends LocalPortalRepository implements P
   }): Promise<{ user: PortalUserRecord; profile: PortalProfileRecord }> {
     if (!input.password) throw new Error('A password is required to create a Supabase Auth account.');
     const email = input.email.trim().toLowerCase();
-    const redirectTo = `${(process.env.PORTAL_PUBLIC_URL || 'https://ophireummultimedia.com').replace(/\\/$/, '')}/portal/verify-email?verified=1`;
+    const redirectTo = `${(process.env.PORTAL_PUBLIC_URL || 'https://ophireummultimedia.com').replace(/\/$/, '')}/portal/verify-email?verified=1`;
     const { data: linkData, error: linkError } = await this.supabase.auth.admin.generateLink({
       type: 'signup',
       email,
@@ -134,6 +135,10 @@ export class SupabasePortalRepository extends LocalPortalRepository implements P
       throw new Error(linkError?.message || 'Supabase did not return a signup confirmation link.');
     }
 
+    if (linkData.user.email_confirmed_at || linkData.user.confirmed_at) {
+      await this.supabase.auth.admin.deleteUser(String(linkData.user.id));
+      throw new Error('Supabase Auth email confirmations must be enabled before client registration can be used.');
+    }
     const userId = String(linkData.user.id);
     const { data: profileRow, error: profileError } = await this.supabase.from('profiles').insert({
       user_id: userId,
