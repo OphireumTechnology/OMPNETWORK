@@ -563,9 +563,11 @@ export interface PortalRepository {
   // Auth & Users
   findUserByEmail(email: string): Promise<PortalUserRecord | null>;
   findUserById(userId: string): Promise<PortalUserRecord | null>;
+  authenticateUser?(email: string, password: string): Promise<PortalUserRecord | null>;
   createUser(input: {
     email: string;
     passwordHash: string;
+    password?: string;
     firstName: string;
     lastName: string;
     companyName?: string;

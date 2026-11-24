@@ -9,6 +9,26 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: ophireum_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ophireum_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGDATABASE: ophireum_test
+      PGUSER: postgres
+      PGPASSWORD: postgres
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -33,3 +53,15 @@ jobs:
 
       - name: Verify server bundle compilation
         run: npm run build:server
+
+      - name: Bootstrap disposable Supabase-compatible PostgreSQL fixture
+        run: psql -v ON_ERROR_STOP=1 -f tests/database/bootstrap.sql
+
+      - name: Apply migrations 001, 002 and 003 to disposable PostgreSQL
+        run: |
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/001_phase1_security_and_persistence.sql
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/002_client_portal_commerce.sql
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/003_portal_auth_sessions.sql
+
+      - name: Verify migration structure and client RLS isolation
+        run: psql -v ON_ERROR_STOP=1 -f tests/database/assertions.sql

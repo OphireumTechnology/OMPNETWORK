@@ -282,6 +282,9 @@ export function createApp(deps: AppDependencies = {}): {
   // Initialize Portal Repository upfront so /api/health reports accurate persistence mode
   const supaUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
   const supaServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+  if (!deps.portalRepo && process.env.NODE_ENV === 'production' && (!supaUrl || !supaServiceKey)) {
+    throw new Error('Production Client Portal requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. Local file persistence is disabled in production.');
+  }
   const portalRepo: PortalRepository =
     deps.portalRepo ||
     (supaUrl && supaServiceKey
@@ -316,7 +319,7 @@ export function createApp(deps: AppDependencies = {}): {
         },
         portalPersistence: {
           mode: portalRepo.mode,
-          supabaseWritePersistenceImplemented: false,
+          supabaseWritePersistenceImplemented: false, // Commerce/project persistence remains a separate implementation milestone.\n          portalAuthPersistenceImplemented: portalRepo.mode === 'supabase',
         },
         email: {
           configured: emailService.isConfigured(),

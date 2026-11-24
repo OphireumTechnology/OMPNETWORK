@@ -335,6 +335,7 @@ export const PortalVerifyEmailPage: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const verifiedFromSupabase = query.get('verified') === '1';
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -383,7 +384,7 @@ export const PortalVerifyEmailPage: React.FC = () => {
       title="Verify your email address"
       subtitle="Confirm ownership of your email to secure your Ophireum Multimedia account."
     >
-      {user?.emailVerified || message.includes('verified successfully') ? (
+      {user?.emailVerified || message.includes('verified successfully') || verifiedFromSupabase ? (
         <div className="space-y-4">
           <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200 flex items-start gap-3">
             <CheckCircle2 className="w-5 h-5 text-[#15803D] shrink-0 mt-0.5" />
@@ -392,10 +393,10 @@ export const PortalVerifyEmailPage: React.FC = () => {
             </div>
           </div>
           <button
-            onClick={() => navigate('/portal/dashboard', { replace: true })}
+            onClick={() => navigate(verifiedFromSupabase && !user ? '/portal/login' : '/portal/dashboard', { replace: true })}
             className="w-full py-2.5 px-4 rounded-lg bg-[#0F4C3A] hover:bg-[#0B3B2D] text-white text-sm font-semibold cursor-pointer"
           >
-            Continue to Dashboard
+            {verifiedFromSupabase && !user ? 'Continue to Sign In' : 'Continue to Dashboard'}
           </button>
         </div>
       ) : (

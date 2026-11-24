@@ -24,7 +24,7 @@ interface PortalAuthContextValue {
     lastName: string;
     companyName?: string;
     phone?: string;
-  }) => Promise<{ devVerificationToken?: string }>;
+  }) => Promise<{ devVerificationToken?: string; requiresEmailVerification?: boolean }>;
   logout: () => Promise<void>;
   logoutAll: () => Promise<void>;
 }
@@ -104,13 +104,14 @@ export const PortalAuthProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         user: PortalUser;
         profile: PortalProfile;
         devVerificationToken?: string;
+        requiresEmailVerification?: boolean;
       }>('/auth/register', { method: 'POST', body: input, skipAuth: true });
-      setPortalToken(res.token);
+      if (res.token) setPortalToken(res.token);
       if (res.devVerificationToken) {
         setDevVerificationToken(res.devVerificationToken);
       }
-      await refreshSession();
-      return { devVerificationToken: res.devVerificationToken };
+      if (res.token) await refreshSession();
+      return { devVerificationToken: res.devVerificationToken, requiresEmailVerification: res.requiresEmailVerification };
     },
     [refreshSession]
   );

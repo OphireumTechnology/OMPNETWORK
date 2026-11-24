@@ -413,16 +413,56 @@ export function createPortalRouter(options: {
 
     const verificationToken = crypto.randomBytes(24).toString('hex');
     const verificationExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    const { user, profile } = await repo.createUser({
-      email,
-      passwordHash: hashPassword(password),
-      firstName,
-      lastName,
-      companyName,
-      phone,
-      verificationTokenHash: sha256Hex(verificationToken),
-      verificationTokenExpiresAt: verificationExpiresAt,
-    });
+    let created: Awaited<ReturnType<PortalRepository['createUser']>>;
+    try {
+      created = await repo.createUser({
+        email,
+        passwordHash: hashPassword(password),
+        password,
+        firstName,
+        lastName,
+        companyName,
+        phone,
+        verificationTokenHash: sha256Hex(verificationToken),
+        verificationTokenExpiresAt: verificationExpiresAt,
+      });
+    } catch (error: any) {
+      const message = String(error?.message || '');
+      if (/already registered|already exists|user exists/i.test(message)) {
+        res.status(409).json({ success: false, error: 'That email address is already registered.' });
+        return;
+      }
+      logStructured('error', 'portal_client_registration_failed', {
+        emailDomain: email.split('@')[1] || 'unknown',
+        reason: message.slice(0, 180),
+        mode: repo.mode,
+      });
+      res.status(503).json({
+        success: false,
+        error: repo.mode === 'supabase'
+          ? 'We could not complete registration or deliver your verification email. Please try again later.'
+          : 'Registration could not be completed. Please try again.',
+      });
+      return;
+    }
+    const { user, profile } = created;
+
+    if (repo.mode === 'supabase') {
+      logStructured('info', 'portal_client_registered', { userId: user.id, mode: repo.mode, emailVerification: 'sent_via_resend' });
+      res.status(201).json({
+        success: true,
+        requiresEmailVerification: true,
+        user: {
+          id: user.id,
+          email: user.email,
+          emailVerified: false,
+          accountStatus: user.accountStatus,
+        },
+        profile,
+        verificationNotice: 'Your account has been created. Check your inbox for the verification link before signing in.',
+      });
+      return;
+    }
 
     const rawSessionToken = crypto.randomBytes(32).toString('hex');
     await repo.createSession({
@@ -466,8 +506,25 @@ export function createPortalRouter(options: {
       return;
     }
 
-    const user = await repo.findUserByEmail(email);
-    if (!user || !verifyPassword(password, user.passwordHash)) {
+    let user: PortalUserRecord | null = null;
+    if (repo.mode === 'supabase' && repo.authenticateUser) {
+      try {
+        user = await repo.authenticateUser(email, password);
+      } catch (error: any) {
+        const message = String(error?.message || '');
+        if (/verify your email|email not confirmed|not confirmed/i.test(message)) {
+          res.status(403).json({ success: false, code: 'EMAIL_NOT_VERIFIED', error: 'Please verify your email address before signing in.' });
+          return;
+        }
+        logStructured('error', 'portal_supabase_login_failed', { reason: message.slice(0, 180) });
+        res.status(503).json({ success: false, error: 'Sign-in is temporarily unavailable. Please try again.' });
+        return;
+      }
+    } else {
+      user = await repo.findUserByEmail(email);
+      if (!user || !verifyPassword(password, user.passwordHash)) user = null;
+    }
+    if (!user) {
       res.status(401).json({ success: false, error: 'Invalid email address or password.' });
       return;
     }
