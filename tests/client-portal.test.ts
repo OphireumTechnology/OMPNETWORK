@@ -7,13 +7,18 @@ import { LocalPortalRepository } from '../src/server/portal/localPortalRepositor
 import { PaymentGatewayRegistry } from '../src/server/portal/payments/paymentAdapters';
 
 async function startPortalTestServer(envOverrides?: NodeJS.ProcessEnv) {
+  // Integration tests explicitly opt into the gated local-dev flows. The application
+  // itself remains fail-closed unless deployment operators set these flags.
+  const testEnv: NodeJS.ProcessEnv = {
+    PORTAL_REGISTRATION_ENABLED: 'true',
+    PORTAL_CHECKOUT_ENABLED: 'true',
+    ...(envOverrides || {}),
+  };
   const prevEnv: Record<string, string | undefined> = {};
-  if (envOverrides) {
-    for (const [k, v] of Object.entries(envOverrides)) {
-      prevEnv[k] = process.env[k];
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
+  for (const [k, v] of Object.entries(testEnv)) {
+    prevEnv[k] = process.env[k];
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
   }
 
   const portalRepo = new LocalPortalRepository({ persistDir: null });
@@ -33,11 +38,9 @@ async function startPortalTestServer(envOverrides?: NodeJS.ProcessEnv) {
     portalRepo,
     close: async () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
-      if (envOverrides) {
-        for (const [k, v] of Object.entries(prevEnv)) {
-          if (v === undefined) delete process.env[k];
-          else process.env[k] = v;
-        }
+      for (const [k, v] of Object.entries(prevEnv)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
       }
     },
   };

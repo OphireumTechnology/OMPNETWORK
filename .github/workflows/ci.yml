@@ -2,7 +2,7 @@ name: CI Security & Stabilization Checks
 
 on:
   push:
-    branches: [main, 'repair/**']
+    branches: [main, 'repair/**', 'fix/**', 'audit/**']
   pull_request:
     branches: [main, 'repair/**']
 

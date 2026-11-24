@@ -303,7 +303,8 @@ export function createApp(deps: AppDependencies = {}): {
     const dbPing = await db.ping();
     const overallStatus = dbPing.ok ? 'healthy' : 'degraded_unconfigured';
 
-    res.status(200).json({
+    const isReadinessProbe = req.path.endsWith('/health/ready');
+    res.status(isReadinessProbe && !dbPing.ok ? 503 : 200).json({
       status: overallStatus,
       platform: 'OPHIREUM NETWORK API Gateway',
       version: APP_VERSION,
@@ -344,6 +345,8 @@ export function createApp(deps: AppDependencies = {}): {
 
   app.get('/api/health', healthHandler);
   app.get('/health', healthHandler);
+  app.get('/api/health/ready', healthHandler);
+  app.get('/health/ready', healthHandler);
 
   app.get('/api/catalog', (_req: Request, res: Response) => {
     res.json({
