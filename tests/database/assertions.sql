@@ -35,18 +35,32 @@ INSERT INTO auth.users (id, email) VALUES
 INSERT INTO public.profiles (user_id, email, first_name, last_name) VALUES
   ('10000000-0000-4000-8000-000000000001', 'client-a@example.test', 'Client', 'A'),
   ('20000000-0000-4000-8000-000000000002', 'client-b@example.test', 'Client', 'B');
+INSERT INTO public.portal_auth_sessions (user_id, token_hash, expires_at) VALUES
+  ('10000000-0000-4000-8000-000000000001', repeat('a', 64), NOW() + INTERVAL '1 day'),
+  ('20000000-0000-4000-8000-000000000002', repeat('b', 64), NOW() + INTERVAL '1 day');
 
 SET ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000001', false);
 DO $$
-DECLARE visible_rows INTEGER;
+DECLARE visible_profiles INTEGER;
+DECLARE visible_sessions INTEGER;
 BEGIN
-  SELECT count(*) INTO visible_rows FROM public.profiles;
-  IF visible_rows <> 1 THEN RAISE EXCEPTION 'Client A expected 1 own profile row, saw %', visible_rows; END IF;
+  SELECT count(*) INTO visible_profiles FROM public.profiles;
+  IF visible_profiles <> 1 THEN
+    RAISE EXCEPTION 'Client A expected 1 own profile row, saw %', visible_profiles;
+  END IF;
   IF EXISTS (SELECT 1 FROM public.profiles WHERE email='client-b@example.test') THEN
     RAISE EXCEPTION 'Client A can read Client B profile';
+  END IF;
+
+  SELECT count(*) INTO visible_sessions FROM public.portal_auth_sessions;
+  IF visible_sessions <> 1 THEN
+    RAISE EXCEPTION 'Client A expected 1 own session row, saw %', visible_sessions;
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.portal_auth_sessions WHERE token_hash=repeat('b', 64)) THEN
+    RAISE EXCEPTION 'Client A can read Client B session';
   END IF;
 END $$;
 RESET ROLE;
 
-SELECT 'PASS: migrations applied; RLS enabled; anon denied; owner isolation verified' AS result;
+SELECT 'PASS: migrations applied; RLS enabled; anon denied; profile and session owner isolation verified' AS result;
