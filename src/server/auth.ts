@@ -112,7 +112,7 @@ export class AdminAuthService {
     const sessionPayload = this.verifySessionToken(token);
     if (sessionPayload) {
       const adminRecord = await this.db.findActiveAdminByEmail(sessionPayload.email);
-      if (adminRecord && (adminRecord.role === 'admin' || adminRecord.role === 'super_admin')) {
+      if (adminRecord && adminRecord.id === sessionPayload.sub && adminRecord.role === sessionPayload.role && adminRecord.isActive && (adminRecord.role === 'admin' || adminRecord.role === 'super_admin')) {
         return {
           authenticated: true,
           adminUser: adminRecord,
