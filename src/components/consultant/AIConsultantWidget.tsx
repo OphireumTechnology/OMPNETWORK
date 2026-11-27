@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Bot, X, Send, Calendar, FileText, Phone, Minimize2, 
   Maximize2, RotateCcw, Shield, Building,
@@ -467,19 +468,29 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
     }
   };
 
-  return (
+  const portalTarget = typeof document !== 'undefined' ? document.body : null;
+
+  const floatingUi = (
     <>
       {/* =========================================================================
-          FLOATING LAUNCHER BUTTON (Bottom-Right)
+          FLOATING LAUNCHER BUTTON (Bottom-Right — Single Viewport Fixed Portal)
           ========================================================================= */}
       {!isOpen && (
-        <div className="fixed bottom-6 right-6 z-40 flex items-center gap-3">
+        <div
+          data-testid="ai-consultant-launcher-container"
+          className="fixed z-[9990] flex items-center gap-3 pointer-events-none"
+          style={{
+            right: 'max(1rem, env(safe-area-inset-right, 0px))',
+            bottom: 'max(1rem, env(safe-area-inset-bottom, 0px))',
+          }}
+        >
           {/* Subtle Callout Bubble */}
           {hasUnreadNotice && (
-            <div className="hidden sm:flex items-center gap-2 px-3.5 py-2 bg-[#111827] border border-[#00C2C7]/30 text-xs text-slate-200 rounded-xl shadow-2xl animate-fade-in">
-              <span className="w-2 h-2 rounded-full bg-[#00C2C7] animate-ping" />
+            <div className="hidden sm:flex items-center gap-2 px-3.5 py-2 bg-[#111827] border border-[#00C2C7]/30 text-xs text-slate-200 rounded-xl shadow-2xl animate-fade-in pointer-events-auto">
+              <span className="w-2 h-2 rounded-full bg-[#00C2C7] animate-ping pointer-events-none" />
               <span>Two-way AI voice enabled: <strong>Speak with AI Solutions</strong></span>
-              <button 
+              <button
+                type="button"
                 onClick={(e) => { e.stopPropagation(); setHasUnreadNotice(false); }}
                 className="text-slate-500 hover:text-slate-300 ml-1 cursor-pointer"
                 aria-label="Dismiss notice"
@@ -490,18 +501,24 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
           )}
 
           <button
+            type="button"
+            data-testid="ai-consultant-launcher"
             onClick={() => {
               setIsOpen(true);
               setIsMinimized(false);
               setHasUnreadNotice(false);
             }}
-            className="group relative flex items-center gap-3 px-4 py-3.5 bg-gradient-to-r from-[#111827] via-[#1a2336] to-[#0d1627] text-white rounded-2xl border border-[#00C2C7]/50 shadow-[0_10px_30px_rgba(0,194,199,0.25)] hover:shadow-[0_15px_35px_rgba(0,194,199,0.4)] transition-all duration-300 hover:scale-105 cursor-pointer"
+            className="pointer-events-auto touch-manipulation select-none group relative flex items-center gap-2.5 sm:gap-3 px-3.5 sm:px-4 py-3 sm:py-3.5 min-h-[52px] min-w-[52px] bg-gradient-to-r from-[#111827] via-[#1a2336] to-[#0d1627] text-white rounded-2xl border border-[#00C2C7]/60 shadow-[0_10px_30px_rgba(0,194,199,0.28)] hover:shadow-[0_15px_35px_rgba(0,194,199,0.42)] transition-shadow duration-300 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00C2C7]"
             aria-label="Open AI Solutions Consultant"
+            aria-expanded={isOpen}
           >
-            {/* Outer Glow Ring */}
-            <div className="absolute -inset-0.5 rounded-2xl bg-gradient-to-r from-[#00C2C7] via-[#D4AF37] to-[#00C2C7] opacity-25 group-hover:opacity-60 blur transition duration-300" />
+            {/* Outer Glow Ring — strictly pointer-events-none so taps never miss button */}
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute -inset-0.5 rounded-2xl bg-gradient-to-r from-[#00C2C7] via-[#D4AF37] to-[#00C2C7] opacity-25 group-hover:opacity-60 blur transition duration-300"
+            />
 
-            <div className="relative flex items-center gap-2.5">
+            <div className="relative flex items-center gap-2.5 pointer-events-none">
               <BrandLogo variant="emblem" size="md" ring="brand" decorative />
 
               <div className="text-left hidden sm:block">
@@ -521,14 +538,21 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
       )}
 
       {/* =========================================================================
-          EXPANDABLE CHAT & VOICE PANEL
+          EXPANDABLE CHAT & VOICE PANEL (Single Viewport Fixed Portal, 100dvh Safe)
           ========================================================================= */}
       {isOpen && (
-        <div 
-          className={`fixed right-3 sm:right-6 bottom-3 sm:bottom-6 z-50 bg-[#0B1220] border border-slate-700 rounded-2xl shadow-2xl flex flex-col overflow-hidden transition-all duration-200 ${
-            isMinimized 
-              ? 'w-80 h-16' 
-              : 'w-[calc(100vw-24px)] sm:w-[460px] md:w-[500px] h-[calc(100vh-50px)] sm:h-[670px] max-h-[90vh]'
+        <div
+          role="dialog"
+          aria-label="OPHIREUM AI Solutions Consultant"
+          data-testid="ai-consultant-dialog"
+          style={{
+            right: 'max(0.75rem, env(safe-area-inset-right, 0px))',
+            bottom: 'max(0.75rem, env(safe-area-inset-bottom, 0px))',
+          }}
+          className={`fixed z-[9995] bg-[#0B1220] border border-slate-700 rounded-2xl shadow-2xl flex flex-col overflow-hidden transition-all duration-200 ${
+            isMinimized
+              ? 'w-[min(20rem,calc(100vw-24px))] h-16'
+              : 'w-[calc(100vw-24px)] sm:w-[460px] md:w-[500px] h-[min(670px,calc(100dvh-24px))] max-h-[calc(100dvh-24px)]'
           }`}
         >
           {/* Top Header */}
@@ -1009,15 +1033,17 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
                 >
                   <input
                     type="text"
+                    data-testid="ai-consultant-input"
+                    aria-label="Message AI Solutions Consultant"
                     maxLength={2000}
                     value={inputMessage}
                     onChange={(e) => setInputMessage(e.target.value)}
                     placeholder={
-                      isVoiceActive 
-                        ? "Voice is active, speak aloud or type here..." 
-                        : "Describe your project or ask a question..."
+                      isVoiceActive
+                        ? 'Voice is active, speak aloud or type here...'
+                        : 'Describe your project or type a question...'
                     }
-                    className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#00C2C7] transition-colors"
+                    className="flex-1 min-w-0 px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#00C2C7] transition-colors"
                   />
 
                   {/* Mic Quick Trigger */}
@@ -1099,7 +1125,7 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
           EXECUTIVE ESCALATION MODAL (Founder & CEO Direct Channel)
           ========================================================================= */}
       {isEscalationModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+        <div className="fixed inset-0 z-[9998] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
           <div className="relative w-full max-w-lg bg-[#0B1220] border border-[#00C2C7]/40 rounded-2xl shadow-2xl overflow-hidden p-6">
             <div className="flex items-center justify-between pb-4 border-b border-slate-800">
               <div className="flex items-center gap-3">
@@ -1110,6 +1136,7 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => setIsEscalationModalOpen(false)}
                 className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
                 aria-label="Close modal"
@@ -1128,13 +1155,13 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
                       Direct executive oversight for high-value media productions, enterprise contracts, and proprietary technology architecture.
                     </p>
                   </div>
-                  <span className="text-[10px] font-mono text-[#00C2C7] bg-[#00C2C7]/10 px-2 py-0.5 rounded border border-[#00C2C7]/30">
+                  <span className="text-[10px] font-mono text-[#00C2C7] bg-[#00C2C7]/10 px-2 py-0.5 rounded border border-[#00C2C7]/30 shrink-0">
                     EXECUTIVE SUITE
                   </span>
                 </div>
 
                 <div className="mt-4 pt-3 border-t border-slate-800/80 space-y-2 text-xs">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <span className="text-slate-400 flex items-center gap-1.5">
                       <Phone className="w-3.5 h-3.5 text-[#00C2C7]" />
                       <span>Direct Mobile / WhatsApp:</span>
@@ -1147,25 +1174,25 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
                     </a>
                   </div>
 
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <span className="text-slate-400 flex items-center gap-1.5">
                       <Building className="w-3.5 h-3.5 text-[#00C2C7]" />
                       <span>Executive Suite:</span>
                     </span>
-                    <span className="text-slate-300 font-medium">KMC | One West Aeropark</span>
+                    <span className="text-slate-300 font-medium text-right">KMC | One West Aeropark</span>
                   </div>
 
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <span className="text-slate-400 flex items-center gap-1.5">
                       <MapPin className="w-3.5 h-3.5 text-[#00C2C7]" />
                       <span>Freeport Location:</span>
                     </span>
-                    <span className="text-slate-300">Clark Freeport Zone, Pampanga</span>
+                    <span className="text-slate-300 text-right">Clark Freeport Zone, Pampanga</span>
                   </div>
                 </div>
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <a
                   href={`tel:${COMPANY_CONFIG.mobile.replace(/\s+/g, '')}`}
                   className="flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-[#00C2C7] to-[#009b9f] text-[#0B1220] font-bold text-xs text-center flex items-center justify-center gap-2 shadow-lg hover:brightness-110 transition-all cursor-pointer"
@@ -1174,6 +1201,7 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
                   <span>Call {COMPANY_CONFIG.mobile}</span>
                 </a>
                 <button
+                  type="button"
                   onClick={() => {
                     setIsEscalationModalOpen(false);
                     setIsBookingModalOpen(true);
@@ -1190,4 +1218,6 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
       )}
     </>
   );
+
+  return portalTarget ? createPortal(floatingUi, portalTarget) : floatingUi;
 };

@@ -61,12 +61,13 @@ export const Header: React.FC<HeaderProps> = ({ onOpenPortal, onNavigate, active
       </div>
 
       {/* Main Navigation Bar — Desktop Height 88px */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-[88px] flex items-center justify-between gap-4">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 min-h-[76px] sm:h-[88px] py-2 sm:py-0 flex items-center justify-between gap-2 sm:gap-4">
         
         {/* Zone 1: Official Corporate Emblem & Exact Registered Name */}
         <button
+          type="button"
           onClick={() => handleNavClick('hero')}
-          className="flex items-center gap-3.5 sm:gap-4 group text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00C2C7] shrink-0"
+          className="flex items-center gap-2.5 sm:gap-4 group text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00C2C7] min-w-0 flex-1 lg:flex-initial lg:shrink-0"
           aria-label={`${COMPANY_CONFIG.name} Homepage`}
         >
           {/* Official Logo: 54px on desktop, 44px on mobile */}
@@ -76,16 +77,16 @@ export const Header: React.FC<HeaderProps> = ({ onOpenPortal, onNavigate, active
             ring="brand"
             eager
             decorative
-            className="group-hover:shadow-[#00C2C7]/40 transition-all"
+            className="shrink-0 group-hover:shadow-[#00C2C7]/40 transition-all"
           />
 
-          <div className="flex flex-col justify-center">
-            {/* Main company name: 16-18px Plus Jakarta Sans bold */}
-            <span className="text-[15px] sm:text-[17px] font-bold tracking-wide text-white uppercase group-hover:text-[#00C2C7] transition-colors leading-tight">
+          <div className="flex flex-col justify-center min-w-0">
+            {/* Main company name: responsive mobile wrapping so 320px-412px never overflows */}
+            <span className="text-[12.5px] min-[390px]:text-[14px] sm:text-[17px] font-bold tracking-wide text-white uppercase group-hover:text-[#00C2C7] transition-colors leading-tight break-words sm:whitespace-nowrap">
               {COMPANY_CONFIG.name}
             </span>
             {/* Secondary brand: 10-11px cyan medium */}
-            <span className="text-[10px] sm:text-[10.5px] font-medium tracking-widest text-[#00C2C7] uppercase mt-0.5 font-mono">
+            <span className="text-[9.5px] sm:text-[10.5px] font-medium tracking-widest text-[#00C2C7] uppercase mt-0.5 font-mono truncate">
               {COMPANY_CONFIG.platformName}
             </span>
           </div>

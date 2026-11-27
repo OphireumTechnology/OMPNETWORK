@@ -2,6 +2,12 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Enterprise Reliability, Accessibility, Privacy & Legal Governance E2E', () => {
   test('exposes structured health, readiness, and version endpoints without leaking secrets', async ({ request }) => {
+    const livenessRes = await request.get('/healthz');
+    expect(livenessRes.status()).toBe(200);
+    const liveness = await livenessRes.json();
+    expect(liveness.ok).toBe(true);
+    expect(liveness.status).toBe('alive');
+
     const healthRes = await request.get('/api/health');
     expect(healthRes.ok()).toBeTruthy();
     const health = await healthRes.json();
@@ -21,6 +27,11 @@ test.describe('Enterprise Reliability, Accessibility, Privacy & Legal Governance
     expect(versionRes.ok()).toBeTruthy();
     const version = await versionRes.json();
     expect(version.packageName).toBe('ophireum-network');
+    expect(typeof version.commitSha).toBe('string');
+    expect(typeof version.buildTimestamp).toBe('string');
+    expect(typeof version.deploymentEnvironment).toBe('string');
+    expect(typeof version.databaseAdapter).toBe('string');
+    expect(typeof version.migrationCompatibilityStatus).toBe('string');
     expect(typeof version.nodeVersion).toBe('string');
   });
 
@@ -36,7 +47,7 @@ test.describe('Enterprise Reliability, Accessibility, Privacy & Legal Governance
     const overflow = await page.evaluate(() => {
       return document.documentElement.scrollWidth - window.innerWidth;
     });
-    expect(overflow).toBeLessThanOrEqual(4);
+    expect(overflow).toBeLessThanOrEqual(0);
     expect(consoleErrors).toEqual([]);
   });
 

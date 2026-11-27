@@ -336,17 +336,17 @@
       "timeout": 60000,
       "env": {
         "GOOGLE_RUNTIME": "nodejs22",
-        "LANGUAGE": "en_US:en",
         "NO_UPDATE_NOTIFIER": "1",
+        "LANGUAGE": "en_US:en",
         "npm_config_user_agent": "npm/10.9.9 node/v22.23.5 linux x64 workspaces/false",
         "NODE_VERSION": "22.23.5",
-        "APP_URL": "https://ais-dev-2widw3qjql7hz5pthosn47-408877721892.asia-east1.run.app",
-        "YARN_VERSION": "1.22.22",
         "CONTROL_PLANE_PORT": "8000",
         "K_REVISION": "ais-dev-2widw3qjql7hz5pthosn47-00001-92j",
+        "YARN_VERSION": "1.22.22",
+        "APP_URL": "https://ais-dev-2widw3qjql7hz5pthosn47-408877721892.asia-east1.run.app",
         "npm_node_execpath": "/usr/local/bin/node",
-        "DEFAULT_APP_PORT": "3000",
         "SHLVL": "0",
+        "DEFAULT_APP_PORT": "3000",
         "npm_config_noproxy": "",
         "HOME": "/root",
         "PORT": "3000",
@@ -355,27 +355,27 @@
         "NODE_OPTIONS": "--max-old-space-size=4096",
         "npm_config_userconfig": "/root/.npmrc",
         "npm_config_local_prefix": "/app/applet",
-        "PLAYWRIGHT_CLI_VERSION": "0.1.22",
         "NG_ALLOWED_HOSTS": "ais-dev-2widw3qjql7hz5pthosn47-408877721892.asia-east1.run.app",
+        "PLAYWRIGHT_CLI_VERSION": "0.1.22",
         "COLOR": "0",
         "CLOUD_RUN_TIMEOUT_SECONDS": "3600",
-        "K_CONFIGURATION": "ais-dev-2widw3qjql7hz5pthosn47",
         "APPLET_ID": "ca33367a-b31d-49aa-8444-8ffb0dda32e1",
+        "K_CONFIGURATION": "ais-dev-2widw3qjql7hz5pthosn47",
         "_": "/app/control-plane-api/control-plane-api",
         "npm_config_prefix": "/usr/local",
         "npm_config_npm_version": "10.9.9",
         "APPLET_DIR": "applet",
         "npm_config_cache": "/root/.npm",
-        "GOMEMLIMIT": "512MiB",
         "CONTROL_PLANE_API_DIR": "control-plane-api",
+        "GOMEMLIMIT": "512MiB",
         "npm_config_node_gyp": "/usr/local/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js",
         "PATH": "/app/applet/node_modules/.bin:/app/node_modules/.bin:/node_modules/.bin:/usr/local/lib/node_modules/npm/node_modules/@npmcli/run-script/lib/node-gyp-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         "NEXT_TELEMETRY_DISABLED": "1",
         "NODE": "/usr/local/bin/node",
         "npm_package_name": "ophireum-network",
         "CNB_GROUP_ID": "33",
-        "CNB_USER_ID": "33",
         "PLAYWRIGHT_BROWSERS_PATH": "/ms-playwright",
+        "CNB_USER_ID": "33",
         "APP_DIR": "/app/applet",
         "LANG": "en_US.UTF-8",
         "npm_config_nodedir": "/usr/local",
@@ -386,8 +386,8 @@
         "NGINX_PORT": "8080",
         "npm_config_globalconfig": "/usr/local/etc/npmrc",
         "npm_config_init_module": "/root/.npm-init.js",
-        "LC_ALL": "en_US.UTF-8",
         "PWD": "/app/applet",
+        "LC_ALL": "en_US.UTF-8",
         "npm_execpath": "/usr/local/lib/node_modules/npm/bin/npm-cli.js",
         "npm_config_global_prefix": "/usr/local",
         "AUTHORIZED_SERVICE_ACCOUNT_EMAIL": "ais-sandbox@ais-asia-east1-7b85ae7e1de8449.iam.gserviceaccount.com",
@@ -397,6 +397,7 @@
         "CNB_STACK_ID": "google.gae.22",
         "INIT_CWD": "/app/applet",
         "EDITOR": "vi",
+        "BROWSERSLIST_IGNORE_OLD_DATA": "true",
         "ADMIN_BOOTSTRAP_EMAIL": "e2e-admin@ophireum.test",
         "ADMIN_BOOTSTRAP_PASSWORD": "OphireumE2EAdminPass!2026",
         "ADMIN_SESSION_SECRET": "ophireum-e2e-session-secret-0123456789abcdef",
@@ -673,7 +674,7 @@
               ],
               "id": "21ff83ff28adf02b0418-80ccad5ebaf1c771ef5a",
               "file": "enterprise-platform.spec.ts",
-              "line": 27,
+              "line": 38,
               "column": 3
             },
             {
@@ -729,7 +730,7 @@
               ],
               "id": "21ff83ff28adf02b0418-ffd39554c7bb6dc4acb5",
               "file": "enterprise-platform.spec.ts",
-              "line": 43,
+              "line": 54,
               "column": 3
             },
             {
@@ -785,7 +786,7 @@
               ],
               "id": "21ff83ff28adf02b0418-a2b506093504739a71c9",
               "file": "enterprise-platform.spec.ts",
-              "line": 48,
+              "line": 59,
               "column": 3
             }
           ]
@@ -802,7 +803,7 @@
         {
           "title": "Phase 26 E2E — Public Website, Navigation, Services Catalog & AI Voice/Chat",
           "file": "public-and-ai.spec.ts",
-          "line": 3,
+          "line": 61,
           "column": 6,
           "specs": [
             {
@@ -858,7 +859,7 @@
               ],
               "id": "2077ad6fd23395d1327b-444fae1348f8e1c1cd5d",
               "file": "public-and-ai.spec.ts",
-              "line": 4,
+              "line": 62,
               "column": 3
             },
             {
@@ -914,7 +915,7 @@
               ],
               "id": "2077ad6fd23395d1327b-62abb3850b121872e9ce",
               "file": "public-and-ai.spec.ts",
-              "line": 21,
+              "line": 83,
               "column": 3
             },
             {
@@ -970,7 +971,7 @@
               ],
               "id": "2077ad6fd23395d1327b-1e434e150ab40c9afb5e",
               "file": "public-and-ai.spec.ts",
-              "line": 56,
+              "line": 148,
               "column": 3
             }
           ]
@@ -980,8 +981,8 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-11-27T18:15:06.626Z",
-    "duration": 64.45600000000013,
+    "startTime": "2026-11-27T22:16:09.825Z",
+    "duration": 199.077,
     "expected": 0,
     "skipped": 45,
     "unexpected": 0,

@@ -13,16 +13,16 @@ interface HeroProps {
 export const Hero: React.FC<HeroProps> = ({ onNavigate, onOpenPortal }) => {
   return (
     <section id="hero" className="relative pt-10 pb-20 lg:pt-16 lg:pb-28 overflow-hidden bg-[#0B1220]">
-      {/* Dynamic Animated Blockchain Network Background Canvas */}
-      <div className="absolute inset-0 pointer-events-auto opacity-70">
-        <BlockchainNetworkCanvas nodeCount={50} interactive={true} />
+      {/* Dynamic Animated Blockchain Network Background Canvas — strictly non-intercepting */}
+      <div aria-hidden="true" className="absolute inset-0 pointer-events-none opacity-70">
+        <BlockchainNetworkCanvas nodeCount={50} interactive={false} />
       </div>
 
       {/* Atmospheric lighting halos */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[500px] bg-[#00C2C7]/10 blur-[140px] rounded-full pointer-events-none" />
-      <div className="absolute top-1/3 right-10 w-[380px] h-[380px] bg-[#D4AF37]/6 blur-[130px] rounded-full pointer-events-none" />
+      <div aria-hidden="true" className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(700px,100vw)] h-[500px] bg-[#00C2C7]/10 blur-[140px] rounded-full pointer-events-none" />
+      <div aria-hidden="true" className="absolute top-1/3 right-0 sm:right-10 w-[min(380px,90vw)] h-[380px] bg-[#D4AF37]/6 blur-[130px] rounded-full pointer-events-none" />
 
-      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pointer-events-none">
+      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         
         {/* Trust & Location Indicator */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium text-slate-400 mb-6 pointer-events-auto">

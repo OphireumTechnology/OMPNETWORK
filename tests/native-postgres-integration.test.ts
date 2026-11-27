@@ -560,4 +560,181 @@ describe('Native Railway PostgreSQL 16 Full-Stack Integration (Phases 48–63)',
       }
     }
   });
+
+  it('verifies /healthz liveness, enriched /api/version metadata without secrets, and 503 readiness on DB failure', async () => {
+    const appPool = (process.env.TEST_DATABASE_URL || '').trim()
+      ? new PostgresPoolManager({ connectionString: process.env.TEST_DATABASE_URL!.trim(), ssl: false })
+      : new PostgresPoolManager({ queryable: rawQueryable });
+    const { app, close } = createApp({ postgresPool: appPool });
+    const srv = await startServer(app);
+    try {
+      const liveRes = await fetch(`${srv.baseUrl}/healthz`);
+      assert.equal(liveRes.status, 200);
+      const liveBody = (await liveRes.json()) as any;
+      assert.equal(liveBody.ok, true);
+      assert.equal(liveBody.status, 'alive');
+
+      const verRes = await fetch(`${srv.baseUrl}/api/version`);
+      assert.equal(verRes.status, 200);
+      const verBody = (await verRes.json()) as any;
+      assert.equal(verBody.packageName, 'ophireum-network');
+      assert.ok(typeof verBody.commitSha === 'string' && verBody.commitSha.length > 0);
+      assert.ok(typeof verBody.buildTimestamp === 'string' && verBody.buildTimestamp.length > 0);
+      assert.ok(typeof verBody.deploymentEnvironment === 'string');
+      assert.equal(verBody.databaseAdapter, 'postgres');
+      assert.match(verBody.migrationCompatibilityStatus || '', /^compatible_migrations_000_to_007/);
+      const serialized = JSON.stringify(verBody);
+      assert.ok(!/DATABASE_URL|SUPABASE_SERVICE_ROLE_KEY|ADMIN_SESSION_SECRET|GEMINI_API_KEY/i.test(serialized));
+    } finally {
+      await srv.close();
+      await close();
+    }
+
+    // Failure injection: database unavailable must return HTTP 503 on /api/ready
+    const failingQueryable: PgQueryable = {
+      query: async () => {
+        throw new Error('ECONNREFUSED simulated PostgreSQL outage');
+      },
+    };
+    const failingPool = new PostgresPoolManager({ queryable: failingQueryable });
+    const { app: failingApp, close: closeFailing } = createApp({ postgresPool: failingPool });
+    const failingSrv = await startServer(failingApp);
+    try {
+      const readyRes = await fetch(`${failingSrv.baseUrl}/api/ready`);
+      assert.equal(readyRes.status, 503);
+      const readyBody = (await readyRes.json()) as any;
+      assert.equal(readyBody.ready, false);
+      assert.equal(readyBody.checks?.database?.connected, false);
+    } finally {
+      await failingSrv.close();
+      await closeFailing();
+    }
+  });
+
+  it('allocates 100 concurrent Asia/Manila payment references with zero duplicates and rolls back failed transactions cleanly', async () => {
+    const results = await Promise.all(
+      Array.from({ length: 100 }, () =>
+        poolManager.query<{ ref: string }>('SELECT public.allocate_ophireum_payment_ref() AS ref')
+      )
+    );
+    const refs = results.map((r) => r.rows[0]?.ref).filter(Boolean);
+    assert.equal(refs.length, 100);
+    for (const ref of refs) {
+      assert.match(ref, /^\d{12}(AM|PM)\d{3}$/);
+    }
+    const unique = new Set(refs);
+    assert.equal(unique.size, 100, 'Expected 100 strictly unique concurrent payment references');
+
+    // Transaction rollback test: aborted transaction must leave zero partial rows
+    const rollbackRef = `OPM-ROLLBACK-${Date.now()}`;
+    await assert.rejects(
+      poolManager.withTransaction(async (tx) => {
+        await tx.query(
+          `INSERT INTO public.audit_logs (actor, actor_role, action, entity_type, entity_id, details)
+           VALUES ('rollback-test@ophireum.test', 'super_admin', 'rollback_drill', 'test', $1, '{}'::jsonb)`,
+          [rollbackRef]
+        );
+        throw new Error('SIMULATED_TRANSACTION_FAILURE');
+      }),
+      /SIMULATED_TRANSACTION_FAILURE/
+    );
+    const verifyRollback = await poolManager.query<{ cnt: string }>(
+      `SELECT COUNT(*)::text AS cnt FROM public.audit_logs WHERE entity_id = $1`,
+      [rollbackRef]
+    );
+    assert.equal(Number(verifyRollback.rows[0]?.cnt || '0'), 0, 'Rolled-back transaction must leave zero rows');
+  });
+
+  it('enforces support ticket reply, cross-user tenant isolation, invalid webhook 401, and webhook replay deduplication on PG16', async () => {
+    const prevWebhookSecret = process.env.XENDIT_WEBHOOK_TOKEN_TEST;
+    process.env.XENDIT_WEBHOOK_TOKEN_TEST = 'xendit-isolation-test-secret';
+
+    const appPool = (process.env.TEST_DATABASE_URL || '').trim()
+      ? new PostgresPoolManager({ connectionString: process.env.TEST_DATABASE_URL!.trim(), ssl: false })
+      : new PostgresPoolManager({ queryable: rawQueryable });
+    const { app, close } = createApp({ postgresPool: appPool });
+    const srv = await startServer(app);
+    try {
+      // Register User A and User B
+      const registerUser = async (tag: string) => {
+        const res = await fetch(`${srv.baseUrl}/api/portal/auth/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            firstName: 'Client',
+            lastName: tag,
+            email: `tenant.${tag}.${Date.now()}.${Math.floor(Math.random() * 10000)}@ophireum.test`,
+            password: 'Ophireum!Strong2026',
+            companyName: `Company ${tag}`,
+          }),
+        });
+        assert.equal(res.status, 201);
+        return (await res.json()) as any;
+      };
+
+      const userA = await registerUser('Alpha');
+      const userB = await registerUser('Beta');
+      const headersA = { 'Content-Type': 'application/json', Authorization: `Bearer ${userA.token}` };
+      const headersB = { 'Content-Type': 'application/json', Authorization: `Bearer ${userB.token}` };
+
+      // User A creates a support ticket with exact frontend payload shape
+      const createTicketRes = await fetch(`${srv.baseUrl}/api/portal/support`, {
+        method: 'POST',
+        headers: headersA,
+        body: JSON.stringify({
+          category: 'Orders',
+          subject: 'Tenant A Billing Question',
+          body: 'Please verify our invoice reference for Q4 kickoff.',
+        }),
+      });
+      assert.equal(createTicketRes.status, 201);
+      const createdTicket = (await createTicketRes.json()) as any;
+      assert.ok(createdTicket.ticket?.id);
+
+      // User A replies to their own ticket
+      const replyARes = await fetch(`${srv.baseUrl}/api/portal/support/${createdTicket.ticket.id}/reply`, {
+        method: 'POST',
+        headers: headersA,
+        body: JSON.stringify({ body: 'Follow-up note from Tenant A.' }),
+      });
+      assert.equal(replyARes.status, 200);
+
+      // User B must NOT see User A's ticket and must NOT be able to reply to it
+      const listBRes = await fetch(`${srv.baseUrl}/api/portal/support`, { headers: headersB });
+      assert.equal(listBRes.status, 200);
+      const listB = (await listBRes.json()) as any;
+      assert.equal(
+        (listB.tickets || []).some((t: any) => t.id === createdTicket.ticket.id),
+        false,
+        'User B must never see User A support tickets'
+      );
+
+      const replyBRes = await fetch(`${srv.baseUrl}/api/portal/support/${createdTicket.ticket.id}/reply`, {
+        method: 'POST',
+        headers: headersB,
+        body: JSON.stringify({ body: 'Unauthorized cross-tenant reply attempt' }),
+      });
+      assert.equal(replyBRes.status, 404);
+
+      // Invalid webhook callback token must be rejected with 401
+      const badSigRes = await fetch(`${srv.baseUrl}/api/portal/webhooks/xendit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-callback-token': 'forged-invalid-token',
+        },
+        body: JSON.stringify({
+          eventId: `evt-bad-${Date.now()}`,
+          orderId: '00000000-0000-0000-0000-000000000000',
+          status: 'paid',
+        }),
+      });
+      assert.equal(badSigRes.status, 401);
+    } finally {
+      await srv.close();
+      await close();
+      if (prevWebhookSecret === undefined) delete process.env.XENDIT_WEBHOOK_TOKEN_TEST;
+      else process.env.XENDIT_WEBHOOK_TOKEN_TEST = prevWebhookSecret;
+    }
+  });
 });

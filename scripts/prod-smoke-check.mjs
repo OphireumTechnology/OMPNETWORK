@@ -126,6 +126,11 @@ async function testCompiledRuntimeAndGracefulShutdown() {
     assert(health.dependencies && typeof health.dependencies === 'object', 'Health must include dependencies');
     assert(health.circuitBreakers && typeof health.circuitBreakers === 'object', 'Health must include circuitBreakers');
 
+    const livenessRes = await fetch(`${baseUrl}/healthz`);
+    assert(livenessRes.status === 200, `/healthz expected 200, got ${livenessRes.status}`);
+    const livenessBody = await livenessRes.json();
+    assert(livenessBody.ok === true && livenessBody.status === 'alive', '/healthz must return ok:true and status:alive');
+
     const readyRes = await fetch(`${baseUrl}/api/ready`);
     const readyBody = await readyRes.json();
     assert([200, 503].includes(readyRes.status), `Unexpected /api/ready HTTP status: ${readyRes.status}`);
@@ -135,6 +140,13 @@ async function testCompiledRuntimeAndGracefulShutdown() {
     assert(versionRes.status === 200, `/api/version expected 200, got ${versionRes.status}`);
     const versionBody = await versionRes.json();
     assert(versionBody.packageName === 'ophireum-network', `Unexpected /api/version packageName: ${versionBody.packageName}`);
+    assert(typeof versionBody.commitSha === 'string', '/api/version missing commitSha');
+    assert(typeof versionBody.buildTimestamp === 'string', '/api/version missing buildTimestamp');
+    assert(typeof versionBody.databaseAdapter === 'string', '/api/version missing databaseAdapter');
+    assert(
+      typeof versionBody.migrationCompatibilityStatus === 'string',
+      '/api/version missing migrationCompatibilityStatus'
+    );
     assert(typeof versionBody.nodeVersion === 'string', '/api/version missing nodeVersion');
 
     const notFoundRes = await fetch(`${baseUrl}/api/nonexistent-smoke-route`);

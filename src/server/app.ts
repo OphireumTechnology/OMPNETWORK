@@ -77,8 +77,9 @@ export interface AppDependencies {
 }
 
 const APP_STARTED_AT = Date.now();
-const APP_VERSION = process.env.APP_VERSION || process.env.npm_package_version || '1.0.0-rc.1';
+const APP_VERSION = process.env.APP_VERSION || process.env.npm_package_version || '1.0.0-rc.2';
 const BUILD_COMMIT_SHA = (process.env.GITHUB_SHA || process.env.RAILWAY_GIT_COMMIT_SHA || 'local-dev').slice(0, 12);
+const BUILD_TIMESTAMP = process.env.BUILD_TIMESTAMP || new Date(APP_STARTED_AT).toISOString();
 
 const CATALOG_SUMMARY_FOR_AI = CATALOG_CATEGORIES.filter((c) => c.id !== 'all')
   .map((cat) => {
@@ -360,6 +361,7 @@ export function createApp(deps: AppDependencies = {}): {
     }
 
     const isProbePath =
+      req.path === '/healthz' ||
       req.path === '/api/health' ||
       req.path === '/health' ||
       req.path === '/api/ready' ||
@@ -587,6 +589,16 @@ export function createApp(deps: AppDependencies = {}): {
 
   app.get('/api/health', healthHandler);
   app.get('/health', healthHandler);
+  app.get('/healthz', (_req: Request, res: Response) => {
+    res.status(200).json({
+      ok: true,
+      status: 'alive',
+      service: 'OPHIREUM NETWORK API Gateway',
+      version: APP_VERSION,
+      uptimeSeconds: Math.floor((Date.now() - APP_STARTED_AT) / 1000),
+      timestamp: new Date().toISOString(),
+    });
+  });
 
   // Readiness probe: returns HTTP 503 whenever draining or mandatory database dependency is unavailable
   app.get('/api/ready', async (req: Request & { correlationId?: string }, res: Response) => {
@@ -620,13 +632,40 @@ export function createApp(deps: AppDependencies = {}): {
     });
   });
 
-  app.get('/api/version', (_req: Request, res: Response) => {
+  app.get('/api/version', async (_req: Request, res: Response) => {
+    let migrationCompatibilityStatus: string;
+    if (sharedPgPool && sharedPgPool.isConfigured) {
+      try {
+        const mig = await sharedPgPool.query<{ version: string }>(
+          'SELECT version FROM public.schema_migrations ORDER BY version ASC'
+        );
+        const versions = mig.rows.map((r) => r.version);
+        if (versions.includes('007') && versions.length >= 8) {
+          migrationCompatibilityStatus = `compatible_migrations_000_to_${versions[versions.length - 1]}`;
+        } else {
+          migrationCompatibilityStatus = `partial_${versions.length}_migrations_applied`;
+        }
+      } catch {
+        migrationCompatibilityStatus = 'migration_ledger_unavailable';
+      }
+    } else if (activeDbProvider === 'supabase') {
+      migrationCompatibilityStatus = 'supabase_managed';
+    } else {
+      migrationCompatibilityStatus = 'database_unconfigured';
+    }
+
     res.status(200).json({
       success: true,
       service: 'OPHIREUM NETWORK API Gateway',
       packageName: 'ophireum-network',
       version: APP_VERSION,
       commit: BUILD_COMMIT_SHA,
+      commitSha: BUILD_COMMIT_SHA,
+      buildTimestamp: BUILD_TIMESTAMP,
+      deploymentEnvironment:
+        process.env.RAILWAY_ENVIRONMENT_NAME || process.env.DEPLOYMENT_ENVIRONMENT || process.env.NODE_ENV || 'development',
+      databaseAdapter: activeDbProvider,
+      migrationCompatibilityStatus,
       nodeVersion: process.version,
       environment: process.env.NODE_ENV || 'development',
       uptimeSeconds: Math.floor((Date.now() - APP_STARTED_AT) / 1000),
