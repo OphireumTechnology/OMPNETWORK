@@ -522,4 +522,192 @@ export class TransactionalEmailService {
     }
     return processed;
   }
+
+  private async enqueuePortalTransactionalEmail(input: {
+    dedupeKey: string;
+    entityType: 'solution_request' | 'appointment';
+    entityReference: string;
+    recipientEmail: string;
+    notificationType: EmailOutboxRecord['notificationType'];
+    headerSubtitle: string;
+    subject: string;
+    bodyHtml: string;
+    textBody: string;
+    correlationId?: string;
+  }): Promise<EmailOutboxRecord['status']> {
+    const htmlBody = `
+      <div style="font-family:Inter,Arial,sans-serif;background:#0B1220;color:#E2E8F0;padding:24px;border-radius:12px;">
+        ${renderOfficialEmailHeader(input.headerSubtitle)}
+        ${input.bodyHtml}
+        <p style="font-size:12px;color:#94A3B8;border-top:1px solid #1E293B;padding-top:12px;margin-top:20px;">
+          OPHIREUM MULTIMEDIA PRODUCTION · ${escapeHtml(COMPANY_CONFIG.address.fullFormatted)}<br/>
+          Support &amp; Executive Contact: ${escapeHtml(COMPANY_CONFIG.mobile)}
+        </p>
+      </div>
+    `;
+    const outbox = await this.db.createOutboxRecord({
+      dedupeKey: input.dedupeKey,
+      entityType: input.entityType,
+      entityReference: input.entityReference,
+      recipientEmail: input.recipientEmail,
+      notificationType: input.notificationType,
+      subject: input.subject,
+      htmlBody,
+      textBody: input.textBody,
+    });
+    return outbox.record.status === 'sent'
+      ? 'sent'
+      : await this.dispatchOutboxItem(outbox.record, input.correlationId);
+  }
+
+  public async enqueueAndSendRegistrationVerificationEmail(input: {
+    userId: string;
+    email: string;
+    fullName: string;
+    verificationToken: string;
+    correlationId?: string;
+  }): Promise<EmailOutboxRecord['status']> {
+    const safeName = escapeHtml(input.fullName);
+    const safeToken = escapeHtml(input.verificationToken);
+    return this.enqueuePortalTransactionalEmail({
+      dedupeKey: `reg-verify-${input.userId}-${input.verificationToken.slice(0, 8)}`,
+      entityType: 'solution_request',
+      entityReference: input.userId,
+      recipientEmail: input.email,
+      notificationType: 'customer_confirmation',
+      headerSubtitle: 'Verify Your OPHIREUM Client Portal Account',
+      subject: 'Verify Your OPHIREUM Client Portal Email Address',
+      bodyHtml: `<p>Welcome ${safeName},</p><p>Use the verification code below inside the OPHIREUM Client Portal to confirm your email address:</p><p style="font-family:monospace;font-size:15px;color:#00C2C7;background:#111827;padding:12px;border-radius:8px;">${safeToken}</p>`,
+      textBody: `Welcome ${input.fullName},\n\nVerify your OPHIREUM Client Portal account using token: ${input.verificationToken}`,
+      correlationId: input.correlationId,
+    });
+  }
+
+  public async enqueueAndSendPasswordResetEmail(input: {
+    userId: string;
+    email: string;
+    resetToken: string;
+    correlationId?: string;
+  }): Promise<EmailOutboxRecord['status']> {
+    return this.enqueuePortalTransactionalEmail({
+      dedupeKey: `pwd-reset-${input.userId}-${input.resetToken.slice(0, 8)}`,
+      entityType: 'solution_request',
+      entityReference: input.userId,
+      recipientEmail: input.email,
+      notificationType: 'customer_confirmation',
+      headerSubtitle: 'Password Recovery Request',
+      subject: 'OPHIREUM Account Password Reset Instructions',
+      bodyHtml: `<p>A password reset was requested for your OPHIREUM Client Portal account.</p><p>Enter this single-use reset token (valid for 1 hour):</p><p style="font-family:monospace;font-size:15px;color:#00C2C7;background:#111827;padding:12px;border-radius:8px;">${escapeHtml(input.resetToken)}</p><p>If you did not request this, you can safely ignore this message.</p>`,
+      textBody: `OPHIREUM Password Reset Token (valid 1 hour): ${input.resetToken}`,
+      correlationId: input.correlationId,
+    });
+  }
+
+  public async enqueueAndSendOrderConfirmationEmail(input: {
+    orderNumber: string;
+    recipientEmail: string;
+    currency: string;
+    totalMinor: number;
+    paymentStatus: string;
+    correlationId?: string;
+  }): Promise<EmailOutboxRecord['status']> {
+    const formatted = `${input.currency} ${(input.totalMinor / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+    return this.enqueuePortalTransactionalEmail({
+      dedupeKey: `ord-conf-${input.orderNumber}`,
+      entityType: 'solution_request',
+      entityReference: input.orderNumber,
+      recipientEmail: input.recipientEmail,
+      notificationType: 'customer_confirmation',
+      headerSubtitle: 'Order Confirmation',
+      subject: `OPHIREUM Order Confirmed [${input.orderNumber}]`,
+      bodyHtml: `<p>Your order <strong>${escapeHtml(input.orderNumber)}</strong> has been recorded.</p><p><strong>Total:</strong> ${escapeHtml(formatted)}<br/><strong>Payment Status:</strong> ${escapeHtml(input.paymentStatus)}</p>`,
+      textBody: `Order ${input.orderNumber} recorded.\nTotal: ${formatted}\nPayment Status: ${input.paymentStatus}`,
+      correlationId: input.correlationId,
+    });
+  }
+
+  public async enqueueAndSendPaymentReceiptEmail(input: {
+    paymentReference: string;
+    orderNumber: string;
+    recipientEmail: string;
+    currency: string;
+    amountMinor: number;
+    correlationId?: string;
+  }): Promise<EmailOutboxRecord['status']> {
+    const formatted = `${input.currency} ${(input.amountMinor / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+    return this.enqueuePortalTransactionalEmail({
+      dedupeKey: `pay-rcpt-${input.paymentReference}`,
+      entityType: 'solution_request',
+      entityReference: input.paymentReference,
+      recipientEmail: input.recipientEmail,
+      notificationType: 'customer_confirmation',
+      headerSubtitle: 'Official Payment Receipt',
+      subject: `OPHIREUM Payment Receipt [${input.paymentReference}]`,
+      bodyHtml: `<p>We have verified payment for order <strong>${escapeHtml(input.orderNumber)}</strong>.</p><p><strong>Official Payment Reference:</strong> ${escapeHtml(input.paymentReference)}<br/><strong>Amount Paid:</strong> ${escapeHtml(formatted)}</p>`,
+      textBody: `Payment verified for order ${input.orderNumber}.\nPayment Reference: ${input.paymentReference}\nAmount Paid: ${formatted}`,
+      correlationId: input.correlationId,
+    });
+  }
+
+  public async enqueueAndSendProjectUpdateEmail(input: {
+    projectReference: string;
+    projectTitle: string;
+    newStage: string;
+    recipientEmail: string;
+    correlationId?: string;
+  }): Promise<EmailOutboxRecord['status']> {
+    return this.enqueuePortalTransactionalEmail({
+      dedupeKey: `proj-upd-${input.projectReference}-${input.newStage}-${Date.now()}`,
+      entityType: 'solution_request',
+      entityReference: input.projectReference,
+      recipientEmail: input.recipientEmail,
+      notificationType: 'customer_confirmation',
+      headerSubtitle: 'Project Stage Update',
+      subject: `Project Update: ${input.projectTitle} [${input.projectReference}]`,
+      bodyHtml: `<p>Your project <strong>${escapeHtml(input.projectTitle)}</strong> (${escapeHtml(input.projectReference)}) has moved to stage: <strong style="color:#00C2C7;">${escapeHtml(input.newStage)}</strong>.</p>`,
+      textBody: `Project ${input.projectTitle} (${input.projectReference}) moved to stage: ${input.newStage}.`,
+      correlationId: input.correlationId,
+    });
+  }
+
+  public async enqueueAndSendDeliverableReadyEmail(input: {
+    projectReference: string;
+    deliverableTitle: string;
+    recipientEmail: string;
+    correlationId?: string;
+  }): Promise<EmailOutboxRecord['status']> {
+    return this.enqueuePortalTransactionalEmail({
+      dedupeKey: `deliv-ready-${input.projectReference}-${input.deliverableTitle.slice(0, 24)}-${Date.now()}`,
+      entityType: 'solution_request',
+      entityReference: input.projectReference,
+      recipientEmail: input.recipientEmail,
+      notificationType: 'customer_confirmation',
+      headerSubtitle: 'Deliverable Ready for Review',
+      subject: `Deliverable Ready: ${input.deliverableTitle} [${input.projectReference}]`,
+      bodyHtml: `<p>A new deliverable <strong>${escapeHtml(input.deliverableTitle)}</strong> is ready for your review inside the OPHIREUM Client Portal under project ${escapeHtml(input.projectReference)}.</p>`,
+      textBody: `Deliverable "${input.deliverableTitle}" is ready for review on project ${input.projectReference}.`,
+      correlationId: input.correlationId,
+    });
+  }
+
+  public async enqueueAndSendSupportTicketReplyEmail(input: {
+    ticketNumber: string;
+    subject: string;
+    replyPreview: string;
+    recipientEmail: string;
+    correlationId?: string;
+  }): Promise<EmailOutboxRecord['status']> {
+    return this.enqueuePortalTransactionalEmail({
+      dedupeKey: `ticket-reply-${input.ticketNumber}-${Date.now()}`,
+      entityType: 'solution_request',
+      entityReference: input.ticketNumber,
+      recipientEmail: input.recipientEmail,
+      notificationType: 'customer_confirmation',
+      headerSubtitle: 'Support Ticket Update',
+      subject: `Re: ${input.subject} [${input.ticketNumber}]`,
+      bodyHtml: `<p>Our support team responded to ticket <strong>${escapeHtml(input.ticketNumber)}</strong>:</p><blockquote style="background:#111827;border-left:3px solid #00C2C7;padding:12px;margin:12px 0;">${escapeHtml(input.replyPreview.slice(0, 600))}</blockquote>`,
+      textBody: `Support reply on ${input.ticketNumber}:\n\n${input.replyPreview.slice(0, 600)}`,
+      correlationId: input.correlationId,
+    });
+  }
 }

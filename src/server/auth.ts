@@ -1,4 +1,6 @@
 import crypto from 'crypto';
+import * as OTPAuth from 'otpauth';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Request, Response, NextFunction } from 'express';
 import { DatabaseRepository, AdminRole, AdminUserRecord } from './db/types';
 import { logStructured } from './logger';
@@ -176,91 +178,185 @@ export function hasAdminPermission(role: AdminRole, permission: AdminPermission)
 }
 
 // ---------------------------------------------------------------------------
-// RFC 6238 TOTP MFA Helper (Node crypto, zero external dependencies)
+// Established Library RFC 6238 TOTP MFA (otpauth) + AES-256-GCM Secret Storage
 // ---------------------------------------------------------------------------
-const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+const TOTP_PERIOD_SECONDS = 30;
+const TOTP_DIGITS = 6;
+const TOTP_DRIFT_WINDOW = 1; // +/- 30s clock skew
 
 export function generateTotpSecret(byteLength = 20): string {
-  const bytes = crypto.randomBytes(byteLength);
-  let bits = 0;
-  let value = 0;
-  let output = '';
-  for (const byte of bytes) {
-    value = (value << 8) | byte;
-    bits += 8;
-    while (bits >= 5) {
-      output += BASE32_ALPHABET[(value >>> (bits - 5)) & 31];
-      bits -= 5;
-    }
-  }
-  if (bits > 0) {
-    output += BASE32_ALPHABET[(value << (5 - bits)) & 31];
-  }
-  return output;
+  const secret = new OTPAuth.Secret({ size: byteLength });
+  return secret.base32;
 }
 
-function base32ToBuffer(secret: string): Buffer {
-  const cleaned = secret.toUpperCase().replace(/[^A-Z2-7]/g, '');
-  let bits = 0;
-  let value = 0;
-  const out: number[] = [];
-  for (const ch of cleaned) {
-    const idx = BASE32_ALPHABET.indexOf(ch);
-    if (idx === -1) continue;
-    value = (value << 5) | idx;
-    bits += 5;
-    if (bits >= 8) {
-      out.push((value >>> (bits - 8)) & 0xff);
-      bits -= 8;
-    }
-  }
-  return Buffer.from(out);
+function buildTotpInstance(secretBase32: string, accountEmail = 'user@ophireummultimedia.com', issuer = 'OPHIREUM NETWORK'): OTPAuth.TOTP {
+  return new OTPAuth.TOTP({
+    issuer,
+    label: accountEmail,
+    algorithm: 'SHA1',
+    digits: TOTP_DIGITS,
+    period: TOTP_PERIOD_SECONDS,
+    secret: OTPAuth.Secret.fromBase32(secretBase32.toUpperCase().replace(/[^A-Z2-7]/g, '')),
+  });
 }
 
-export function generateTotpCode(secret: string, timestampMs = Date.now(), stepSeconds = 30): string {
-  const key = base32ToBuffer(secret);
-  const counter = Math.floor(timestampMs / 1000 / stepSeconds);
-  const counterBuf = Buffer.alloc(8);
-  counterBuf.writeUInt32BE(Math.floor(counter / 0x100000000), 0);
-  counterBuf.writeUInt32BE(counter >>> 0, 4);
-  const hmac = crypto.createHmac('sha1', key).update(counterBuf).digest();
-  const offset = hmac[hmac.length - 1] & 0x0f;
-  const binary =
-    ((hmac[offset] & 0x7f) << 24) |
-    ((hmac[offset + 1] & 0xff) << 16) |
-    ((hmac[offset + 2] & 0xff) << 8) |
-    (hmac[offset + 3] & 0xff);
-  return String(binary % 1_000_000).padStart(6, '0');
+export function generateTotpCode(secret: string, timestampMs = Date.now(), stepSeconds = TOTP_PERIOD_SECONDS): string {
+  const totp = new OTPAuth.TOTP({
+    algorithm: 'SHA1',
+    digits: TOTP_DIGITS,
+    period: stepSeconds,
+    secret: OTPAuth.Secret.fromBase32(secret.toUpperCase().replace(/[^A-Z2-7]/g, '')),
+  });
+  return totp.generate({ timestamp: timestampMs });
+}
+
+/**
+ * Timing-safe RFC 6238 TOTP verification returning the matched time-step counter
+ * so callers can strictly reject replays within the same 30-second step.
+ */
+export function verifyTotpCodeWithStep(
+  secret: string,
+  code: string,
+  timestampMs = Date.now(),
+  windowSteps = TOTP_DRIFT_WINDOW
+): { valid: boolean; matchedStep?: number } {
+  const normalized = code.replace(/\s+/g, '');
+  if (!/^\d{6}$/.test(normalized)) return { valid: false };
+
+  const currentStep = Math.floor(timestampMs / 1000 / TOTP_PERIOD_SECONDS);
+  const providedBuf = Buffer.from(normalized, 'utf8');
+  let matchedStep: number | undefined;
+
+  for (let delta = -windowSteps; delta <= windowSteps; delta += 1) {
+    const candidateStep = currentStep + delta;
+    const candidate = generateTotpCode(secret, candidateStep * TOTP_PERIOD_SECONDS * 1000);
+    const candidateBuf = Buffer.from(candidate, 'utf8');
+    if (
+      providedBuf.length === candidateBuf.length &&
+      crypto.timingSafeEqual(providedBuf, candidateBuf)
+    ) {
+      matchedStep = candidateStep;
+    }
+  }
+
+  return matchedStep !== undefined ? { valid: true, matchedStep } : { valid: false };
 }
 
 export function verifyTotpCode(
   secret: string,
   code: string,
   timestampMs = Date.now(),
-  windowSteps = 1
+  windowSteps = TOTP_DRIFT_WINDOW
 ): boolean {
-  const normalized = code.replace(/\s+/g, '');
-  if (!/^\d{6}$/.test(normalized)) return false;
-  const providedBuf = Buffer.from(normalized, 'utf8');
-  for (let delta = -windowSteps; delta <= windowSteps; delta += 1) {
-    const candidate = generateTotpCode(secret, timestampMs + delta * 30_000);
-    const candidateBuf = Buffer.from(candidate, 'utf8');
-    if (providedBuf.length === candidateBuf.length && crypto.timingSafeEqual(providedBuf, candidateBuf)) {
-      return true;
-    }
-  }
-  return false;
+  return verifyTotpCodeWithStep(secret, code, timestampMs, windowSteps).valid;
 }
 
 export function buildTotpOtpAuthUri(accountEmail: string, secret: string, issuer = 'OPHIREUM NETWORK'): string {
-  return `otpauth://totp/${encodeURIComponent(issuer)}:${encodeURIComponent(accountEmail)}?secret=${encodeURIComponent(
-    secret
-  )}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=30`;
+  return buildTotpInstance(secret, accountEmail, issuer).toString();
+}
+
+function deriveAesKey(rawKeyMaterial: string): Buffer {
+  return crypto.createHash('sha256').update(`ophireum-mfa-v1:${rawKeyMaterial}`, 'utf8').digest();
+}
+
+export function encryptMfaSecret(plainSecret: string, keyMaterial: string): string {
+  const key = deriveAesKey(keyMaterial);
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(plainSecret, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `enc:v1:${iv.toString('base64url')}:${tag.toString('base64url')}:${encrypted.toString('base64url')}`;
+}
+
+export function decryptMfaSecret(storedSecret: string, keyMaterial: string): string {
+  if (!storedSecret.startsWith('enc:v1:')) {
+    return storedSecret;
+  }
+  const parts = storedSecret.split(':');
+  if (parts.length !== 5) {
+    throw new Error('Malformed encrypted MFA secret.');
+  }
+  const [, , ivB64, tagB64, dataB64] = parts;
+  const key = deriveAesKey(keyMaterial);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivB64, 'base64url'));
+  decipher.setAuthTag(Buffer.from(tagB64, 'base64url'));
+  const decrypted = Buffer.concat([
+    decipher.update(Buffer.from(dataB64, 'base64url')),
+    decipher.final(),
+  ]);
+  return decrypted.toString('utf8');
+}
+
+export function generateRecoveryCodes(count = 10): string[] {
+  const codes: string[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const raw = crypto.randomBytes(5).toString('hex').toUpperCase();
+    codes.push(`${raw.slice(0, 5)}-${raw.slice(5, 10)}`);
+  }
+  return codes;
+}
+
+export function hashRecoveryCode(code: string): string {
+  return crypto
+    .createHash('sha256')
+    .update(`ophireum-recovery:${code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')}`, 'utf8')
+    .digest('hex');
+}
+
+// ---------------------------------------------------------------------------
+// Cookie & CSRF Helpers
+// ---------------------------------------------------------------------------
+export const ADMIN_SESSION_COOKIE = 'opm_admin_session';
+
+export function buildAdminSessionCookieHeader(token: string, maxAgeSeconds: number): string {
+  const isProd = process.env.NODE_ENV === 'production';
+  const parts = [
+    `${ADMIN_SESSION_COOKIE}=${encodeURIComponent(token)}`,
+    'Path=/',
+    'HttpOnly',
+    `Max-Age=${Math.max(0, Math.floor(maxAgeSeconds))}`,
+  ];
+  if (isProd) {
+    // Cross-origin GitHub Pages -> Railway API requires SameSite=None; Secure; Partitioned
+    parts.push('SameSite=None', 'Secure', 'Partitioned');
+  } else {
+    parts.push('SameSite=Lax');
+  }
+  return parts.join('; ');
+}
+
+export function isAdminCookieCsrfSafe(req: Request, allowedOrigins: string[]): boolean {
+  const method = req.method.toUpperCase();
+  if (!['POST', 'PATCH', 'PUT', 'DELETE'].includes(method)) {
+    return true;
+  }
+  const xrw = String(req.headers['x-requested-with'] || '').trim();
+  if (xrw === 'XMLHttpRequest' || xrw === 'fetch') {
+    return true;
+  }
+  const rawOrigin = String(req.headers.origin || '').trim();
+  const rawReferer = String(req.headers.referer || '').trim();
+  let candidateOrigin = rawOrigin.replace(/\/$/, '');
+  if (!candidateOrigin && rawReferer) {
+    try {
+      candidateOrigin = new URL(rawReferer).origin.replace(/\/$/, '');
+    } catch {
+      candidateOrigin = '';
+    }
+  }
+  if (!candidateOrigin) return false;
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').trim();
+  if (host && (candidateOrigin === `https://${host}` || candidateOrigin === `http://${host}`)) {
+    return true;
+  }
+  return allowedOrigins.includes(candidateOrigin);
 }
 
 export interface AuthenticatedAdminRequest extends Request {
   adminUser?: AdminUserRecord;
   adminSessionJti?: string;
+  adminAuthSource?: 'bearer' | 'cookie';
+  adminMfaVerified?: boolean;
   correlationId?: string;
 }
 
@@ -273,7 +369,19 @@ interface SessionTokenPayload {
   exp: number;
 }
 
-export const ADMIN_SESSION_COOKIE = 'opm_admin_session';
+interface StoredAdminMfaEntry {
+  encryptedSecret: string;
+  enabled: boolean;
+  lastUsedStep?: number;
+  failedAttempts: number;
+  lockedUntilMs?: number;
+  recoveryCodeHashes: Set<string>;
+}
+
+export interface PersistentRevocationStore {
+  revoke(jti: string, principalId: string, expEpochSec: number): Promise<void>;
+  isRevoked(jti: string): Promise<boolean>;
+}
 
 function parseCookieHeader(rawCookie?: string): Record<string, string> {
   const result: Record<string, string> = {};
@@ -290,23 +398,89 @@ function parseCookieHeader(rawCookie?: string): Record<string, string> {
 
 export class AdminAuthService {
   private readonly sessionSecret: string;
-  // Bounded revocation table: jti -> expEpochSec
+  private readonly mfaEncryptionKey: string;
+  private readonly allowedOrigins: string[];
+  // Bounded local cache + optional persistent DB store for cross-replica token revocation
   private readonly revokedJtis = new Map<string, number>();
-  // Per-admin TOTP secrets (populated via enrollment or ADMIN_MFA_SECRET env)
-  private readonly adminMfaSecrets = new Map<string, { secret: string; enabled: boolean }>();
+  private readonly persistentRevocationStore: PersistentRevocationStore | null;
+  // Encrypted per-admin TOTP secrets + replay & lockout tracking
+  private readonly adminMfaEntries = new Map<string, StoredAdminMfaEntry>();
 
-  constructor(private readonly db: DatabaseRepository, sessionSecret?: string) {
-    // Only read from server environment; generate ephemeral random key in non-configured dev instances
-    // so an attacker cannot forge tokens with a static fallback string.
+  constructor(
+    private readonly db: DatabaseRepository,
+    sessionSecret?: string,
+    options?: {
+      allowedOrigins?: string[];
+      revocationStore?: PersistentRevocationStore;
+      supabaseClient?: SupabaseClient | null;
+    }
+  ) {
     this.sessionSecret =
       sessionSecret ||
       process.env.ADMIN_SESSION_SECRET ||
       crypto.randomBytes(32).toString('hex');
 
+    this.mfaEncryptionKey =
+      (process.env.MFA_ENCRYPTION_KEY || '').trim() || this.sessionSecret;
+
+    this.allowedOrigins = options?.allowedOrigins || [
+      'https://ophireummultimedia.com',
+      'https://www.ophireummultimedia.com',
+      'https://ophireumtechnology.github.io',
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      'http://localhost:5173',
+      'http://127.0.0.1:5173',
+    ];
+
+    if (options?.revocationStore) {
+      this.persistentRevocationStore = options.revocationStore;
+    } else {
+      const supaUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
+      const supaKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+      const client =
+        options?.supabaseClient !== undefined
+          ? options.supabaseClient
+          : supaUrl && supaKey && !supaUrl.includes('your-ompnetwork-id')
+          ? createClient(supaUrl, supaKey, { auth: { autoRefreshToken: false, persistSession: false } })
+          : null;
+
+      this.persistentRevocationStore = client
+        ? {
+            async revoke(jti: string, principalId: string, expEpochSec: number): Promise<void> {
+              await client
+                .from('revoked_session_tokens')
+                .upsert(
+                  {
+                    jti,
+                    principal_type: 'admin',
+                    principal_id: principalId,
+                    expires_at: new Date(expEpochSec * 1000).toISOString(),
+                  },
+                  { onConflict: 'jti' }
+                );
+            },
+            async isRevoked(jti: string): Promise<boolean> {
+              const { data, error } = await client
+                .from('revoked_session_tokens')
+                .select('jti')
+                .eq('jti', jti)
+                .maybeSingle();
+              return !error && Boolean(data);
+            },
+          }
+        : null;
+    }
+
     const bootstrapEmail = (process.env.ADMIN_BOOTSTRAP_EMAIL || '').trim().toLowerCase();
     const bootstrapMfa = (process.env.ADMIN_BOOTSTRAP_MFA_SECRET || '').trim();
     if (bootstrapEmail && bootstrapMfa) {
-      this.adminMfaSecrets.set(bootstrapEmail, { secret: bootstrapMfa, enabled: true });
+      this.adminMfaEntries.set(bootstrapEmail, {
+        encryptedSecret: encryptMfaSecret(bootstrapMfa, this.mfaEncryptionKey),
+        enabled: true,
+        failedAttempts: 0,
+        recoveryCodeHashes: new Set(),
+      });
     }
   }
 
@@ -316,34 +490,106 @@ export class AdminAuthService {
     return Boolean(email && pass && pass.length >= 12);
   }
 
-  public isAdminMfaEnabled(email: string): boolean {
-    return Boolean(this.adminMfaSecrets.get(email.trim().toLowerCase())?.enabled);
+  public isAdminMfaRequiredByPolicy(): boolean {
+    return process.env.REQUIRE_ADMIN_MFA === 'true';
   }
 
-  public enrollAdminMfa(email: string): { secret: string; otpAuthUri: string } {
+  public isAdminMfaEnabled(email: string): boolean {
+    return Boolean(this.adminMfaEntries.get(email.trim().toLowerCase())?.enabled);
+  }
+
+  public getEncryptedAdminMfaSecret(email: string): string | undefined {
+    return this.adminMfaEntries.get(email.trim().toLowerCase())?.encryptedSecret;
+  }
+
+  public enrollAdminMfa(email: string): {
+    secret: string;
+    otpAuthUri: string;
+    recoveryCodes: string[];
+  } {
     const normalized = email.trim().toLowerCase();
     const secret = generateTotpSecret();
-    this.adminMfaSecrets.set(normalized, { secret, enabled: false });
+    const recoveryCodes = generateRecoveryCodes(10);
+    this.adminMfaEntries.set(normalized, {
+      encryptedSecret: encryptMfaSecret(secret, this.mfaEncryptionKey),
+      enabled: false,
+      failedAttempts: 0,
+      recoveryCodeHashes: new Set(recoveryCodes.map(hashRecoveryCode)),
+    });
     return {
       secret,
       otpAuthUri: buildTotpOtpAuthUri(normalized, secret, 'OPHIREUM Admin'),
+      recoveryCodes,
     };
   }
 
-  public confirmAdminMfaEnrollment(email: string, totpCode: string): boolean {
+  public confirmAdminMfaEnrollment(email: string, totpCode: string, timestampMs = Date.now()): boolean {
     const normalized = email.trim().toLowerCase();
-    const entry = this.adminMfaSecrets.get(normalized);
+    const entry = this.adminMfaEntries.get(normalized);
     if (!entry) return false;
-    if (!verifyTotpCode(entry.secret, totpCode)) return false;
+    const plainSecret = decryptMfaSecret(entry.encryptedSecret, this.mfaEncryptionKey);
+    const check = verifyTotpCodeWithStep(plainSecret, totpCode, timestampMs);
+    if (!check.valid || check.matchedStep === undefined) return false;
     entry.enabled = true;
+    entry.lastUsedStep = check.matchedStep;
+    entry.failedAttempts = 0;
+    entry.lockedUntilMs = undefined;
     return true;
   }
 
-  public verifyAdminMfaCode(email: string, totpCode: string): boolean {
+  public verifyAdminMfaCode(
+    email: string,
+    totpOrRecoveryCode: string,
+    timestampMs = Date.now()
+  ): { ok: boolean; reason?: 'locked' | 'replay' | 'invalid' | 'mfa_not_enrolled'; usedRecoveryCode?: boolean } {
     const normalized = email.trim().toLowerCase();
-    const entry = this.adminMfaSecrets.get(normalized);
-    if (!entry || !entry.enabled) return true;
-    return verifyTotpCode(entry.secret, totpCode);
+    const entry = this.adminMfaEntries.get(normalized);
+    if (!entry || !entry.enabled) {
+      if (this.isAdminMfaRequiredByPolicy()) {
+        return { ok: false, reason: 'mfa_not_enrolled' };
+      }
+      return { ok: true };
+    }
+
+    if (entry.lockedUntilMs && timestampMs < entry.lockedUntilMs) {
+      return { ok: false, reason: 'locked' };
+    }
+
+    const cleanInput = totpOrRecoveryCode.trim();
+    if (!cleanInput) {
+      return { ok: false, reason: 'invalid' };
+    }
+
+    // 1. Check single-use recovery code (e.g. XXXXX-XXXXX)
+    if (cleanInput.includes('-') || /^[A-F0-9]{10}$/i.test(cleanInput)) {
+      const hashed = hashRecoveryCode(cleanInput);
+      if (entry.recoveryCodeHashes.has(hashed)) {
+        entry.recoveryCodeHashes.delete(hashed);
+        entry.failedAttempts = 0;
+        entry.lockedUntilMs = undefined;
+        return { ok: true, usedRecoveryCode: true };
+      }
+    }
+
+    // 2. Check RFC 6238 TOTP code with strict replay prevention
+    const plainSecret = decryptMfaSecret(entry.encryptedSecret, this.mfaEncryptionKey);
+    const check = verifyTotpCodeWithStep(plainSecret, cleanInput, timestampMs);
+    if (!check.valid || check.matchedStep === undefined) {
+      entry.failedAttempts += 1;
+      if (entry.failedAttempts >= 5) {
+        entry.lockedUntilMs = timestampMs + 15 * 60 * 1000;
+      }
+      return { ok: false, reason: 'invalid' };
+    }
+
+    if (entry.lastUsedStep !== undefined && check.matchedStep <= entry.lastUsedStep) {
+      return { ok: false, reason: 'replay' };
+    }
+
+    entry.lastUsedStep = check.matchedStep;
+    entry.failedAttempts = 0;
+    entry.lockedUntilMs = undefined;
+    return { ok: true };
   }
 
   private pruneRevokedTokens(): void {
@@ -381,6 +627,20 @@ export class AdminAuthService {
     if (!payload) return false;
     this.pruneRevokedTokens();
     this.revokedJtis.set(payload.jti, payload.exp);
+    if (this.persistentRevocationStore) {
+      void this.persistentRevocationStore.revoke(payload.jti, payload.sub, payload.exp).catch(() => undefined);
+    }
+    return true;
+  }
+
+  public async revokeSessionTokenAsync(token: string): Promise<boolean> {
+    const payload = this.verifySessionToken(token);
+    if (!payload) return false;
+    this.pruneRevokedTokens();
+    this.revokedJtis.set(payload.jti, payload.exp);
+    if (this.persistentRevocationStore) {
+      await this.persistentRevocationStore.revoke(payload.jti, payload.sub, payload.exp).catch(() => undefined);
+    }
     return true;
   }
 
@@ -438,17 +698,21 @@ export class AdminAuthService {
     return emailMatches && crypto.timingSafeEqual(passBuf, expectedBuf);
   }
 
-  public extractTokenFromRequest(req: Request): string | null {
+  public extractTokenWithSource(req: Request): { token: string | null; source: 'bearer' | 'cookie' | null } {
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const bearer = authHeader.slice('Bearer '.length).trim();
-      if (bearer) return bearer;
+      if (bearer) return { token: bearer, source: 'bearer' };
     }
     const cookies = parseCookieHeader(req.headers.cookie);
     if (cookies[ADMIN_SESSION_COOKIE]) {
-      return cookies[ADMIN_SESSION_COOKIE];
+      return { token: cookies[ADMIN_SESSION_COOKIE], source: 'cookie' };
     }
-    return null;
+    return { token: null, source: null };
+  }
+
+  public extractTokenFromRequest(req: Request): string | null {
+    return this.extractTokenWithSource(req).token;
   }
 
   public async resolveAuthenticatedPrincipal(req: Request): Promise<{
@@ -456,15 +720,26 @@ export class AdminAuthService {
     adminUser?: AdminUserRecord;
     identityEmail?: string;
     sessionJti?: string;
+    authSource?: 'bearer' | 'cookie';
+    mfaVerified?: boolean;
+    mfaBypassBlocked?: boolean;
   }> {
-    const token = this.extractTokenFromRequest(req);
-    if (!token) {
+    const { token, source } = this.extractTokenWithSource(req);
+    if (!token || !source) {
       return { authenticated: false };
     }
 
-    // 1. Check server-signed admin session token with strict principal binding (sub + role + active status)
+    // 1. Check server-signed admin session token with strict principal binding + cross-replica revocation check
     const sessionPayload = this.verifySessionToken(token);
     if (sessionPayload) {
+      if (sessionPayload.jti && this.persistentRevocationStore) {
+        const revokedInDb = await this.persistentRevocationStore.isRevoked(sessionPayload.jti).catch(() => false);
+        if (revokedInDb) {
+          this.revokedJtis.set(sessionPayload.jti, sessionPayload.exp);
+          return { authenticated: false };
+        }
+      }
+
       const adminRecord = await this.db.findActiveAdminByEmail(sessionPayload.email);
       const principalMatches =
         Boolean(adminRecord && adminRecord.isActive) &&
@@ -473,17 +748,31 @@ export class AdminAuthService {
         Boolean(ROLE_PERMISSIONS[adminRecord!.role]);
 
       if (principalMatches && adminRecord) {
+        const mfaEnabled = this.isAdminMfaEnabled(adminRecord.email);
+        const mfaRequired = mfaEnabled || this.isAdminMfaRequiredByPolicy();
+        if (mfaRequired && !sessionPayload.mfaVerified) {
+          return {
+            authenticated: true,
+            identityEmail: adminRecord.email,
+            sessionJti: sessionPayload.jti,
+            authSource: source,
+            mfaVerified: false,
+            mfaBypassBlocked: true,
+          };
+        }
         return {
           authenticated: true,
           adminUser: {
             ...adminRecord,
-            mfaEnabled: this.isAdminMfaEnabled(adminRecord.email),
+            mfaEnabled,
           },
           identityEmail: adminRecord.email,
           sessionJti: sessionPayload.jti,
+          authSource: source,
+          mfaVerified: Boolean(sessionPayload.mfaVerified),
         };
       }
-      return { authenticated: true, identityEmail: sessionPayload.email };
+      return { authenticated: true, identityEmail: sessionPayload.email, authSource: source };
     }
 
     // 2. Check Supabase-issued JWT via server-side auth.getUser(token) + admin_users RBAC lookup
@@ -498,11 +787,14 @@ export class AdminAuthService {
             mfaEnabled: this.isAdminMfaEnabled(adminRecord.email),
           },
           identityEmail: supaUser.email,
+          authSource: source,
+          mfaVerified: true,
         };
       }
       return {
         authenticated: true,
         identityEmail: supaUser.email,
+        authSource: source,
       };
     }
 
@@ -530,6 +822,35 @@ export class AdminAuthService {
         return;
       }
 
+      if (resolved.authSource === 'cookie' && !isAdminCookieCsrfSafe(req, this.allowedOrigins)) {
+        logStructured('warn', 'admin_csrf_check_failed', {
+          correlationId: req.correlationId,
+          path: req.path,
+          method: req.method,
+          origin: req.headers.origin,
+        });
+        res.status(403).json({
+          success: false,
+          code: 'CSRF_CHECK_FAILED',
+          error: 'State-changing cookie-authenticated administrative request failed CSRF validation.',
+        });
+        return;
+      }
+
+      if (resolved.mfaBypassBlocked) {
+        logStructured('warn', 'admin_mfa_verification_required', {
+          correlationId: req.correlationId,
+          path: req.path,
+          email: resolved.identityEmail,
+        });
+        res.status(403).json({
+          success: false,
+          code: 'MFA_VERIFICATION_REQUIRED',
+          error: 'Privileged session requires verified multi-factor authentication.',
+        });
+        return;
+      }
+
       if (!resolved.adminUser) {
         logStructured('warn', 'admin_auth_forbidden_non_admin', {
           correlationId: req.correlationId,
@@ -547,6 +868,8 @@ export class AdminAuthService {
 
       req.adminUser = resolved.adminUser;
       req.adminSessionJti = resolved.sessionJti;
+      req.adminAuthSource = resolved.authSource;
+      req.adminMfaVerified = resolved.mfaVerified;
       next();
     } catch (err: any) {
       logStructured('error', 'admin_auth_middleware_error', {

@@ -1,10 +1,10 @@
-name: CI Security & Stabilization Checks
+name: CI Security, Migration & Commissioning Verification
 
 on:
   push:
-    branches: [main, 'repair/**']
+    branches: [main, 'repair/**', 'release/**']
   pull_request:
-    branches: [main, 'repair/**']
+    branches: [main, 'repair/**', 'release/**']
 
 jobs:
   verify:
@@ -22,20 +22,23 @@ jobs:
       - name: Install dependencies cleanly from lockfile
         run: npm ci --no-audit --no-fund
 
-      - name: TypeScript typecheck
+      - name: TypeScript strict typecheck
         run: npm run typecheck
 
-      - name: Lint & syntax validation
+      - name: ESLint & syntax validation
         run: npm run lint
 
-      - name: Run unit, integration & security regression suite
+      - name: Run full unit, security, AI workforce, commerce & PostgreSQL 16 PGlite migration test suites
         run: npm test
 
       - name: Build production frontend bundle
         run: npm run build
 
-      - name: Verify server bundle compilation
+      - name: Verify production server bundle compilation
         run: npm run build:server
+
+      - name: Dependency security audit (production dependencies)
+        run: npm audit --omit=dev --audit-level=high || true
 
       - name: Static client secret & unsafe SQL policy hygiene check
         run: |
@@ -45,5 +48,9 @@ jobs:
           fi
           if grep -rnE "USING \(true\)" supabase/; then
             echo "Forbidden permissive RLS policy USING (true) detected in supabase/!"
+            exit 1
+          fi
+          if grep -rnE "live_payments_enabled.*true" supabase/ src/server/; then
+            echo "Forbidden live_payments_enabled=true default detected!"
             exit 1
           fi

@@ -274,8 +274,15 @@ export function createPortalRouter(options: {
       return;
     }
     const user = await repo.findUserById(session.userId);
-    if (!user || user.accountStatus === 'closed') {
-      res.status(403).json({ success: false, code: 'ACCOUNT_INACTIVE', error: 'This client account is no longer active.' });
+    if (!user || user.accountStatus === 'closed' || user.accountStatus === 'suspended') {
+      res.status(403).json({
+        success: false,
+        code: user?.accountStatus === 'suspended' ? 'ACCOUNT_SUSPENDED' : 'ACCOUNT_INACTIVE',
+        error:
+          user?.accountStatus === 'suspended'
+            ? 'This client account is currently suspended. Contact Ophireum support.'
+            : 'This client account is no longer active.',
+      });
       return;
     }
     req.portalUser = user;
@@ -471,8 +478,14 @@ export function createPortalRouter(options: {
       res.status(401).json({ success: false, error: 'Invalid email address or password.' });
       return;
     }
-    if (user.accountStatus === 'closed') {
-      res.status(403).json({ success: false, error: 'This account has been closed.' });
+    if (user.accountStatus === 'closed' || user.accountStatus === 'suspended') {
+      res.status(403).json({
+        success: false,
+        error:
+          user.accountStatus === 'suspended'
+            ? 'This account is suspended. Please contact support for assistance.'
+            : 'This account has been closed.',
+      });
       return;
     }
 
@@ -667,6 +680,7 @@ export function createPortalRouter(options: {
         success: true,
         deduplicated: outcome.deduplicated,
         orderNumber: outcome.order?.orderNumber,
+        ophireumPaymentReference: outcome.ophireumPaymentReference,
         creditsAllocated: outcome.creditsAllocated,
         projectReference: outcome.projectCreated?.referenceNumber,
       });
@@ -702,6 +716,54 @@ export function createPortalRouter(options: {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, no-store');
     res.status(200).send(found.buffer);
+  });
+
+  router.get('/downloads/signed/:entitlementId', async (req: Request, res: Response) => {
+    const entitlementId = sanitizeText(req.params.entitlementId, 80);
+    const uid = sanitizeText(req.query.uid, 80);
+    const exp = Number(req.query.exp);
+    const sig = sanitizeText(req.query.sig, 128);
+
+    if (!entitlementId || !uid || !sig || !verifyDownloadUrlToken(`ent:${entitlementId}`, uid, exp, sig)) {
+      res.status(403).json({ success: false, error: 'Signed digital download link is invalid or has expired.' });
+      return;
+    }
+    if (!repo.recordDigitalDownload) {
+      res.status(503).json({ success: false, error: 'Digital downloads module unavailable.' });
+      return;
+    }
+    const outcome = await repo.recordDigitalDownload({
+      userId: uid,
+      entitlementId,
+      ipAddress: req.ip || 'unknown',
+      userAgent: String(req.headers['user-agent'] || '').slice(0, 200),
+    });
+    if (outcome.error || !outcome.entitlement) {
+      res.status(403).json({ success: false, error: outcome.error || 'Digital entitlement is not downloadable.' });
+      return;
+    }
+    const manifestPayload = JSON.stringify(
+      {
+        platform: 'OPHIREUM MULTIMEDIA PRODUCTION',
+        entitlementId: outcome.entitlement.id,
+        orderNumber: outcome.entitlement.orderNumber,
+        productName: outcome.entitlement.productName,
+        packageName: outcome.entitlement.packageName,
+        licenseKey: outcome.entitlement.licenseKey,
+        version: outcome.entitlement.versionLabel,
+        downloadsUsed: `${outcome.entitlement.downloadCount}/${outcome.entitlement.maxDownloads}`,
+        issuedAt: new Date().toISOString(),
+        terms: 'Licensed strictly to the verified purchasing client account under OPHIREUM Digital Product Licensing Terms.',
+      },
+      null,
+      2
+    );
+    const safeFileName = `ophireum-license-${outcome.entitlement.orderNumber.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeFileName}"`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.status(200).send(manifestPayload);
   });
 
   // =========================================================================
@@ -1094,6 +1156,9 @@ export function createPortalRouter(options: {
 
   // Orders
   router.get('/orders', async (req: PortalAuthenticatedRequest, res: Response) => {
+    if (repo.expireStaleOrders) {
+      await repo.expireStaleOrders();
+    }
     const orders = await repo.listOrders(req.portalUser!.id);
     res.status(200).json({ success: true, orders });
   });
@@ -1213,6 +1278,28 @@ export function createPortalRouter(options: {
       return;
     }
     res.status(200).json({ success: true, subscription: updated });
+  });
+
+  router.post('/subscriptions/:subscriptionId/change-plan', async (req: PortalAuthenticatedRequest, res: Response) => {
+    if (!repo.changeSubscriptionPlan) {
+      res.status(503).json({ success: false, error: 'Subscription plan management unavailable.' });
+      return;
+    }
+    const newPackageId = sanitizeText(req.body?.packageId, 120);
+    if (!newPackageId) {
+      res.status(400).json({ success: false, error: 'packageId is required.' });
+      return;
+    }
+    const result = await repo.changeSubscriptionPlan(
+      req.portalUser!.id,
+      sanitizeText(req.params.subscriptionId, 80),
+      newPackageId
+    );
+    if (result.error || !result.subscription) {
+      res.status(400).json({ success: false, error: result.error || 'Unable to update subscription plan.' });
+      return;
+    }
+    res.status(200).json({ success: true, subscription: result.subscription });
   });
 
   // Projects, Discussions, Deliverables & Revisions
@@ -1927,12 +2014,58 @@ export function createPortalRouter(options: {
     });
   });
 
-  // ---- Customer Optional TOTP MFA ----
+  router.post('/downloads/:entitlementId/sign', async (req: PortalAuthenticatedRequest, res: Response) => {
+    if (isProd && !hasStrongSigningSecret) {
+      res.status(503).json({
+        success: false,
+        error: 'Signed download service is unavailable until PORTAL_SIGNING_SECRET is configured.',
+      });
+      return;
+    }
+    const userId = req.portalUser!.id;
+    const entitlementId = sanitizeText(req.params.entitlementId, 80);
+    const ent = repo.getDigitalEntitlementById
+      ? await repo.getDigitalEntitlementById(userId, entitlementId)
+      : (await (repo.listDigitalEntitlements ? repo.listDigitalEntitlements(userId) : [])).find(
+          (e) => e.id === entitlementId
+        ) || null;
+    if (!ent) {
+      res.status(404).json({ success: false, error: 'Digital entitlement not found.' });
+      return;
+    }
+    if (ent.status !== 'active') {
+      res.status(403).json({ success: false, error: `Entitlement is ${ent.status} and cannot be downloaded.` });
+      return;
+    }
+    if (ent.expiresAt && Date.parse(ent.expiresAt) < Date.now()) {
+      res.status(403).json({ success: false, error: 'Digital entitlement license has expired.' });
+      return;
+    }
+    if (ent.downloadCount >= ent.maxDownloads) {
+      res.status(403).json({ success: false, error: `Maximum download limit (${ent.maxDownloads}) reached.` });
+      return;
+    }
+    const exp = Math.floor(Date.now() / 1000) + 300;
+    const sig = signDownloadUrlToken(`ent:${entitlementId}`, userId, exp);
+    const signedPath = `/api/portal/downloads/signed/${encodeURIComponent(entitlementId)}?uid=${encodeURIComponent(userId)}&exp=${exp}&sig=${sig}`;
+    res.status(200).json({
+      success: true,
+      downloadUrl: signedPath,
+      signedDownloadUrl: signedPath,
+      expiresAt: new Date(exp * 1000).toISOString(),
+    });
+  });
+
+  // ---- Customer Optional TOTP MFA (Encrypted Secret + Replay Prevention + Recovery Codes) ----
   router.get('/security/mfa', async (req: PortalAuthenticatedRequest, res: Response) => {
     const state = repo.getUserMfaState ? await repo.getUserMfaState(req.portalUser!.id) : { enabled: false };
     res.status(200).json({
       success: true,
-      mfa: { enabled: state.enabled, enrolledAt: state.enrolledAt || null },
+      mfa: {
+        enabled: state.enabled,
+        enrolledAt: state.enrolledAt || null,
+        recoveryCodesRemaining: state.recoveryCodeHashes?.length || 0,
+      },
     });
   });
 
@@ -1941,13 +2074,29 @@ export function createPortalRouter(options: {
       res.status(503).json({ success: false, error: 'MFA unavailable.' });
       return;
     }
-    const { generateTotpSecret, buildTotpOtpAuthUri } = await import('../auth');
+    const {
+      generateTotpSecret,
+      buildTotpOtpAuthUri,
+      encryptMfaSecret,
+      generateRecoveryCodes,
+      hashRecoveryCode,
+    } = await import('../auth');
+    const mfaEncKey =
+      (process.env.MFA_ENCRYPTION_KEY || process.env.ADMIN_SESSION_SECRET || 'ophireum-portal-mfa-key').trim();
     const secret = generateTotpSecret();
-    await repo.setUserMfaState(req.portalUser!.id, { enabled: false, secret });
+    const recoveryCodes = generateRecoveryCodes(10);
+    await repo.setUserMfaState(req.portalUser!.id, {
+      enabled: false,
+      encryptedSecret: encryptMfaSecret(secret, mfaEncKey),
+      recoveryCodeHashes: recoveryCodes.map(hashRecoveryCode),
+      failedAttempts: 0,
+      lockedUntil: undefined,
+    });
     res.status(200).json({
       success: true,
       secret,
       otpAuthUri: buildTotpOtpAuthUri(req.portalUser!.email, secret, 'OPHIREUM Client Portal'),
+      recoveryCodes,
     });
   });
 
@@ -1956,20 +2105,48 @@ export function createPortalRouter(options: {
       res.status(503).json({ success: false, error: 'MFA unavailable.' });
       return;
     }
-    const code = sanitizeText(req.body?.code, 12);
+    const code = sanitizeText(req.body?.code, 20);
     const state = await repo.getUserMfaState(req.portalUser!.id);
-    if (!state.secret) {
+    if (state.lockedUntil && Date.parse(state.lockedUntil) > Date.now()) {
+      res.status(429).json({ success: false, error: 'Too many failed MFA attempts. Try again later.' });
+      return;
+    }
+    const { decryptMfaSecret, verifyTotpCodeWithStep } = await import('../auth');
+    const mfaEncKey =
+      (process.env.MFA_ENCRYPTION_KEY || process.env.ADMIN_SESSION_SECRET || 'ophireum-portal-mfa-key').trim();
+    const plainSecret = state.encryptedSecret ? decryptMfaSecret(state.encryptedSecret, mfaEncKey) : state.secret;
+    if (!plainSecret) {
       res.status(400).json({ success: false, error: 'Initiate MFA enrollment first.' });
       return;
     }
-    const { verifyTotpCode } = await import('../auth');
-    if (!verifyTotpCode(state.secret, code)) {
-      res.status(400).json({ success: false, error: 'Invalid 6-digit authenticator code.' });
+    const check = verifyTotpCodeWithStep(plainSecret, code);
+    const isReplay =
+      check.valid &&
+      state.lastUsedStep !== undefined &&
+      check.matchedStep !== undefined &&
+      check.matchedStep <= state.lastUsedStep;
+    if (!check.valid || isReplay) {
+      const nextFails = (state.failedAttempts || 0) + 1;
+      await repo.setUserMfaState(req.portalUser!.id, {
+        ...state,
+        failedAttempts: nextFails,
+        lockedUntil: nextFails >= 5 ? new Date(Date.now() + 15 * 60 * 1000).toISOString() : undefined,
+      });
+      res.status(400).json({
+        success: false,
+        error: isReplay
+          ? 'This authenticator code was already used. Wait for the next 30-second code.'
+          : 'Invalid 6-digit authenticator code.',
+      });
       return;
     }
     await repo.setUserMfaState(req.portalUser!.id, {
+      ...state,
       enabled: true,
-      secret: state.secret,
+      secret: undefined,
+      lastUsedStep: check.matchedStep,
+      failedAttempts: 0,
+      lockedUntil: undefined,
       enrolledAt: new Date().toISOString(),
     });
     res.status(200).json({ success: true, mfaEnabled: true });

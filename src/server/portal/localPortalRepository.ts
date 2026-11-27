@@ -408,6 +408,45 @@ export class LocalPortalRepository implements PortalRepository {
     return user;
   }
 
+  async suspendUser(userId: string, reason: string, actor: string): Promise<PortalUserRecord | null> {
+    const user = this.state.users.find((u) => u.id === userId);
+    if (!user) return null;
+    const ts = this.now();
+    user.accountStatus = 'suspended';
+    user.suspendedAt = ts;
+    user.suspensionReason = reason.trim() || 'Suspended by administrator';
+    user.updatedAt = ts;
+    await this.revokeAllUserSessions(userId);
+    await this.addActivity({
+      userId,
+      eventType: 'account_suspended',
+      title: 'Account suspended',
+      detail: `Suspended by ${actor}: ${user.suspensionReason}`,
+      relatedPath: '/portal/security',
+    });
+    this.persist();
+    return user;
+  }
+
+  async reactivateUser(userId: string, actor: string): Promise<PortalUserRecord | null> {
+    const user = this.state.users.find((u) => u.id === userId);
+    if (!user) return null;
+    const ts = this.now();
+    user.accountStatus = 'active';
+    user.suspendedAt = undefined;
+    user.suspensionReason = undefined;
+    user.updatedAt = ts;
+    await this.addActivity({
+      userId,
+      eventType: 'account_reactivated',
+      title: 'Account reactivated',
+      detail: `Reactivated by ${actor}`,
+      relatedPath: '/portal/security',
+    });
+    this.persist();
+    return user;
+  }
+
   // ---- Sessions ----
   async createSession(input: Omit<PortalSessionRecord, 'id' | 'createdAt' | 'lastSeenAt'>): Promise<PortalSessionRecord> {
     const ts = this.now();
@@ -690,6 +729,7 @@ export class LocalPortalRepository implements PortalRepository {
       ...input,
       id: orderId,
       orderNumber,
+      expiresAt: input.expiresAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       items: input.items.map((item) => ({ ...item, orderId })),
       createdAt: ts,
       updatedAt: ts,
@@ -862,6 +902,48 @@ export class LocalPortalRepository implements PortalRepository {
     });
     this.persist();
     return order;
+  }
+
+  async expireStaleOrders(nowDate: Date = new Date()): Promise<OrderRecord[]> {
+    const nowMs = nowDate.getTime();
+    const ts = nowDate.toISOString();
+    const expired: OrderRecord[] = [];
+    for (const order of this.state.orders) {
+      if (
+        ['unpaid', 'pending'].includes(order.paymentStatus) &&
+        order.fulfillmentStatus === 'pending_payment' &&
+        order.expiresAt &&
+        Date.parse(order.expiresAt) <= nowMs
+      ) {
+        order.paymentStatus = 'cancelled';
+        order.fulfillmentStatus = 'cancelled';
+        order.cancellationReason = 'Order expired after unpaid checkout window';
+        order.updatedAt = ts;
+        order.timeline.push({
+          status: 'cancelled',
+          label: 'Order Expired',
+          note: 'Unpaid order automatically expired after checkout window.',
+          timestamp: ts,
+        });
+        const pendingCreditsTotal = order.items.reduce((sum, i) => sum + i.creditsAllocated * i.quantity, 0);
+        if (pendingCreditsTotal > 0) {
+          const wallet = await this.getWallet(order.userId);
+          wallet.pendingCredits = Math.max(0, wallet.pendingCredits - pendingCreditsTotal);
+          wallet.updatedAt = ts;
+        }
+        const inv = this.state.invoices.find((i) => i.orderId === order.id);
+        if (inv) inv.paymentStatus = 'cancelled';
+        const pay = this.state.payments.find((p) => p.orderId === order.id);
+        if (pay) {
+          pay.status = 'cancelled';
+          pay.failureReason = 'Order checkout window expired';
+          pay.updatedAt = ts;
+        }
+        expired.push(order);
+      }
+    }
+    if (expired.length > 0) this.persist();
+    return expired;
   }
 
   async listPayments(userId: string): Promise<PaymentRecord[]> {
@@ -1243,6 +1325,115 @@ export class LocalPortalRepository implements PortalRepository {
     });
     this.persist();
     return sub;
+  }
+
+  async renewSubscription(
+    subscriptionId: string,
+    providerTransactionId?: string
+  ): Promise<{ subscription: SubscriptionRecord; creditsAllocated: number } | null> {
+    const sub = this.state.subscriptions.find((s) => s.id === subscriptionId);
+    if (!sub || sub.status === 'cancelled' || sub.status === 'expired') return null;
+    const ts = this.now();
+    const nextEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    sub.status = 'active';
+    sub.currentPeriodStart = ts;
+    sub.currentPeriodEnd = nextEnd;
+    sub.gracePeriodEndsAt = undefined;
+    sub.failedRenewalCount = 0;
+    sub.lastRenewalAt = ts;
+    sub.updatedAt = ts;
+
+    let creditsAllocated = 0;
+    if (sub.creditsPerCycle > 0) {
+      await this.applyCreditLedgerEntry({
+        userId: sub.userId,
+        transactionType: 'subscription_allocation',
+        amount: sub.creditsPerCycle,
+        description: `Subscription renewal allocation for ${sub.planName}`,
+        relatedOrderId: sub.orderId,
+        idempotencyKey: providerTransactionId
+          ? `sub-renew:${sub.id}:${providerTransactionId}`
+          : `sub-renew:${sub.id}:${ts}`,
+      });
+      creditsAllocated = sub.creditsPerCycle;
+    }
+
+    await this.addNotification({
+      userId: sub.userId,
+      type: 'subscription_update',
+      title: `Subscription Renewed — ${sub.planName}`,
+      body: creditsAllocated > 0
+        ? `Your subscription renewed through ${nextEnd.slice(0, 10)} and ${creditsAllocated.toLocaleString()} credits were added.`
+        : `Your subscription renewed through ${nextEnd.slice(0, 10)}.`,
+      linkPath: '/portal/subscriptions',
+    });
+    this.persist();
+    return { subscription: sub, creditsAllocated };
+  }
+
+  async recordSubscriptionRenewalFailure(
+    subscriptionId: string,
+    reason: string,
+    graceDays = 7
+  ): Promise<SubscriptionRecord | null> {
+    const sub = this.state.subscriptions.find((s) => s.id === subscriptionId);
+    if (!sub || sub.status === 'cancelled') return null;
+    const ts = this.now();
+    const nextFailures = (sub.failedRenewalCount || 0) + 1;
+    sub.failedRenewalCount = nextFailures;
+    if (nextFailures >= 3) {
+      sub.status = 'suspended';
+    } else {
+      sub.status = 'past_due';
+      if (!sub.gracePeriodEndsAt) {
+        sub.gracePeriodEndsAt = new Date(Date.now() + graceDays * 24 * 60 * 60 * 1000).toISOString();
+      }
+    }
+    sub.updatedAt = ts;
+    await this.addNotification({
+      userId: sub.userId,
+      type: 'subscription_update',
+      title: sub.status === 'suspended' ? `Subscription Suspended — ${sub.planName}` : `Payment Past Due — ${sub.planName}`,
+      body: sub.status === 'suspended'
+        ? `Renewal failed ${nextFailures} times (${reason}). Update billing to reactivate.`
+        : `Renewal attempt failed (${reason}). Grace period active until ${(sub.gracePeriodEndsAt || ts).slice(0, 10)}.`,
+      linkPath: '/portal/subscriptions',
+    });
+    this.persist();
+    return sub;
+  }
+
+  async changeSubscriptionPlan(
+    userId: string,
+    subscriptionId: string,
+    newPackageId: string
+  ): Promise<{ subscription?: SubscriptionRecord; error?: string }> {
+    const sub = this.state.subscriptions.find((s) => s.id === subscriptionId && s.userId === userId);
+    if (!sub) return { error: 'Subscription not found.' };
+    if (sub.status === 'cancelled' || sub.status === 'expired') {
+      return { error: `Cannot change plan while subscription is ${sub.status}.` };
+    }
+    const found = await this.getPackageById(newPackageId);
+    if (!found || found.pkg.billingType !== 'subscription_monthly') {
+      return { error: 'Target package must be an active monthly subscription plan.' };
+    }
+    const ts = this.now();
+    sub.productId = found.product.id;
+    sub.packageId = found.pkg.id;
+    sub.planName = found.pkg.name;
+    sub.amountMinor = sub.currency === 'PHP' ? found.pkg.pricePhpMinor : found.pkg.priceUsdMinor;
+    sub.creditsPerCycle = found.pkg.creditsIncluded;
+    sub.inclusions = [...found.pkg.features];
+    sub.updatedAt = ts;
+    await this.addNotification({
+      userId,
+      type: 'subscription_update',
+      title: `Subscription Plan Updated — ${sub.planName}`,
+      body: `Plan updated to ${sub.planName} (${sub.creditsPerCycle.toLocaleString()} credits/cycle).`,
+      linkPath: '/portal/subscriptions',
+    });
+    this.persist();
+    return { subscription: sub };
   }
 
   // ---- Projects ----
@@ -1814,6 +2005,29 @@ export class LocalPortalRepository implements PortalRepository {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
+  async getDigitalEntitlementById(userId: string, entitlementId: string): Promise<DigitalEntitlementRecord | null> {
+    return this.state.digitalEntitlements.find((e) => e.id === entitlementId && e.userId === userId) || null;
+  }
+
+  async revokeDigitalEntitlement(
+    entitlementId: string,
+    reason: string,
+    actor: string
+  ): Promise<DigitalEntitlementRecord | null> {
+    const ent = this.state.digitalEntitlements.find((e) => e.id === entitlementId);
+    if (!ent) return null;
+    ent.status = 'revoked';
+    await this.addActivity({
+      userId: ent.userId,
+      eventType: 'digital_entitlement_revoked',
+      title: `Digital license revoked (${ent.productName})`,
+      detail: `Revoked by ${actor}: ${reason}`,
+      relatedPath: '/portal/orders',
+    });
+    this.persist();
+    return ent;
+  }
+
   async recordDigitalDownload(input: {
     userId: string;
     entitlementId: string;
@@ -2051,8 +2265,8 @@ export class LocalPortalRepository implements PortalRepository {
     requestedBy: string;
   }): Promise<PaymentRefundRecord | null> {
     const payment = this.state.payments.find((p) => p.id === input.paymentId);
-    if (!payment || payment.status !== 'paid') return null;
-    if (input.amountMinor <= 0 || input.amountMinor + payment.refundedMinor > payment.amountMinor) {
+    if (!payment || !['paid', 'partially_refunded'].includes(payment.status)) return null;
+    if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0 || input.amountMinor + payment.refundedMinor > payment.amountMinor) {
       return null;
     }
     const ts = this.now();
@@ -2081,6 +2295,9 @@ export class LocalPortalRepository implements PortalRepository {
   ): Promise<PaymentRefundRecord | null> {
     const refund = this.state.refunds.find((r) => r.id === refundId);
     if (!refund) return null;
+    if (refund.status === 'processed' || refund.status === 'rejected') {
+      return refund;
+    }
     const ts = this.now();
     refund.status = decision;
     refund.approvedBy = actor;
@@ -2096,7 +2313,18 @@ export class LocalPortalRepository implements PortalRepository {
       }
       if (order && payment) {
         order.paymentStatus = payment.status;
-        if (payment.status === 'refunded') order.fulfillmentStatus = 'cancelled';
+        if (payment.status === 'refunded') {
+          order.fulfillmentStatus = 'cancelled';
+          for (const ent of this.state.digitalEntitlements) {
+            if (ent.orderId === order.id) ent.status = 'revoked';
+          }
+        }
+        order.timeline.push({
+          status: order.fulfillmentStatus,
+          label: payment.status === 'refunded' ? 'Full Refund Processed' : 'Partial Refund Processed',
+          note: `Refund of ${(refund.amountMinor / 100).toFixed(2)} ${refund.currency} processed by ${actor}. Reason: ${refund.reason}`,
+          timestamp: ts,
+        });
         order.updatedAt = ts;
       }
       if (invoice && payment) {
@@ -2105,5 +2333,48 @@ export class LocalPortalRepository implements PortalRepository {
     }
     this.persist();
     return refund;
+  }
+
+  async adminCreateDeliverable(input: {
+    projectId: string;
+    title: string;
+    description: string;
+    fileId: string;
+    actor: string;
+  }): Promise<ProjectDeliverableRecord | null> {
+    const project = this.state.projects.find((p) => p.id === input.projectId);
+    if (!project) return null;
+    const ts = this.now();
+    const existingCount = this.state.deliverables.filter((d) => d.projectId === input.projectId).length;
+    const deliverable: ProjectDeliverableRecord = {
+      id: crypto.randomUUID(),
+      projectId: project.id,
+      userId: project.userId,
+      title: input.title.trim(),
+      description: input.description.trim(),
+      fileId: input.fileId,
+      version: existingCount + 1,
+      status: 'awaiting_review',
+      createdAt: ts,
+    };
+    this.state.deliverables.push(deliverable);
+    project.currentStage = 'client_review';
+    project.progressPercent = 60;
+    project.approvalHistory.push({
+      action: `Deliverable uploaded: ${deliverable.title} (v${deliverable.version})`,
+      actor: input.actor,
+      note: deliverable.description || 'Submitted for client review',
+      timestamp: ts,
+    });
+    project.updatedAt = ts;
+    await this.addNotification({
+      userId: project.userId,
+      type: 'deliverable_uploaded',
+      title: `New Deliverable Ready — ${project.referenceNumber}`,
+      body: `${deliverable.title} (v${deliverable.version}) is ready for your review.`,
+      linkPath: `/portal/projects/${project.id}`,
+    });
+    this.persist();
+    return deliverable;
   }
 }

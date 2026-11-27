@@ -146,8 +146,14 @@ export const aiConsultantService = {
     userMessage: string,
     state: ConsultationState,
     conversationHistory: ChatMessage[],
-    language: 'en-US' | 'fil-PH' = 'en-US'
-  ): Promise<{ aiMessage: ChatMessage; updatedState: ConsultationState }> {
+    language: 'en-US' | 'fil-PH' = 'en-US',
+    sessionId?: string
+  ): Promise<{
+    aiMessage: ChatMessage;
+    updatedState: ConsultationState;
+    sessionId?: string;
+    serverGeminiAvailable?: boolean;
+  }> {
     const trimmed = userMessage.trim();
     const updatedState: ConsultationState = {
       ...state,
@@ -199,6 +205,7 @@ export const aiConsultantService = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          sessionId,
           userMessage: trimmed.slice(0, 2000),
           state: updatedState,
           conversationHistory: conversationHistory.slice(-8).map((m) => ({
@@ -236,6 +243,9 @@ export const aiConsultantService = {
               : ['Review Project Brief', 'Schedule Consultation'],
           },
           updatedState,
+          sessionId: typeof data.sessionId === 'string' ? data.sessionId : sessionId,
+          serverGeminiAvailable:
+            typeof data.serverGeminiAvailable === 'boolean' ? data.serverGeminiAvailable : undefined,
         };
       }
     } catch (err) {

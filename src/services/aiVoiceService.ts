@@ -1,7 +1,9 @@
 /**
  * OPHIREUM AI Solutions Consultant - Real-Time Voice Engine
- * Handles bidirectional voice conversation, Web Audio API analysis,
- * Speech-to-Text streaming, Speech Synthesis, interruption detection,
+ * Handles bidirectional voice conversation, Web Audio API VAD analysis,
+ * SpeechRecognition + MediaRecorder /api/voice/transcribe fallback,
+ * backend Gemini WAV TTS (/api/voice/speak) with SpeechSynthesis fallback,
+ * barge-in interruption, shared chat/voice sessionId continuity,
  * and verified handoff to AppointmentBookingModal (never fabricates bookings).
  */
 
@@ -25,6 +27,8 @@ export interface VoiceEventCallbacks {
   onVolumeChange?: (volume: number) => void;
   onAppointmentBooked?: (appointment: ConsultationAppointment) => void;
   onBookingRequested?: () => void;
+  onDegradedNotice?: (notice: string | null) => void;
+  onSessionId?: (sessionId: string) => void;
   onError?: (errorMessage: string) => void;
 }
 
@@ -41,10 +45,20 @@ class AIVoiceService {
   private recognition: any = null;
   private isRecognitionRunning = false;
   private recognitionRestartTimeout: any = null;
+  private recognitionReconnectAttempts = 0;
 
+  private mediaRecorder: MediaRecorder | null = null;
+  private recordedChunks: Blob[] = [];
+  private isRecordingClip = false;
+
+  private currentAudio: HTMLAudioElement | null = null;
+  private currentAudioUrl: string | null = null;
   private currentUtterance: SpeechSynthesisUtterance | null = null;
+  private speakAbortController: AbortController | null = null;
+
   private isSpeakerMuted = false;
   private isMicMuted = false;
+  private serverGeminiAvailable = true;
 
   private sessionId: string = '';
   private conversationHistory: Array<{ sender: 'user' | 'ai'; text: string }> = [];
@@ -57,12 +71,31 @@ class AIVoiceService {
     this.callbacks = { ...this.callbacks, ...callbacks };
   }
 
+  public getSessionId(): string {
+    return this.sessionId;
+  }
+
+  public setSessionId(sessionId: string) {
+    if (sessionId && sessionId.trim()) {
+      this.sessionId = sessionId.trim().slice(0, 80);
+    }
+  }
+
   public getStatus(): VoiceState {
     return this.status;
   }
 
   public getLanguage(): VoiceLanguage {
     return this.language;
+  }
+
+  public supportsNativeSpeechRecognition(): boolean {
+    if (typeof window === 'undefined') return false;
+    return Boolean((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+  }
+
+  public isPushToTalkRecording(): boolean {
+    return this.isRecordingClip;
   }
 
   public setLanguage(lang: VoiceLanguage) {
@@ -86,8 +119,8 @@ class AIVoiceService {
 
   public setSpeakerMuted(muted: boolean) {
     this.isSpeakerMuted = muted;
-    if (muted && typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
+    if (muted) {
+      this.cancelSpeech();
       if (this.status === 'speaking') {
         this.setStatus('idle');
       }
@@ -102,12 +135,16 @@ class AIVoiceService {
     return this.isSpeakerMuted;
   }
 
-  public async startSession(): Promise<boolean> {
+  public async startSession(sharedSessionId?: string): Promise<boolean> {
+    if (sharedSessionId) {
+      this.setSessionId(sharedSessionId);
+    }
     if (this.status !== 'disconnected' && this.status !== 'error') {
       return true;
     }
 
     this.setStatus('connecting');
+    this.recognitionReconnectAttempts = 0;
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -143,14 +180,27 @@ class AIVoiceService {
         const res = await fetch(apiUrl('/api/voice/session'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ language: this.language }),
+          body: JSON.stringify({ language: this.language, sessionId: this.sessionId }),
         });
         if (res.ok) {
           const data = await res.json();
-          this.sessionId = data.sessionId || this.sessionId;
+          if (data.sessionId) {
+            this.sessionId = data.sessionId;
+            this.callbacks.onSessionId?.(this.sessionId);
+          }
+          this.serverGeminiAvailable = Boolean(data.serverGeminiAvailable);
+          this.callbacks.onDegradedNotice?.(
+            data.serverGeminiAvailable
+              ? null
+              : data.degradedNotice ||
+                  'Live Gemini audio synthesis is in catalog-grounded fallback mode; browser speech and text chat remain active.'
+          );
         }
       } catch {
-        // Non-fatal telemetry/session hint
+        this.serverGeminiAvailable = false;
+        this.callbacks.onDegradedNotice?.(
+          'Voice backend connection degraded. Using local fallback mode; text chat remains available.'
+        );
       }
 
       this.setStatus('idle');
@@ -159,12 +209,12 @@ class AIVoiceService {
         ? 'Magandang araw po. Ako ang inyong OPHIREUM AI Solutions Consultant. Paano ko po matutulungan ang inyong multimedia o software development project ngayon?'
         : 'Welcome to OPHIREUM MULTIMEDIA PRODUCTION. I am your AI Solutions Consultant. How can I assist with your creative media, AI, or enterprise software project today?';
 
-      this.speakText(greeting, false);
+      void this.speakText(greeting, true);
       return true;
     } catch (err: any) {
       this.setStatus('error');
       const msg =
-        err.name === 'NotAllowedError'
+        err?.name === 'NotAllowedError'
           ? 'Microphone permission denied. Please allow microphone access in your browser settings to activate voice communication.'
           : 'Could not initialize audio input. Returning to text chat.';
       this.callbacks.onError?.(msg);
@@ -173,8 +223,92 @@ class AIVoiceService {
     }
   }
 
+  /**
+   * MediaRecorder -> /api/voice/transcribe push-to-talk fallback for browsers
+   * without native Web Speech API (e.g., Firefox or certain mobile browsers).
+   */
+  public startPushToTalkCapture(): boolean {
+    if (!this.mediaStream || typeof MediaRecorder === 'undefined' || this.isRecordingClip) {
+      return false;
+    }
+    try {
+      this.interrupt();
+      const preferredMime = MediaRecorder.isTypeSupported('audio/webm')
+        ? 'audio/webm'
+        : MediaRecorder.isTypeSupported('audio/mp4')
+          ? 'audio/mp4'
+          : 'audio/ogg';
+      this.recordedChunks = [];
+      this.mediaRecorder = new MediaRecorder(this.mediaStream, { mimeType: preferredMime });
+      this.mediaRecorder.ondataavailable = (ev) => {
+        if (ev.data && ev.data.size > 0) this.recordedChunks.push(ev.data);
+      };
+      this.mediaRecorder.onstop = () => {
+        this.isRecordingClip = false;
+        void this.transcribeRecordedClip(preferredMime);
+      };
+      this.mediaRecorder.start();
+      this.isRecordingClip = true;
+      this.setStatus('listening');
+      return true;
+    } catch {
+      this.callbacks.onError?.('Audio clip recording is not supported in this browser; please use text chat.');
+      return false;
+    }
+  }
+
+  public stopPushToTalkCapture() {
+    if (this.mediaRecorder && this.isRecordingClip) {
+      try {
+        this.mediaRecorder.stop();
+      } catch {}
+    }
+  }
+
+  private async transcribeRecordedClip(mimeType: string) {
+    if (this.recordedChunks.length === 0) {
+      this.setStatus('idle');
+      return;
+    }
+    this.setStatus('thinking');
+    try {
+      const blob = new Blob(this.recordedChunks, { type: mimeType });
+      const arrayBuf = await blob.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuf);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const audioBase64 = btoa(binary);
+      const res = await fetch(apiUrl('/api/voice/transcribe'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audioBase64, mimeType }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.transcript && typeof data.transcript === 'string' && data.transcript.trim()) {
+          await this.handleUserSpeech(data.transcript.trim());
+          return;
+        }
+      }
+      this.callbacks.onError?.('Server speech transcription is currently unavailable. Please type your message below.');
+      this.setStatus('idle');
+    } catch {
+      this.callbacks.onError?.('Could not transcribe audio clip. Please continue with text chat.');
+      this.setStatus('idle');
+    }
+  }
+
   public stopSession() {
     this.cancelSpeech();
+
+    if (this.mediaRecorder && this.isRecordingClip) {
+      try {
+        this.mediaRecorder.stop();
+      } catch {}
+      this.isRecordingClip = false;
+    }
 
     if (this.recognition) {
       try {
@@ -213,6 +347,7 @@ class AIVoiceService {
     this.cancelSpeech();
     if (this.status === 'speaking') {
       this.setStatus('idle');
+      this.startRecognitionSafe();
     }
   }
 
@@ -237,7 +372,7 @@ class AIVoiceService {
       this.conversationHistory.push({ sender: 'ai', text: reply });
       this.callbacks.onAiResponse?.(reply, { isBookingIntent: true });
       this.callbacks.onBookingRequested?.();
-      this.speakText(reply);
+      void this.speakText(reply);
       return;
     }
 
@@ -246,6 +381,7 @@ class AIVoiceService {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          sessionId: this.sessionId,
           userMessage: cleanTranscript,
           language: this.language,
           conversationHistory: this.conversationHistory.slice(-6),
@@ -254,6 +390,9 @@ class AIVoiceService {
 
       if (response.ok) {
         const data = await response.json();
+        if (typeof data.serverGeminiAvailable === 'boolean') {
+          this.serverGeminiAvailable = data.serverGeminiAvailable;
+        }
         const replyText =
           data.replyText ||
           "I've analyzed your project parameters. How else can we tailor our services for you?";
@@ -263,7 +402,7 @@ class AIVoiceService {
           { sender: 'ai', text: replyText },
         ];
         this.callbacks.onAiResponse?.(replyText, data.detectedIntent);
-        this.speakText(replyText);
+        void this.speakText(replyText);
         return;
       }
     } catch {
@@ -276,15 +415,10 @@ class AIVoiceService {
       { sender: 'ai', text: localReply },
     ];
     this.callbacks.onAiResponse?.(localReply);
-    this.speakText(localReply);
+    void this.speakText(localReply);
   }
 
-  public speakText(text: string, restartRecognitionAfter = true) {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-      this.setStatus('idle');
-      return;
-    }
-
+  public async speakText(text: string, restartRecognitionAfter = true) {
     if (this.isSpeakerMuted) {
       this.setStatus('idle');
       return;
@@ -303,7 +437,66 @@ class AIVoiceService {
     const cleanText = text
       .replace(/[*#_`~>]/g, '')
       .replace(/https?:\/\/\S+/g, '')
-      .replace(/OPM-[A-Z]+-\d+-[A-Z0-9]+/g, (match) => match.split('-').join(' '));
+      .replace(/OPM-[A-Z]+-\d+-[A-Z0-9]+/g, (match) => match.split('-').join(' '))
+      .trim();
+
+    const finishSpeaking = () => {
+      if (this.status !== 'disconnected') {
+        this.setStatus('idle');
+      }
+      if (
+        restartRecognitionAfter &&
+        this.recognition &&
+        !this.isMicMuted &&
+        this.status !== 'disconnected'
+      ) {
+        this.startRecognitionSafe();
+      }
+    };
+
+    // 1. Prefer backend-mediated Gemini WAV TTS (/api/voice/speak) when Gemini is available
+    if (this.serverGeminiAvailable && typeof window !== 'undefined' && typeof Audio !== 'undefined') {
+      try {
+        this.speakAbortController = new AbortController();
+        const res = await fetch(apiUrl('/api/voice/speak'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: cleanText.slice(0, 600), language: this.language }),
+          signal: this.speakAbortController.signal,
+        });
+        if (res.ok && res.headers.get('content-type')?.includes('audio/')) {
+          const audioBlob = await res.blob();
+          const objectUrl = URL.createObjectURL(audioBlob);
+          this.currentAudioUrl = objectUrl;
+          const audio = new Audio(objectUrl);
+          this.currentAudio = audio;
+          audio.onended = () => {
+            this.cleanupCurrentAudio();
+            finishSpeaking();
+          };
+          audio.onerror = () => {
+            this.cleanupCurrentAudio();
+            this.speakWithBrowserSynthesis(cleanText, finishSpeaking);
+          };
+          await audio.play();
+          return;
+        }
+      } catch (err: any) {
+        if (err?.name === 'AbortError') {
+          return;
+        }
+        // Gracefully fall back to browser SpeechSynthesis
+      }
+    }
+
+    this.speakWithBrowserSynthesis(cleanText, finishSpeaking);
+  }
+
+  private speakWithBrowserSynthesis(cleanText: string, onDone: () => void) {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      onDone();
+      return;
+    }
 
     const utterance = new SpeechSynthesisUtterance(cleanText);
     this.currentUtterance = utterance;
@@ -325,34 +518,38 @@ class AIVoiceService {
 
     utterance.onend = () => {
       this.currentUtterance = null;
-      this.setStatus('idle');
-      if (
-        restartRecognitionAfter &&
-        this.recognition &&
-        !this.isMicMuted &&
-        this.status !== 'disconnected'
-      ) {
-        this.startRecognitionSafe();
-      }
+      onDone();
     };
-
     utterance.onerror = () => {
       this.currentUtterance = null;
-      this.setStatus('idle');
-      if (
-        restartRecognitionAfter &&
-        this.recognition &&
-        !this.isMicMuted &&
-        this.status !== 'disconnected'
-      ) {
-        this.startRecognitionSafe();
-      }
+      onDone();
     };
 
     window.speechSynthesis.speak(utterance);
   }
 
+  private cleanupCurrentAudio() {
+    if (this.currentAudio) {
+      try {
+        this.currentAudio.pause();
+        this.currentAudio.src = '';
+      } catch {}
+      this.currentAudio = null;
+    }
+    if (this.currentAudioUrl) {
+      URL.revokeObjectURL(this.currentAudioUrl);
+      this.currentAudioUrl = null;
+    }
+  }
+
   public cancelSpeech() {
+    if (this.speakAbortController) {
+      try {
+        this.speakAbortController.abort();
+      } catch {}
+      this.speakAbortController = null;
+    }
+    this.cleanupCurrentAudio();
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       this.currentUtterance = null;
@@ -373,6 +570,13 @@ class AIVoiceService {
 
       this.recognition.onstart = () => {
         this.isRecognitionRunning = true;
+        this.recognitionReconnectAttempts = 0;
+      };
+
+      this.recognition.onerror = (event: any) => {
+        if (event?.error === 'not-allowed' || event?.error === 'service-not-allowed') {
+          this.callbacks.onError?.('Speech recognition permission denied. Text fallback remains active.');
+        }
       };
 
       this.recognition.onresult = (event: any) => {
@@ -404,16 +608,23 @@ class AIVoiceService {
 
       this.recognition.onend = () => {
         this.isRecognitionRunning = false;
-        if (this.status !== 'disconnected' && this.status !== 'speaking' && !this.isMicMuted) {
+        if (
+          this.status !== 'disconnected' &&
+          this.status !== 'speaking' &&
+          !this.isMicMuted &&
+          this.recognitionReconnectAttempts < 8
+        ) {
+          this.recognitionReconnectAttempts += 1;
+          const delayMs = Math.min(2500, 350 * this.recognitionReconnectAttempts);
           this.recognitionRestartTimeout = setTimeout(() => {
             this.startRecognitionSafe();
-          }, 400);
+          }, delayMs);
         }
       };
 
       this.startRecognitionSafe();
     } catch {
-      // Unsupported browser fallback
+      // Unsupported browser fallback (push-to-talk MediaRecorder or text chat remains active)
     }
   }
 

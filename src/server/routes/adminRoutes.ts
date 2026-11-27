@@ -1,9 +1,9 @@
 import { Router, Response, NextFunction } from 'express';
 import {
-  ADMIN_SESSION_COOKIE,
   AdminAuthService,
   AuthenticatedAdminRequest,
   ROLE_PERMISSIONS,
+  buildAdminSessionCookieHeader,
 } from '../auth';
 import { DatabaseRepository, SolutionRequestRecord } from '../db/types';
 import { OrderStatus, PortalRepository, ProjectStage, SupportTicketStatus } from '../portal/types';
@@ -13,6 +13,16 @@ import { GoogleCalendarService } from '../services/calendarService';
 import { EnterpriseAiWorkforceService } from '../ai/workforceService';
 import { CentralKnowledgeService } from '../ai/knowledgeService';
 import { sanitizePlainText } from '../validation';
+
+/**
+ * Neutralizes spreadsheet formula injection (=, +, -, @, tab, CR) before CSV quoting.
+ */
+export function sanitizeCsvCell(value: unknown): string {
+  const str = String(value ?? '');
+  const trimmedLeading = str.replace(/^[\t\r\n ]+/, '');
+  const safe = /^[=+\-@\t\r]/.test(str) || /^[=+\-@]/.test(trimmedLeading) ? `'${str}` : str;
+  return `"${safe.replace(/"/g, '""')}"`;
+}
 
 interface SystemConfigEntry {
   key: string;
@@ -93,14 +103,9 @@ export function createAdminCommandRouter(deps: {
     async (req: AuthenticatedAdminRequest, res: Response) => {
       const token = deps.authService.extractTokenFromRequest(req);
       if (token) {
-        deps.authService.revokeSessionToken(token);
+        await deps.authService.revokeSessionTokenAsync(token);
       }
-      res.setHeader(
-        'Set-Cookie',
-        `${ADMIN_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${
-          process.env.NODE_ENV === 'production' ? '; Secure' : ''
-        }`
-      );
+      res.setHeader('Set-Cookie', buildAdminSessionCookieHeader('', 0));
       await audit(req, 'admin_session_revoked', 'admin_auth', req.adminUser?.id, {
         jti: req.adminSessionJti,
       });
@@ -171,13 +176,86 @@ export function createAdminCommandRouter(deps: {
     }
   );
 
-  // ---- Customers ----
+  // ---- Customers, Suspension & Credit Adjustments ----
   router.get(
     '/customers',
     deps.authService.requirePermission('customers.read'),
     async (_req: AuthenticatedAdminRequest, res: Response) => {
       const records = deps.portalRepo.adminListUsers ? await deps.portalRepo.adminListUsers() : [];
       res.json({ success: true, total: records.length, records });
+    }
+  );
+
+  router.post(
+    '/customers/:userId/suspend',
+    deps.authService.requirePermission('customers.write'),
+    async (req: AuthenticatedAdminRequest, res: Response) => {
+      const userId = sanitizePlainText(req.params.userId, 80);
+      const reason = sanitizePlainText(req.body?.reason, 400) || 'Suspended by administrator';
+      const updated = deps.portalRepo.suspendUser
+        ? await deps.portalRepo.suspendUser(userId, reason, req.adminUser!.email)
+        : null;
+      if (!updated) {
+        res.status(404).json({ success: false, error: 'Customer not found.' });
+        return;
+      }
+      await audit(req, 'admin_suspend_customer', 'profiles', userId, { reason });
+      res.json({ success: true, accountStatus: updated.accountStatus });
+    }
+  );
+
+  router.post(
+    '/customers/:userId/reactivate',
+    deps.authService.requirePermission('customers.write'),
+    async (req: AuthenticatedAdminRequest, res: Response) => {
+      const userId = sanitizePlainText(req.params.userId, 80);
+      const updated = deps.portalRepo.reactivateUser
+        ? await deps.portalRepo.reactivateUser(userId, req.adminUser!.email)
+        : null;
+      if (!updated) {
+        res.status(404).json({ success: false, error: 'Customer not found.' });
+        return;
+      }
+      await audit(req, 'admin_reactivate_customer', 'profiles', userId, {});
+      res.json({ success: true, accountStatus: updated.accountStatus });
+    }
+  );
+
+  router.post(
+    '/customers/:userId/credits',
+    deps.authService.requirePermission('credits.write'),
+    async (req: AuthenticatedAdminRequest, res: Response) => {
+      const userId = sanitizePlainText(req.params.userId, 80);
+      const amount = Number(req.body?.amount);
+      const description = sanitizePlainText(req.body?.description, 240);
+      if (!Number.isInteger(amount) || amount === 0 || !description) {
+        res.status(400).json({ success: false, error: 'Non-zero integer amount and description are required.' });
+        return;
+      }
+      try {
+        const result = await deps.portalRepo.applyCreditLedgerEntry({
+          userId,
+          transactionType: 'credit_adjustment',
+          amount,
+          description: `[Admin ${req.adminUser!.email}] ${description}`,
+        });
+        await audit(req, 'admin_adjust_credits', 'credit_wallets', userId, { amount, description });
+        res.status(200).json({ success: true, ...result });
+      } catch (err: any) {
+        res.status(400).json({ success: false, error: err?.message || 'Credit adjustment failed.' });
+      }
+    }
+  );
+
+  router.get(
+    '/catalog',
+    deps.authService.requirePermission('dashboard.read'),
+    async (_req: AuthenticatedAdminRequest, res: Response) => {
+      const [categories, products] = await Promise.all([
+        deps.portalRepo.listCategories(),
+        deps.portalRepo.listProducts(),
+      ]);
+      res.json({ success: true, categories, products });
     }
   );
 
@@ -372,6 +450,90 @@ export function createAdminCommandRouter(deps: {
       }
       await audit(req, 'admin_update_project_stage', 'projects', projectId, { stage, note });
       res.json({ success: true, project: updated });
+    }
+  );
+
+  router.post(
+    '/projects/:projectId/deliverables',
+    deps.authService.requirePermission('projects.write'),
+    async (req: AuthenticatedAdminRequest, res: Response) => {
+      const projectId = sanitizePlainText(req.params.projectId, 80);
+      const title = sanitizePlainText(req.body?.title, 160);
+      const description = sanitizePlainText(req.body?.description, 1000);
+      const fileId = sanitizePlainText(req.body?.fileId, 80) || 'deliverable-file';
+      if (!title) {
+        res.status(400).json({ success: false, error: 'Deliverable title is required.' });
+        return;
+      }
+      const deliverable = deps.portalRepo.adminCreateDeliverable
+        ? await deps.portalRepo.adminCreateDeliverable({
+            projectId,
+            title,
+            description,
+            fileId,
+            actor: req.adminUser!.email,
+          })
+        : null;
+      if (!deliverable) {
+        res.status(404).json({ success: false, error: 'Project not found.' });
+        return;
+      }
+      await audit(req, 'admin_upload_deliverable', 'project_deliverables', deliverable.id, { projectId, title });
+      res.status(201).json({ success: true, deliverable });
+    }
+  );
+
+  router.post(
+    '/subscriptions/:subscriptionId/renew',
+    deps.authService.requirePermission('subscriptions.write'),
+    async (req: AuthenticatedAdminRequest, res: Response) => {
+      const subId = sanitizePlainText(req.params.subscriptionId, 80);
+      const txId = sanitizePlainText(req.body?.providerTransactionId, 120) || undefined;
+      const result = deps.portalRepo.renewSubscription
+        ? await deps.portalRepo.renewSubscription(subId, txId)
+        : null;
+      if (!result) {
+        res.status(404).json({ success: false, error: 'Active subscription not found.' });
+        return;
+      }
+      await audit(req, 'admin_renew_subscription', 'subscriptions', subId, { creditsAllocated: result.creditsAllocated });
+      res.json({ success: true, ...result });
+    }
+  );
+
+  router.post(
+    '/subscriptions/:subscriptionId/renewal-failed',
+    deps.authService.requirePermission('subscriptions.write'),
+    async (req: AuthenticatedAdminRequest, res: Response) => {
+      const subId = sanitizePlainText(req.params.subscriptionId, 80);
+      const reason = sanitizePlainText(req.body?.reason, 300) || 'Payment gateway declined renewal';
+      const sub = deps.portalRepo.recordSubscriptionRenewalFailure
+        ? await deps.portalRepo.recordSubscriptionRenewalFailure(subId, reason)
+        : null;
+      if (!sub) {
+        res.status(404).json({ success: false, error: 'Subscription not found.' });
+        return;
+      }
+      await audit(req, 'admin_subscription_renewal_failed', 'subscriptions', subId, { status: sub.status, reason });
+      res.json({ success: true, subscription: sub });
+    }
+  );
+
+  router.post(
+    '/entitlements/:entitlementId/revoke',
+    deps.authService.requirePermission('orders.write'),
+    async (req: AuthenticatedAdminRequest, res: Response) => {
+      const entId = sanitizePlainText(req.params.entitlementId, 80);
+      const reason = sanitizePlainText(req.body?.reason, 300) || 'Revoked by administrator';
+      const ent = deps.portalRepo.revokeDigitalEntitlement
+        ? await deps.portalRepo.revokeDigitalEntitlement(entId, reason, req.adminUser!.email)
+        : null;
+      if (!ent) {
+        res.status(404).json({ success: false, error: 'Digital entitlement not found.' });
+        return;
+      }
+      await audit(req, 'admin_revoke_digital_entitlement', 'digital_entitlements', entId, { reason });
+      res.json({ success: true, entitlement: ent });
     }
   );
 
@@ -658,8 +820,9 @@ export function createAdminCommandRouter(deps: {
       const rows = [
         ['metric', 'value'],
         ...Object.entries(payload.kpis).map(([k, v]) => [k, String(v)]),
+        ...payload.topServices.map((svc) => [`top_service:${svc.productName}`, String(svc.units)]),
       ];
-      const csv = rows.map((r) => r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+      const csv = rows.map((r) => r.map((cell) => sanitizeCsvCell(cell)).join(',')).join('\n');
       await audit(req, 'admin_export_analytics_csv', 'analytics', undefined, payload.filters);
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', 'attachment; filename="ophireum-bi-analytics.csv"');

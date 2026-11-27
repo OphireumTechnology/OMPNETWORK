@@ -1,11 +1,20 @@
-import { Router, Request, Response } from 'express';
+import express, { Request, Response, Router } from 'express';
 import { GoogleGenAI } from '@google/genai';
 import { AdminAuthService, AuthenticatedAdminRequest } from '../auth';
-import { DatabaseRepository } from '../db/types';
 import { EnterpriseAiWorkforceService } from '../ai/workforceService';
-import { CentralKnowledgeService, KnowledgeApprovalStatus, KnowledgeVisibility } from '../ai/knowledgeService';
-import { SERVICE_CATALOG } from '../../data/serviceCatalog';
+import { CentralKnowledgeService, KnowledgeDocumentRecord } from '../ai/knowledgeService';
+import { DatabaseRepository } from '../db/types';
 import { sanitizePlainText } from '../validation';
+
+const VALID_KB_CATEGORIES: KnowledgeDocumentRecord['category'][] = [
+  'company_policy',
+  'service_catalog',
+  'pricing_guide',
+  'sop',
+  'faq',
+  'legal',
+  'brand_voice',
+];
 
 export function createAiRouter(deps: {
   authService: AdminAuthService;
@@ -15,202 +24,119 @@ export function createAiRouter(deps: {
   aiClient: GoogleGenAI | null;
 }): Router {
   const router = Router();
+  const { authService, db, workforceService, knowledgeService, aiClient } = deps;
 
-  // Public summary of the 25-agent Enterprise AI Workforce (safe metadata only — no internal prompts/tools)
+  const audit = async (
+    req: AuthenticatedAdminRequest,
+    action: string,
+    entityType: string,
+    entityId?: string,
+    details: Record<string, unknown> = {}
+  ) => {
+    try {
+      await db.writeAuditLog({
+        correlationId: req.correlationId,
+        actor: req.adminUser?.email || 'admin',
+        actorRole: req.adminUser?.role || 'admin',
+        action,
+        entityType,
+        entityId,
+        details,
+      });
+    } catch {
+      // Non-fatal if optional DB is unconfigured in local dev
+    }
+  };
+
+  // Public read-only agent registry overview
   router.get('/agents/public', (_req: Request, res: Response) => {
-    const agents = deps.workforceService.listAgents().map((a) => ({
-      code: a.code,
-      name: a.name,
-      department: a.department,
-      description: a.description,
-      riskTier: a.riskTier,
-      requiresHumanApproval: a.requiresHumanApproval,
-      isActive: a.isActive,
-    }));
-    res.json({ success: true, total: agents.length, agents });
-  });
-
-  // Public / Client Architecture Blueprint Synthesizer (replaces mock setTimeout in EnterpriseModal)
-  router.post('/studio/blueprint', async (req: Request & { correlationId?: string }, res: Response) => {
-    const idea = sanitizePlainText(req.body?.idea, 1500);
-    if (!idea || idea.length < 10) {
-      res.status(400).json({
-        success: false,
-        error: 'Please describe your target system or project objective (minimum 10 characters).',
-      });
-      return;
-    }
-
-    const tokens = idea
-      .toLowerCase()
-      .split(/\W+/)
-      .filter((t) => t.length > 2);
-    const matchedServices = SERVICE_CATALOG.map((svc) => {
-      const hay = `${svc.title} ${svc.shortDescription} ${svc.capabilities.join(' ')}`.toLowerCase();
-      const score = tokens.reduce((acc, t) => acc + (hay.includes(t) ? 1 : 0), 0);
-      return { svc, score };
-    })
-      .filter((x) => x.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3)
-      .map((x) => x.svc);
-
-    const knowledgeHits = await deps.knowledgeService.search({
-      query: idea,
-      includeInternal: false,
-      limit: 3,
-    });
-
-    if (deps.aiClient) {
-      try {
-        const knowledgeBlock = deps.knowledgeService.formatRetrievedKnowledgeForPrompt(knowledgeHits);
-        const prompt = [
-          `Generate a concise executive technical blueprint for this OPHIREUM client concept: "${idea}"`,
-          matchedServices.length > 0
-            ? `Matching catalog services:\n${matchedServices
-                .map((s) => `- ${s.title} (Starting at $${s.pricing.startingUsd.toLocaleString('en-US')})`)
-                .join('\n')}`
-            : '',
-          knowledgeBlock,
-          'Return a crisp 4-section markdown blueprint: (1) Recommended Architecture Stack, (2) Matching OPHIREUM Divisions & Starting Investment Benchmarks, (3) Security & Compliance Guardrails, (4) Recommended Next Discovery Milestone. Never guarantee final pricing.',
-        ]
-          .filter(Boolean)
-          .join('\n\n');
-
-        const response: any = await Promise.race([
-          deps.aiClient.models.generateContent({
-            model: 'gemini-4-hydrogen',
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Blueprint timeout')), 10_000)),
-        ]);
-
-        const text = String(response?.text || '').trim();
-        if (text) {
-          res.json({
-            success: true,
-            provider: 'gemini-4-hydrogen',
-            blueprint: text,
-            matchedServices: matchedServices.map((s) => ({
-              id: s.id,
-              title: s.title,
-              startingUsd: s.pricing.startingUsd,
-            })),
-            citations: knowledgeHits.map((k) => ({ title: k.title, version: k.version })),
-          });
-          return;
-        }
-      } catch {
-        // Fall through to grounded deterministic blueprint
-      }
-    }
-
-    const lines = [
-      '### 1. Recommended Architecture Blueprint',
-      '• Frontend: React + TypeScript SPA with strict CSP, responsive accessibility, and zero client-side secret exposure.',
-      '• Backend & Persistence: Hardened Node/Express API gateway with PostgreSQL/Supabase Row Level Security (RLS), server-side validation, and immutable audit logging.',
-      '• Security & Integrations: Server-side webhook signature verification, rate limiting, and explicit third-party provider boundaries.',
-      '',
-      '### 2. Matching OPHIREUM Catalog Solutions (Starting Estimates Only)',
-      ...(matchedServices.length > 0
-        ? matchedServices.map(
-            (s) => `• ${s.title} — Starting at $${s.pricing.startingUsd.toLocaleString('en-US')} USD (${s.shortDescription})`
-          )
-        : ['• Custom Enterprise Software & Multi-Division Architecture — Scoped upon engineering discovery.']),
-      '',
-      '### 3. Compliance & Commercial Notice',
-      '• Figures represent preliminary starting benchmarks only; external cloud hosting, third-party APIs, and gateway fees are itemized separately.',
-      '',
-      '### 4. Next Step',
-      '• Submit a formal Solution Request or schedule an executive consultation with Founder & CEO Dhenze Languisan.',
-    ];
-
-    res.json({
+    res.status(200).json({
       success: true,
-      provider: 'ophireum-grounded-catalog-synthesizer',
-      blueprint: lines.join('\n'),
-      matchedServices: matchedServices.map((s) => ({
-        id: s.id,
-        title: s.title,
-        startingUsd: s.pricing.startingUsd,
+      total: workforceService.listAgents().length,
+      count: workforceService.listAgents().length,
+      agents: workforceService.listAgents().map((a) => ({
+        code: a.code,
+        name: a.name,
+        category: a.category,
+        roleSummary: a.roleSummary,
+        requiresApprovalByDefault: a.requiresApprovalByDefault,
+        outputSchema: a.outputContract.schemaName,
       })),
-      citations: knowledgeHits.map((k) => ({ title: k.title, version: k.version })),
     });
   });
 
-  // Human Escalation Intake (public/portal)
-  router.post('/escalations', (req: Request, res: Response) => {
-    const reason = sanitizePlainText(req.body?.reason, 1000);
-    const userEmail = sanitizePlainText(req.body?.email, 180).toLowerCase() || undefined;
-    const sessionId = sanitizePlainText(req.body?.sessionId, 120) || undefined;
-    if (!reason) {
-      res.status(400).json({ success: false, error: 'Escalation reason is required.' });
+  // Public safe knowledge search (strictly public tenantScope & public role only)
+  router.get('/knowledge/search/public', async (req: Request, res: Response) => {
+    const q = sanitizePlainText(req.query.q, 300);
+    if (!q) {
+      res.status(400).json({ success: false, error: 'Query parameter q is required.' });
       return;
     }
-    const escalation = deps.workforceService.createEscalation({
-      source: req.body?.source === 'voice' ? 'voice' : 'consultant_chat',
-      sessionId,
-      userEmail,
-      reason,
-      priority: req.body?.priority === 'urgent' ? 'urgent' : req.body?.priority === 'high' ? 'high' : 'normal',
+    const hits = await knowledgeService.search(q, {
+      limit: 4,
+      tenantScope: 'public',
+      actorRole: 'public',
+      includeInternal: false,
     });
-    res.status(201).json({ success: true, escalation });
+    res.status(200).json({ success: true, hits });
   });
 
-  // ---- Admin-Protected Full AI Workforce Orchestration & Governance ----
-  router.get(
-    '/agents',
-    deps.authService.requirePermission('ai.read'),
-    (_req: AuthenticatedAdminRequest, res: Response) => {
-      res.json({
-        success: true,
-        total: deps.workforceService.listAgents().length,
-        agents: deps.workforceService.listAgents(),
-      });
-    }
-  );
+  // Protected AI Workforce & Central Knowledge System routes
+  router.get('/agents', authService.requirePermission('ai.read'), (_req: AuthenticatedAdminRequest, res: Response) => {
+    res.status(200).json({
+      success: true,
+      total: workforceService.listAgents().length,
+      count: workforceService.listAgents().length,
+      agents: workforceService.listAgents(),
+    });
+  });
+
+  router.get('/dashboard', authService.requirePermission('ai.read'), (_req: AuthenticatedAdminRequest, res: Response) => {
+    res.status(200).json({
+      success: true,
+      dashboard: workforceService.getOperationalDashboard(),
+      knowledgeStats: knowledgeService.getStats(),
+    });
+  });
+
+  router.get('/executions', authService.requirePermission('ai.read'), (req: AuthenticatedAdminRequest, res: Response) => {
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit || 50)));
+    const tenantScope = sanitizePlainText(req.query.tenantScope, 80) || undefined;
+    res.status(200).json({
+      success: true,
+      executions: workforceService.listExecutions(limit, tenantScope),
+      pendingApprovals: workforceService.listPendingApprovals(),
+    });
+  });
 
   router.post(
     '/agents/:code/execute',
-    deps.authService.requirePermission('ai.execute'),
+    authService.requirePermission('ai.execute'),
     async (req: AuthenticatedAdminRequest, res: Response) => {
-      const code = sanitizePlainText(req.params.code, 16).toUpperCase();
+      const admin = req.adminUser!;
+      const code = sanitizePlainText(req.params.code, 10).toUpperCase();
       const prompt = sanitizePlainText(req.body?.prompt, 4000);
-      if (!prompt) {
-        res.status(400).json({ success: false, error: 'Execution prompt is required.' });
-        return;
-      }
+      const context =
+        req.body?.context && typeof req.body.context === 'object'
+          ? (req.body.context as Record<string, unknown>)
+          : undefined;
+      const tenantScope = sanitizePlainText(req.body?.tenantScope, 80) || 'ophireum_internal';
+      const forceApproval = Boolean(req.body?.forceApproval);
 
-      const result = await deps.workforceService.executeAgent({
+      const result = await workforceService.executeAgent({
         agentCode: code,
+        actor: admin.email,
+        actorRole: admin.role,
         prompt,
-        actor: req.adminUser!.email,
-        actorRole: req.adminUser!.role,
-        correlationId: req.correlationId,
-        context: req.body?.context && typeof req.body.context === 'object' ? req.body.context : {},
+        context,
+        tenantScope,
+        forceApproval,
       });
 
-      if (result.ok === false) {
-        res.status(result.statusCode).json({ success: false, error: result.error });
+      if (result.error || !result.execution) {
+        res.status(result.statusCode || 400).json({ success: false, error: result.error });
         return;
       }
-
-      await deps.db.writeAuditLog({
-        correlationId: req.correlationId,
-        actor: req.adminUser!.email,
-        actorRole: req.adminUser!.role,
-        action:
-          result.execution.status === 'pending_approval'
-            ? 'ai_agent_execution_queued_approval'
-            : 'ai_agent_executed',
-        entityType: 'ai_agent_executions',
-        entityId: result.execution.id,
-        details: {
-          agentCode: code,
-          status: result.execution.status,
-          providerModel: result.execution.providerModel,
-        },
-      });
 
       res.status(result.execution.status === 'pending_approval' ? 202 : 200).json({
         success: true,
@@ -219,164 +145,322 @@ export function createAiRouter(deps: {
     }
   );
 
-  router.get(
-    '/executions',
-    deps.authService.requirePermission('ai.read'),
-    (req: AuthenticatedAdminRequest, res: Response) => {
-      const limit = Math.min(100, Math.max(1, Number(req.query.limit || 50)));
-      res.json({
-        success: true,
-        executions: deps.workforceService.listExecutions(limit),
-        escalations: deps.workforceService.listEscalations(),
-        usageCount: deps.workforceService.listUsage(500).length,
-      });
-    }
-  );
+  router.get('/approvals', authService.requirePermission('ai.read'), (_req: AuthenticatedAdminRequest, res: Response) => {
+    res.status(200).json({
+      success: true,
+      approvals: workforceService.listPendingApprovals(),
+    });
+  });
 
   router.post(
-    '/approvals/:executionId/decide',
-    deps.authService.requirePermission('ai.approve'),
+    '/approvals/:id/decide',
+    authService.requirePermission('ai.approve'),
     async (req: AuthenticatedAdminRequest, res: Response) => {
-      const executionId = sanitizePlainText(req.params.executionId, 80);
-      const decision = req.body?.decision === 'approved' ? 'approved' : req.body?.decision === 'rejected' ? 'rejected' : null;
+      const admin = req.adminUser!;
+      const rawDecision = String(req.body?.decision || '').toLowerCase().trim();
+      const decision =
+        rawDecision === 'approve' || rawDecision === 'approved'
+          ? 'approve'
+          : rawDecision === 'cancel' || rawDecision === 'cancelled'
+            ? 'cancel'
+            : rawDecision === 'reject' || rawDecision === 'rejected'
+              ? 'reject'
+              : null;
       if (!decision) {
-        res.status(400).json({ success: false, error: 'Decision must be approved or rejected.' });
+        res.status(400).json({ success: false, error: 'decision must be "approve", "reject", or "cancel".' });
         return;
       }
-      const updated = await deps.workforceService.decidePendingExecution(
-        executionId,
+      const note = sanitizePlainText(req.body?.note, 500);
+      const expectedActionHash = sanitizePlainText(req.body?.actionHash, 128) || undefined;
+      const result = await workforceService.decideApproval(
+        sanitizePlainText(req.params.id, 80),
         decision,
-        req.adminUser!.email
+        admin.email,
+        admin.role,
+        note,
+        expectedActionHash
       );
-      if (!updated) {
-        res.status(404).json({ success: false, error: 'Pending AI execution not found.' });
+      if (result.error || !result.execution) {
+        res.status(result.statusCode || 400).json({ success: false, error: result.error });
         return;
       }
-      await deps.db.writeAuditLog({
-        correlationId: req.correlationId,
-        actor: req.adminUser!.email,
-        actorRole: req.adminUser!.role,
-        action: `ai_execution_${decision}`,
-        entityType: 'ai_agent_executions',
-        entityId: executionId,
-        details: { agentCode: updated.agentCode, finalStatus: updated.status },
-      });
-      res.json({ success: true, execution: updated });
-    }
-  );
-
-  // ---- Central AI Knowledge Base Management ----
-  router.get(
-    '/knowledge/documents',
-    deps.authService.requirePermission('ai.read'),
-    (req: AuthenticatedAdminRequest, res: Response) => {
-      const category = typeof req.query.category === 'string' ? req.query.category : undefined;
-      const docs = deps.knowledgeService.listDocuments({
-        includeInternal: true,
-        category,
-      });
-      res.json({ success: true, total: docs.length, documents: docs });
+      res.status(200).json({ success: true, execution: result.execution });
     }
   );
 
   router.post(
-    '/knowledge/documents',
-    deps.authService.requirePermission('ai.knowledge.write'),
+    '/approvals/:id/cancel',
+    authService.requirePermission('ai.approve'),
     async (req: AuthenticatedAdminRequest, res: Response) => {
+      const admin = req.adminUser!;
+      const note = sanitizePlainText(req.body?.note, 500) || 'Cancelled via AI Governance Queue';
+      const result = await workforceService.decideApproval(
+        sanitizePlainText(req.params.id, 80),
+        'cancel',
+        admin.email,
+        admin.role,
+        note
+      );
+      if (result.error || !result.execution) {
+        res.status(result.statusCode || 400).json({ success: false, error: result.error });
+        return;
+      }
+      res.status(200).json({ success: true, execution: result.execution });
+    }
+  );
+
+  // Central Knowledge System
+  router.get('/knowledge/documents', authService.requirePermission('ai.read'), (req: AuthenticatedAdminRequest, res: Response) => {
+    const status = sanitizePlainText(req.query.status, 30) || undefined;
+    const tenantScope = sanitizePlainText(req.query.tenantScope, 80) || undefined;
+    res.status(200).json({
+      success: true,
+      stats: knowledgeService.getStats(),
+      documents: knowledgeService.listDocuments({ status, tenantScope, includeInternal: true }),
+    });
+  });
+
+  router.post(
+    '/knowledge/documents',
+    authService.requirePermission('ai.knowledge.write'),
+    async (req: AuthenticatedAdminRequest, res: Response) => {
+      const admin = req.adminUser!;
       const title = sanitizePlainText(req.body?.title, 180);
-      const category = sanitizePlainText(req.body?.category, 60) || 'general';
-      const rawContent = sanitizePlainText(req.body?.rawContent, 20_000);
-      const visibilityRaw = String(req.body?.visibility || 'public');
-      const visibility: KnowledgeVisibility =
-        visibilityRaw === 'internal_admin' || visibilityRaw === 'tenant_private'
-          ? visibilityRaw
-          : 'public';
-      const tenantUserId =
-        visibility === 'tenant_private' ? sanitizePlainText(req.body?.tenantUserId, 80) : undefined;
-      const approvalStatus: KnowledgeApprovalStatus =
-        req.body?.approvalStatus === 'approved' ? 'approved' : 'pending_review';
+      const categoryRaw = sanitizePlainText(req.body?.category, 40) as KnowledgeDocumentRecord['category'];
+      const category = VALID_KB_CATEGORIES.includes(categoryRaw) ? categoryRaw : 'sop';
+      const tenantScope = sanitizePlainText(req.body?.tenantScope, 80) || 'public';
+      const sourceRef = sanitizePlainText(req.body?.sourceRef, 160) || 'admin_console';
+      const content = sanitizePlainText(req.body?.content, 40000);
+      const autoApprove = Boolean(req.body?.autoApprove);
 
-      if (!title || !rawContent) {
-        res.status(400).json({ success: false, error: 'title and rawContent are required.' });
-        return;
-      }
-      if (visibility === 'tenant_private' && !tenantUserId) {
-        res.status(400).json({ success: false, error: 'tenantUserId is required for tenant_private documents.' });
+      if (!title || !content || content.length < 10) {
+        res.status(400).json({ success: false, error: 'Document title and content (10+ chars) are required.' });
         return;
       }
 
-      const doc = await deps.knowledgeService.ingestDocument({
+      try {
+        const result = await knowledgeService.ingestDocument({
+          title,
+          category,
+          tenantScope,
+          sourceRef,
+          content,
+          uploadedBy: admin.email,
+          autoApprove,
+        });
+        await audit(req, 'kb_document_ingested', 'knowledge_document', result.document.id, {
+          title: result.document.title,
+          tenantScope,
+          status: result.document.status,
+          injectionPatternsNeutralized: result.injectionPatternsNeutralized,
+        });
+        res.status(201).json({
+          success: true,
+          document: result.document,
+          injectionPatternsNeutralized: result.injectionPatternsNeutralized,
+        });
+      } catch (err: any) {
+        res.status(400).json({ success: false, error: err?.message || 'Unable to ingest knowledge document.' });
+      }
+    }
+  );
+
+  router.post(
+    '/knowledge/upload',
+    express.json({ limit: '4mb' }),
+    authService.requirePermission('ai.knowledge.write'),
+    async (req: AuthenticatedAdminRequest, res: Response) => {
+      const admin = req.adminUser!;
+      const fileName = sanitizePlainText(req.body?.fileName, 180);
+      const mimeType = sanitizePlainText(req.body?.mimeType, 100);
+      const contentBase64 = typeof req.body?.contentBase64 === 'string' ? req.body.contentBase64 : '';
+      const title = sanitizePlainText(req.body?.title, 180) || fileName;
+      const categoryRaw = sanitizePlainText(req.body?.category, 40) as KnowledgeDocumentRecord['category'];
+      const category = VALID_KB_CATEGORIES.includes(categoryRaw) ? categoryRaw : 'sop';
+      const tenantScope = sanitizePlainText(req.body?.tenantScope, 80) || 'public';
+      const autoApprove = Boolean(req.body?.autoApprove);
+
+      if (!fileName || !mimeType || !contentBase64) {
+        res.status(400).json({ success: false, error: 'fileName, mimeType, and contentBase64 are required.' });
+        return;
+      }
+
+      const outcome = await knowledgeService.uploadFileDocument({
+        fileName,
+        mimeType,
+        contentBase64,
         title,
         category,
-        visibility,
-        tenantUserId,
-        rawContent,
-        sourceUri: sanitizePlainText(req.body?.sourceUri, 240) || undefined,
-        createdBy: req.adminUser!.email,
-        approvalStatus,
+        tenantScope,
+        uploadedBy: admin.email,
+        autoApprove,
       });
 
-      await deps.db.writeAuditLog({
-        correlationId: req.correlationId,
-        actor: req.adminUser!.email,
-        actorRole: req.adminUser!.role,
-        action: 'ai_knowledge_document_ingested',
-        entityType: 'ai_knowledge_documents',
-        entityId: doc.id,
-        details: { title: doc.title, version: doc.version, visibility: doc.visibility },
-      });
+      if (outcome.error || !outcome.document) {
+        res.status(400).json({ success: false, error: outcome.error || 'Upload failed.' });
+        return;
+      }
 
-      res.status(201).json({ success: true, document: doc });
+      await audit(req, 'kb_file_uploaded', 'knowledge_document', outcome.document.id, {
+        fileName,
+        mimeType,
+        tenantScope,
+        injectionPatternsNeutralized: outcome.injectionPatternsNeutralized,
+      });
+      res.status(201).json({
+        success: true,
+        document: outcome.document,
+        injectionPatternsNeutralized: outcome.injectionPatternsNeutralized,
+      });
     }
   );
 
-  router.patch(
-    '/knowledge/documents/:documentId/approval',
-    deps.authService.requirePermission('ai.knowledge.write'),
+  router.post(
+    '/knowledge/documents/:id/approve',
+    authService.requirePermission('ai.knowledge.write'),
     async (req: AuthenticatedAdminRequest, res: Response) => {
-      const documentId = sanitizePlainText(req.params.documentId, 80);
-      const status = String(req.body?.approvalStatus || '') as KnowledgeApprovalStatus;
-      if (!['draft', 'pending_review', 'approved', 'archived'].includes(status)) {
-        res.status(400).json({ success: false, error: 'Invalid approvalStatus.' });
-        return;
-      }
-      const updated = deps.knowledgeService.setApprovalStatus(documentId, status, req.adminUser!.email);
-      if (!updated) {
+      const admin = req.adminUser!;
+      const doc = await knowledgeService.approveDocument(sanitizePlainText(req.params.id, 80), admin.email);
+      if (!doc) {
         res.status(404).json({ success: false, error: 'Knowledge document not found.' });
         return;
       }
-      await deps.db.writeAuditLog({
-        correlationId: req.correlationId,
-        actor: req.adminUser!.email,
-        actorRole: req.adminUser!.role,
-        action: 'ai_knowledge_document_approval_updated',
-        entityType: 'ai_knowledge_documents',
-        entityId: documentId,
-        details: { approvalStatus: status },
+      await audit(req, 'kb_document_approved', 'knowledge_document', doc.id, {
+        title: doc.title,
+        chunkCount: doc.chunkCount,
       });
-      res.json({ success: true, document: updated });
+      res.status(200).json({ success: true, document: doc });
     }
   );
 
   router.post(
-    '/knowledge/search',
-    deps.authService.requirePermission('ai.read'),
+    '/knowledge/documents/:id/reindex',
+    authService.requirePermission('ai.knowledge.write'),
     async (req: AuthenticatedAdminRequest, res: Response) => {
-      const query = sanitizePlainText(req.body?.query, 500);
-      const tenantUserId = sanitizePlainText(req.body?.tenantUserId, 80) || undefined;
-      if (!query) {
-        res.status(400).json({ success: false, error: 'Search query is required.' });
+      const admin = req.adminUser!;
+      const doc = await knowledgeService.reindexDocument(sanitizePlainText(req.params.id, 80), admin.email);
+      if (!doc) {
+        res.status(404).json({ success: false, error: 'Knowledge document not found.' });
         return;
       }
-      const results = await deps.knowledgeService.search({
-        query,
-        includeInternal: true,
-        tenantUserId,
-        limit: Math.min(10, Math.max(1, Number(req.body?.limit || 5))),
+      await audit(req, 'kb_document_reindexed', 'knowledge_document', doc.id, {
+        version: doc.version,
+        chunkCount: doc.chunkCount,
       });
-      res.json({ success: true, results });
+      res.status(200).json({ success: true, document: doc });
     }
   );
+
+  router.post(
+    '/knowledge/documents/:id/revoke',
+    authService.requirePermission('ai.knowledge.write'),
+    async (req: AuthenticatedAdminRequest, res: Response) => {
+      const doc = await knowledgeService.revokeDocumentAccess(sanitizePlainText(req.params.id, 80));
+      if (!doc) {
+        res.status(404).json({ success: false, error: 'Knowledge document not found.' });
+        return;
+      }
+      await audit(req, 'kb_document_revoked', 'knowledge_document', doc.id);
+      res.status(200).json({ success: true, document: doc });
+    }
+  );
+
+  router.delete(
+    '/knowledge/documents/:id',
+    authService.requirePermission('ai.knowledge.write'),
+    async (req: AuthenticatedAdminRequest, res: Response) => {
+      const docId = sanitizePlainText(req.params.id, 80);
+      const deleted = await knowledgeService.deleteDocument(docId);
+      if (!deleted) {
+        res.status(404).json({ success: false, error: 'Knowledge document not found.' });
+        return;
+      }
+      await audit(req, 'kb_document_deleted', 'knowledge_document', docId);
+      res.status(200).json({ success: true });
+    }
+  );
+
+  router.get('/knowledge/search', authService.requirePermission('ai.read'), async (req: AuthenticatedAdminRequest, res: Response) => {
+    const admin = req.adminUser!;
+    const q = sanitizePlainText(req.query.q, 300);
+    const tenantScope = sanitizePlainText(req.query.tenantScope, 80) || 'ophireum_internal';
+    if (!q) {
+      res.status(400).json({ success: false, error: 'Query parameter q is required.' });
+      return;
+    }
+    const hits = await knowledgeService.search(q, {
+      limit: 6,
+      tenantScope,
+      actorRole: admin.role,
+      includeInternal: true,
+    });
+    res.status(200).json({ success: true, hits });
+  });
+
+  router.post('/studio/blueprint', async (req: Request, res: Response) => {
+    const idea = sanitizePlainText(req.body?.idea || req.body?.prompt, 1500);
+    if (!idea || idea.length < 8) {
+      res.status(400).json({ success: false, error: 'Please describe your project idea (minimum 8 characters).' });
+      return;
+    }
+
+    const kbHits = await knowledgeService.search(idea, {
+      limit: 3,
+      tenantScope: 'public',
+      actorRole: 'public',
+      includeInternal: false,
+    });
+
+    if (aiClient) {
+      try {
+        const prompt = [
+          'You are OPHIREUM AI Solutions Architect. Produce a structured, concise enterprise solution blueprint for this client brief.',
+          knowledgeService.formatRetrievedKnowledgeForPrompt(kbHits),
+          `Client Idea: ${idea}`,
+          'Include: (1) Recommended OPHIREUM Divisions & Services, (2) Technical & Creative Architecture, (3) 4-Phase Delivery Roadmap, and (4) Security & Governance Guardrails. Never invent binding fixed prices.',
+        ].join('\n\n');
+        const response = await aiClient.models.generateContent({
+          model: 'gemini-4-hydrogen',
+          contents: prompt,
+        });
+        const blueprint = (response.text || '').trim();
+        if (blueprint.length > 40) {
+          res.status(200).json({
+            success: true,
+            mode: 'gemini_live',
+            blueprint,
+            citations: kbHits.map((h) => h.citationLabel),
+          });
+          return;
+        }
+      } catch {
+        // Fall through to deterministic grounded studio blueprint below
+      }
+    }
+
+    const blueprint = [
+      `# OPHIREUM Enterprise Solution Blueprint`,
+      `**Brief Summary:** ${idea}`,
+      ``,
+      `## 1. Recommended Divisions & Delivery Track`,
+      `- **Software & Web Architecture**: Responsive multi-tenant portal, hardened REST API gateway, and role-based access control.`,
+      `- **AI Creative & Multimedia Production**: Brand-aligned asset pipeline, review checkpoints, and versioned master deliverables.`,
+      `- **Commerce & Billing Governance**: Server-authoritative pricing, signed payment webhooks, and invoice/receipt automation.`,
+      ``,
+      `## 2. Four-Phase Execution Roadmap`,
+      `1. **Discovery & Technical Specification (Week 1)**: Requirements sign-off, schema design, and compliance checklist.`,
+      `2. **Core Platform & Pipeline Build (Weeks 2–4)**: Persistent database workflows, API contracts, and client portal integration.`,
+      `3. **Creative QA & Security Hardening (Week 5)**: Automated security regression testing, RBAC verification, and client review.`,
+      `4. **Staging Acceptance & Launch (Week 6)**: Controlled release validation, runbook handover, and ongoing SLA support.`,
+    ].join('\n');
+
+    res.status(200).json({
+      success: true,
+      mode: 'grounded_deterministic_fallback',
+      blueprint,
+      citations: kbHits.map((h) => h.citationLabel),
+    });
+  });
 
   return router;
 }

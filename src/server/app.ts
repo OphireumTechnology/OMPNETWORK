@@ -34,7 +34,8 @@ import { PortalRepository } from './portal/types';
 import { LocalPortalRepository } from './portal/localPortalRepository';
 import { SupabasePortalRepository } from './portal/supabasePortalRepository';
 import { createPortalRouter } from './portal/portalRoutes';
-import { ADMIN_SESSION_COOKIE } from './auth';
+import { buildAdminSessionCookieHeader } from './auth';
+import { DistributedRateLimiter } from './rateLimiter';
 import { CentralKnowledgeService } from './ai/knowledgeService';
 import { EnterpriseAiWorkforceService } from './ai/workforceService';
 import { createAdminCommandRouter } from './routes/adminRoutes';
@@ -91,37 +92,73 @@ const findCatalogMatches = (query: string, limit = 3) => {
     .map((entry) => entry.svc);
 };
 
-class SlidingWindowRateLimiter {
-  private readonly store = new Map<string, number[]>();
-  constructor(
-    private readonly windowMs: number,
-    private readonly maxRequests: number,
-    private readonly maxKeys = 5000
-  ) {}
+function wrapPcm16AsWav(pcmBuffer: Buffer, sampleRate = 24000, numChannels = 1, bitsPerSample = 16): Buffer {
+  const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+  const blockAlign = numChannels * (bitsPerSample / 8);
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + pcmBuffer.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(numChannels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(pcmBuffer.length, 40);
+  return Buffer.concat([header, pcmBuffer]);
+}
 
-  check(key: string): boolean {
-    const now = Date.now();
-    if (!this.store.has(key) && this.store.size >= this.maxKeys) {
-      // Evict expired or oldest keys to keep memory bounded
-      for (const [k, timestamps] of this.store.entries()) {
-        const active = timestamps.filter((ts) => now - ts < this.windowMs);
-        if (active.length === 0) this.store.delete(k);
-        if (this.store.size < this.maxKeys) break;
-      }
-      if (this.store.size >= this.maxKeys) {
-        const oldest = this.store.keys().next().value;
-        if (oldest) this.store.delete(oldest);
+function verifyResendWebhookSignature(
+  headers: Record<string, string | string[] | undefined>,
+  rawBody: string,
+  webhookSecret: string
+): { valid: boolean; eventDedupeKey?: string; reason?: string } {
+  const getH = (k: string) => {
+    const v = headers[k];
+    return Array.isArray(v) ? v[0] || '' : v || '';
+  };
+
+  // 1. Standard Svix headers used by Resend webhooks: svix-id, svix-timestamp, svix-signature
+  const svixId = getH('svix-id').trim();
+  const svixTimestamp = getH('svix-timestamp').trim();
+  const svixSigHeader = getH('svix-signature').trim();
+  if (svixId && svixTimestamp && svixSigHeader) {
+    const tsSec = Number(svixTimestamp);
+    if (!Number.isFinite(tsSec) || Math.abs(Math.floor(Date.now() / 1000) - tsSec) > 300) {
+      return { valid: false, reason: 'Svix webhook timestamp outside allowed 5-minute tolerance.' };
+    }
+    const secretBytes = webhookSecret.startsWith('whsec_')
+      ? Buffer.from(webhookSecret.slice(6), 'base64')
+      : Buffer.from(webhookSecret, 'utf8');
+    const signedPayload = `${svixId}.${svixTimestamp}.${rawBody}`;
+    const expectedB64 = crypto.createHmac('sha256', secretBytes).update(signedPayload, 'utf8').digest('base64');
+    const candidates = svixSigHeader
+      .split(/\s+/)
+      .map((part) => part.split(',')[1] || part)
+      .filter(Boolean);
+    for (const candidate of candidates) {
+      if (constantTimeHexEquals(candidate, expectedB64)) {
+        return { valid: true, eventDedupeKey: `svix:${svixId}` };
       }
     }
-    const recent = (this.store.get(key) || []).filter((ts) => now - ts < this.windowMs);
-    if (recent.length >= this.maxRequests) {
-      this.store.set(key, recent);
-      return false;
-    }
-    recent.push(now);
-    this.store.set(key, recent);
-    return true;
+    return { valid: false, reason: 'Svix signature verification failed.' };
   }
+
+  // 2. Direct HMAC-SHA256 hex signature header (`x-resend-signature` or raw `svix-signature`)
+  const providedSig = (getH('x-resend-signature') || svixSigHeader).trim().replace(/^sha256=/i, '');
+  if (!providedSig) {
+    return { valid: false, reason: 'Missing webhook signature header.' };
+  }
+  const expectedHmac = crypto.createHmac('sha256', webhookSecret).update(rawBody, 'utf8').digest('hex');
+  if (constantTimeHexEquals(providedSig, expectedHmac)) {
+    const bodyHash = crypto.createHash('sha256').update(rawBody).digest('hex').slice(0, 24);
+    return { valid: true, eventDedupeKey: `hmac:${bodyHash}` };
+  }
+  return { valid: false, reason: 'Invalid webhook signature.' };
 }
 
 function getClientIp(req: Request): string {
@@ -178,18 +215,34 @@ export function createApp(deps: AppDependencies = {}): {
         })
       : null;
 
-  const inquiryLimiter = new SlidingWindowRateLimiter(
+  const inquiryLimiter = new DistributedRateLimiter(
+    'inquiry',
     15 * 60 * 1000,
     deps.rateLimitMaxOverride ?? 12
   );
-  const aiLimiter = new SlidingWindowRateLimiter(
+  const aiLimiter = new DistributedRateLimiter(
+    'ai',
     5 * 60 * 1000,
     deps.rateLimitMaxOverride ?? 30
   );
-  const adminLoginLimiter = new SlidingWindowRateLimiter(
+  const adminLoginLimiter = new DistributedRateLimiter(
+    'admin_login',
     15 * 60 * 1000,
     deps.rateLimitMaxOverride ?? 10
   );
+  // Bounded shared chat + voice conversation context store (max 500 active sessions, 20 turns each)
+  const sharedSessions = new Map<string, Array<{ sender: 'user' | 'assistant'; text: string; channel: 'chat' | 'voice'; timestamp: string }>>();
+  const processedResendWebhookIds = new Set<string>();
+  const appendSharedTurn = (sessionId: string | undefined, sender: 'user' | 'assistant', text: string, channel: 'chat' | 'voice') => {
+    if (!sessionId) return;
+    if (!sharedSessions.has(sessionId) && sharedSessions.size >= 500) {
+      const oldest = sharedSessions.keys().next().value;
+      if (oldest) sharedSessions.delete(oldest);
+    }
+    const list = sharedSessions.get(sessionId) || [];
+    list.push({ sender, text: text.slice(0, 1500), channel, timestamp: new Date().toISOString() });
+    sharedSessions.set(sessionId, list.slice(-20));
+  };
 
   // -----------------------------------------------------------------------
   // 1. SECURITY HEADERS, CORRELATION ID & CORS MIDDLEWARE
@@ -309,13 +362,19 @@ export function createApp(deps: AppDependencies = {}): {
     return strictJsonParser(req, res, next);
   });
 
-  // Initialize Portal Repository upfront so /api/health reports accurate persistence mode
+  // Initialize Portal Repository upfront — fail closed in production if Supabase is not configured!
   const supaUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
   const supaServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+  const isProdRuntime = process.env.NODE_ENV === 'production';
+  if (!deps.portalRepo && isProdRuntime && (!supaUrl || !supaServiceKey)) {
+    throw new Error(
+      'Production deployment requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. Refusing local JSON fallback in production.'
+    );
+  }
   const portalRepo: PortalRepository =
     deps.portalRepo ||
     (supaUrl && supaServiceKey
-      ? new SupabasePortalRepository(supaUrl, supaServiceKey)
+      ? new SupabasePortalRepository(supaUrl, supaServiceKey, { strictPersistence: isProdRuntime })
       : new LocalPortalRepository({
           persistDir:
             process.env.NODE_ENV === 'test'
@@ -324,7 +383,7 @@ export function createApp(deps: AppDependencies = {}): {
         }));
 
   const knowledgeService = new CentralKnowledgeService(ai);
-  const workforceService = new EnterpriseAiWorkforceService(knowledgeService, ai);
+  const workforceService = new EnterpriseAiWorkforceService(knowledgeService, ai, { portalRepo, db });
 
   // -----------------------------------------------------------------------
   // 2. HEALTH, READINESS, VERSION & CATALOG ENDPOINTS
@@ -426,7 +485,8 @@ export function createApp(deps: AppDependencies = {}): {
   // -----------------------------------------------------------------------
   app.post('/api/admin/auth/login', async (req: Request & { correlationId?: string }, res: Response) => {
     const clientIp = getClientIp(req);
-    if (!adminLoginLimiter.check(clientIp)) {
+    const rateCheck = await adminLoginLimiter.checkDistributed(clientIp);
+    if (!rateCheck.allowed) {
       res.status(429).json({
         success: false,
         error: 'Too many authentication attempts. Please wait 15 minutes.',
@@ -478,23 +538,29 @@ export function createApp(deps: AppDependencies = {}): {
 
     const mfaEnabled = authService.isAdminMfaEnabled(adminRecord.email);
     const totpCode = typeof req.body?.totpCode === 'string' ? req.body.totpCode.trim() : '';
-    if (mfaEnabled && !authService.verifyAdminMfaCode(adminRecord.email, totpCode)) {
-      res.status(401).json({
-        success: false,
-        code: 'MFA_REQUIRED',
-        mfaRequired: true,
-        error: 'Valid 6-digit authenticator code required for this administrator account.',
-      });
-      return;
+    let mfaVerified = false;
+    if (mfaEnabled) {
+      const mfaCheck = authService.verifyAdminMfaCode(adminRecord.email, totpCode);
+      if (!mfaCheck.ok) {
+        const isLocked = mfaCheck.reason === 'locked';
+        res.status(isLocked ? 429 : 401).json({
+          success: false,
+          code: isLocked ? 'MFA_LOCKED_OUT' : 'MFA_REQUIRED',
+          mfaRequired: true,
+          error:
+            mfaCheck.reason === 'locked'
+              ? 'Administrator MFA temporarily locked after repeated invalid attempts. Try again in 15 minutes.'
+              : mfaCheck.reason === 'replay'
+                ? 'That authenticator code was already used. Wait for the next 30-second code or use a recovery code.'
+                : 'Valid 6-digit authenticator code or recovery code required for this administrator account.',
+        });
+        return;
+      }
+      mfaVerified = true;
     }
 
-    const token = authService.issueSessionToken(adminRecord, 3600, mfaEnabled);
-    res.setHeader(
-      'Set-Cookie',
-      `${ADMIN_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600${
-        process.env.NODE_ENV === 'production' ? '; Secure' : ''
-      }`
-    );
+    const token = authService.issueSessionToken(adminRecord, 3600, mfaVerified);
+    res.setHeader('Set-Cookie', buildAdminSessionCookieHeader(token, 3600));
 
     await db.writeAuditLog({
       correlationId: req.correlationId,
@@ -657,7 +723,8 @@ export function createApp(deps: AppDependencies = {}): {
     async (req: Request & { correlationId?: string }, res: Response, next: NextFunction) => {
       try {
         const clientIp = getClientIp(req);
-        if (!inquiryLimiter.check(clientIp)) {
+        const rateCheck = await inquiryLimiter.checkDistributed(clientIp);
+        if (!rateCheck.allowed) {
           res.status(429).json({
             success: false,
             error:
@@ -828,7 +895,8 @@ export function createApp(deps: AppDependencies = {}): {
     async (req: Request & { correlationId?: string }, res: Response, next: NextFunction) => {
       try {
         const clientIp = getClientIp(req);
-        if (!inquiryLimiter.check(clientIp)) {
+        const rateCheck = await inquiryLimiter.checkDistributed(clientIp);
+        if (!rateCheck.allowed) {
           res.status(429).json({
             success: false,
             error: 'Too many scheduling attempts. Please wait a few minutes.',
@@ -974,7 +1042,8 @@ export function createApp(deps: AppDependencies = {}): {
     async (req: AuthenticatedAdminRequest, res: Response, next: NextFunction) => {
       try {
         const clientIp = getClientIp(req);
-        if (!inquiryLimiter.check(`apt-patch:${clientIp}`)) {
+        const rateCheck = await inquiryLimiter.checkDistributed(`apt-patch:${clientIp}`);
+        if (!rateCheck.allowed) {
           res.status(429).json({
             success: false,
             error: 'Too many appointment modification attempts. Please wait a few minutes.',
@@ -1118,7 +1187,8 @@ export function createApp(deps: AppDependencies = {}): {
   // -----------------------------------------------------------------------
   app.post('/api/consultant/chat', async (req: Request & { correlationId?: string }, res: Response) => {
     const clientIp = getClientIp(req);
-    if (!aiLimiter.check(clientIp)) {
+    const rateCheck = await aiLimiter.checkDistributed(clientIp);
+    if (!rateCheck.allowed) {
       res.status(429).json({
         error: 'Rate limit exceeded for AI consultant requests. Please wait a moment before sending another message.',
       });
@@ -1131,7 +1201,20 @@ export function createApp(deps: AppDependencies = {}): {
       return;
     }
 
-    const { userMessage, language, history, stateContext } = sanitized;
+    const sessionId =
+      typeof req.body?.sessionId === 'string' && req.body.sessionId.trim()
+        ? req.body.sessionId.trim().slice(0, 80)
+        : `opm-session-${crypto.randomUUID()}`;
+    const priorTurns = sharedSessions.get(sessionId) || [];
+    const { userMessage, language, stateContext } = sanitized;
+    const history =
+      sanitized.history.length > 0
+        ? sanitized.history
+        : priorTurns.map((t) => ({
+            sender: t.sender === 'user' ? ('user' as const) : ('bot' as const),
+            text: t.text,
+          }));
+    appendSharedTurn(sessionId, 'user', userMessage, 'chat');
     const isFilipino = language === 'fil-PH' || /filipino|tagalog/i.test(userMessage);
 
     const systemInstruction = `You are the official OPHIREUM AI Solutions Consultant for OPHIREUM MULTIMEDIA PRODUCTION (DTI Registration No. 7567003), headquartered at KMC | One West Aeropark, Clark Freeport Zone, Mabalacat City, Pampanga, Philippines. Founder & CEO: Dhenze Languisan (+63 917 966 8814).
@@ -1219,8 +1302,13 @@ CONSULTATION BEHAVIOR:
           const allowedActions = ['none', 'review_brief', 'schedule_meeting', 'talk_to_human'];
           const action = allowedActions.includes(parsed.suggestedAction) ? parsed.suggestedAction : 'none';
 
+          const replyText = String(parsed.replyText || '');
+          appendSharedTurn(sessionId, 'assistant', replyText, 'chat');
+
           res.json({
-            replyText: String(parsed.replyText || ''),
+            sessionId,
+            serverGeminiAvailable: true,
+            replyText,
             recommendedServiceIds: validIds,
             suggestedAction: action === 'none' ? undefined : action,
             quickReplies:
@@ -1278,7 +1366,11 @@ CONSULTATION BEHAVIOR:
       replyText = `Thank you for reaching out to OPHIREUM MULTIMEDIA PRODUCTION. We deliver across 10 integrated technology divisions—including ${summaryText}, plus Enterprise Software, Cloud/Security, Digital Care, Creative Multimedia, Industry Solutions, and Signature Suites.\n\nCould you share the primary business challenge you want to solve and your target timeline?`;
     }
 
+    appendSharedTurn(sessionId, 'assistant', replyText, 'chat');
+
     res.json({
+      sessionId,
+      serverGeminiAvailable: Boolean(ai),
       replyText,
       recommendedServiceIds: matched.map((m) => m.id),
       suggestedAction: isHuman ? 'talk_to_human' : isBooking ? 'schedule_meeting' : undefined,
@@ -1295,7 +1387,9 @@ CONSULTATION BEHAVIOR:
 
   app.post('/api/voice/session', (req: Request, res: Response) => {
     const language = typeof req.body?.language === 'string' ? req.body.language.slice(0, 16) : 'en-US';
-    const sessionId = `opm-voice-${crypto.randomUUID()}`;
+    const existingId = typeof req.body?.sessionId === 'string' ? req.body.sessionId.trim().slice(0, 80) : '';
+    const sessionId = existingId || `opm-session-${crypto.randomUUID()}`;
+    const existingHistory = sharedSessions.get(sessionId) || [];
     res.json({
       sessionId,
       status: 'ready',
@@ -1304,14 +1398,28 @@ CONSULTATION BEHAVIOR:
       language,
       sampleRate: 24000,
       serverGeminiAvailable: Boolean(ai),
+      sharedTurnCount: existingHistory.length,
+      degradedNotice: ai
+        ? undefined
+        : 'Live Gemini audio synthesis is currently in catalog-grounded fallback mode; text & browser speech remain active.',
       disclaimer:
         'Voice Disclosure: OPHIREUM AI Solutions Consultant voice mode is active. Microphone audio is used strictly for real-time consultation transcription and response generation and is not permanently stored.',
     });
   });
 
+  app.get('/api/consultant/session/:sessionId', (req: Request, res: Response) => {
+    const sid = sanitizePlainText(req.params.sessionId, 80);
+    res.json({
+      success: true,
+      sessionId: sid,
+      turns: sharedSessions.get(sid) || [],
+    });
+  });
+
   app.post('/api/voice/process', async (req: Request & { correlationId?: string }, res: Response) => {
     const clientIp = getClientIp(req);
-    if (!aiLimiter.check(clientIp)) {
+    const rateCheck = await aiLimiter.checkDistributed(clientIp);
+    if (!rateCheck.allowed) {
       res.status(429).json({ error: 'Rate limit exceeded for voice processing.' });
       return;
     }
@@ -1322,7 +1430,17 @@ CONSULTATION BEHAVIOR:
       return;
     }
 
-    const { userMessage, language, history } = sanitized;
+    const sessionId =
+      typeof req.body?.sessionId === 'string' && req.body.sessionId.trim()
+        ? req.body.sessionId.trim().slice(0, 80)
+        : undefined;
+    const priorTurns = sessionId ? sharedSessions.get(sessionId) || [] : [];
+    const { userMessage, language } = sanitized;
+    const history =
+      sanitized.history.length > 0
+        ? sanitized.history
+        : priorTurns.map((t) => ({ sender: t.sender === 'user' ? ('user' as const) : ('bot' as const), text: t.text }));
+    appendSharedTurn(sessionId, 'user', userMessage, 'voice');
     const isFilipino = language === 'fil-PH';
 
     const systemInstruction = `You are the official OPHIREUM AI Solutions Consultant for OPHIREUM MULTIMEDIA PRODUCTION located at KMC | One West Aeropark, Clark Freeport Zone, Mabalacat City, Pampanga, Philippines.
@@ -1362,10 +1480,15 @@ Tone & Voice Rules:
         const response: any = await Promise.race([geminiPromise, timeoutPromise]);
         const replyText = response && response.text ? response.text.trim() : '';
 
+        const finalVoiceReply =
+          replyText ||
+          'I understand your project requirements. Would you like me to prepare a preliminary brief or open the appointment scheduler?';
+        appendSharedTurn(sessionId, 'assistant', finalVoiceReply, 'voice');
+
         res.json({
-          replyText:
-            replyText ||
-            'I understand your project requirements. Would you like me to prepare a preliminary brief or open the appointment scheduler?',
+          sessionId,
+          serverGeminiAvailable: true,
+          replyText: finalVoiceReply,
           detectedIntent: {
             isBookingIntent: /schedule|appointment|book|calendar|slot|meeting/i.test(userMessage),
             isBriefIntent: /brief|proposal|scope|specification|quote/i.test(userMessage),
@@ -1404,7 +1527,11 @@ Tone & Voice Rules:
         : 'I can help you submit a verified consultation scheduling request Monday through Friday. Let us open the scheduling form so you can choose your slot and enter your contact details.';
     }
 
+    appendSharedTurn(sessionId, 'assistant', replyText, 'voice');
+
     res.json({
+      sessionId,
+      serverGeminiAvailable: Boolean(ai),
       replyText,
       detectedIntent: {
         isBookingIntent: /schedule|appointment|book|meeting/i.test(userMessage),
@@ -1418,7 +1545,8 @@ Tone & Voice Rules:
 
   app.post('/api/voice/transcribe', async (req: Request & { correlationId?: string }, res: Response) => {
     const clientIp = getClientIp(req);
-    if (!aiLimiter.check(clientIp)) {
+    const rateCheck = await aiLimiter.checkDistributed(clientIp);
+    if (!rateCheck.allowed) {
       res.status(429).json({ error: 'Rate limit exceeded for transcription.' });
       return;
     }
@@ -1500,10 +1628,19 @@ Tone & Voice Rules:
         res.status(502).json({ error: 'Speech synthesis provider returned empty audio payload.' });
         return;
       }
+      const rawMime = String(inlineAudio.mimeType || 'audio/pcm').toLowerCase();
+      let finalMime = rawMime;
+      let finalBase64 = String(inlineAudio.data);
+      if (rawMime.includes('pcm') || rawMime.includes('l16')) {
+        const pcmBytes = Buffer.from(finalBase64, 'base64');
+        const wavBytes = wrapPcm16AsWav(pcmBytes, 24000, 1, 16);
+        finalBase64 = wavBytes.toString('base64');
+        finalMime = 'audio/wav';
+      }
       res.json({
         success: true,
-        mimeType: inlineAudio.mimeType || 'audio/pcm',
-        audioBase64: inlineAudio.data,
+        mimeType: finalMime,
+        audioBase64: finalBase64,
       });
     } catch (error: any) {
       logStructured('error', 'voice_tts_failed', {
@@ -1514,7 +1651,7 @@ Tone & Voice Rules:
     }
   });
 
-  // Signed Resend Transactional Email Delivery Webhook
+  // Signed Resend Transactional Email Delivery Webhook (Svix v1 + HMAC-SHA256 + deduplication)
   app.post('/api/webhooks/resend', async (req: Request & { rawBody?: string }, res: Response) => {
     const webhookSecret = (process.env.RESEND_WEBHOOK_SECRET || '').trim();
     if (!webhookSecret) {
@@ -1524,16 +1661,22 @@ Tone & Voice Rules:
       });
       return;
     }
-    const providedSig = String(req.headers['svix-signature'] || req.headers['x-resend-signature'] || '').trim();
     const rawBody = req.rawBody || JSON.stringify(req.body || {});
-    const expectedHmac = crypto.createHmac('sha256', webhookSecret).update(rawBody, 'utf8').digest('hex');
-    const cleanSig = providedSig.replace(/^sha256=/i, '');
-    if (!cleanSig || !constantTimeHexEquals(cleanSig, expectedHmac)) {
-      res.status(401).json({ success: false, error: 'Invalid webhook signature.' });
+    const verification = verifyResendWebhookSignature(req.headers, rawBody, webhookSecret);
+    if (!verification.valid) {
+      res.status(401).json({ success: false, error: verification.reason || 'Invalid webhook signature.' });
       return;
     }
+    if (verification.eventDedupeKey && processedResendWebhookIds.has(verification.eventDedupeKey)) {
+      res.status(200).json({ success: true, deduplicated: true, updated: false });
+      return;
+    }
+    if (verification.eventDedupeKey) {
+      if (processedResendWebhookIds.size >= 5000) processedResendWebhookIds.clear();
+      processedResendWebhookIds.add(verification.eventDedupeKey);
+    }
     const outcome = await emailService.processResendWebhookEvent(req.body || {});
-    res.status(200).json({ success: true, ...outcome });
+    res.status(200).json({ success: true, deduplicated: false, ...outcome });
   });
 
   // -----------------------------------------------------------------------

@@ -95,12 +95,15 @@ export const AdminConsoleApp: React.FC = () => {
   const [promoCode, setPromoCode] = useState('');
   const [promoValue, setPromoValue] = useState('10');
   const [ticketReplyMap, setTicketReplyMap] = useState<Record<string, string>>({});
-  const [mfaEnrollment, setMfaEnrollment] = useState<{ secret: string; otpauthUri: string } | null>(null);
+  const [aiDashboard, setAiDashboard] = useState<any>(null);
+  const [mfaEnrollment, setMfaEnrollment] = useState<{ secret: string; otpAuthUri: string } | null>(null);
+  const [mfaRecoveryCodes, setMfaRecoveryCodes] = useState<string[]>([]);
   const [mfaConfirmCode, setMfaConfirmCode] = useState('');
 
   const adminFetch = useCallback(async (path: string, init?: RequestInit) => {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
+      'X-Requested-With': 'fetch',
       ...(init?.headers as Record<string, string> | undefined),
     };
     if (memoryAdminToken) {
@@ -130,6 +133,7 @@ export const AdminConsoleApp: React.FC = () => {
         tickRes,
         agentRes,
         execRes,
+        aiDashRes,
         kbRes,
         healthRes,
         cfgRes,
@@ -147,6 +151,7 @@ export const AdminConsoleApp: React.FC = () => {
         adminFetch('/api/admin/tickets'),
         adminFetch('/api/ai/agents'),
         adminFetch('/api/ai/executions?limit=40'),
+        adminFetch('/api/ai/dashboard'),
         adminFetch('/api/ai/knowledge/documents'),
         adminFetch('/api/admin/integrations/health'),
         adminFetch('/api/admin/config'),
@@ -176,6 +181,7 @@ export const AdminConsoleApp: React.FC = () => {
         setExecutions(execRes.data.executions || []);
         setEscalations(execRes.data.escalations || []);
       }
+      if (aiDashRes.ok) setAiDashboard(aiDashRes.data.dashboard || null);
       if (kbRes.ok) setKnowledgeDocs(kbRes.data.documents || []);
       if (healthRes.ok) setIntegrations(healthRes.data.integrations || []);
       if (cfgRes.ok) setConfigs(cfgRes.data.configs || []);
@@ -347,6 +353,49 @@ export const AdminConsoleApp: React.FC = () => {
     if (res.ok) void syncAll();
   };
 
+  const handleCancelApproval = async (executionId: string) => {
+    const res = await adminFetch(`/api/ai/approvals/${encodeURIComponent(executionId)}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ note: 'Cancelled from Admin Console' }),
+    });
+    setStatusBanner(res.ok ? `Pending execution ${executionId} cancelled.` : res.data.error || 'Cancel failed.');
+    if (res.ok) void syncAll();
+  };
+
+  const handleDecideRefund = async (refundId: string, decision: 'approved' | 'rejected') => {
+    const res = await adminFetch(`/api/admin/refunds/${encodeURIComponent(refundId)}/decide`, {
+      method: 'POST',
+      body: JSON.stringify({ decision }),
+    });
+    setStatusBanner(res.ok ? `Refund ${refundId} marked ${decision}.` : res.data.error || 'Refund decision failed.');
+    if (res.ok) void syncAll();
+  };
+
+  const handleToggleCustomerSuspension = async (userId: string, isSuspended: boolean) => {
+    const endpoint = isSuspended
+      ? `/api/admin/customers/${encodeURIComponent(userId)}/reactivate`
+      : `/api/admin/customers/${encodeURIComponent(userId)}/suspend`;
+    const res = await adminFetch(endpoint, {
+      method: 'POST',
+      body: JSON.stringify({ reason: 'Administrative review' }),
+    });
+    setStatusBanner(
+      res.ok
+        ? `Customer ${userId} ${isSuspended ? 'reactivated' : 'suspended'}.`
+        : res.data.error || 'Customer status update failed.'
+    );
+    if (res.ok) void syncAll();
+  };
+
+  const handleGrantCustomerCredit = async (userId: string) => {
+    const res = await adminFetch(`/api/admin/customers/${encodeURIComponent(userId)}/credits`, {
+      method: 'POST',
+      body: JSON.stringify({ amountMinor: 2500, currency: 'USD', reason: 'Admin goodwill credit' }),
+    });
+    setStatusBanner(res.ok ? 'Issued $25.00 USD credit to customer.' : res.data.error || 'Credit adjustment failed.');
+    if (res.ok) void syncAll();
+  };
+
   const handleIngestKnowledge = async (e: React.FormEvent) => {
     e.preventDefault();
     const res = await adminFetch('/api/ai/knowledge/documents', {
@@ -376,7 +425,13 @@ export const AdminConsoleApp: React.FC = () => {
 
   const handleStartMfa = async () => {
     const res = await adminFetch('/api/admin/auth/mfa/enroll', { method: 'POST' });
-    if (res.ok) setMfaEnrollment({ secret: res.data.secret, otpauthUri: res.data.otpauthUri });
+    if (res.ok) {
+      setMfaEnrollment({
+        secret: res.data.secret,
+        otpAuthUri: res.data.otpAuthUri || res.data.otpauthUri || '',
+      });
+      setMfaRecoveryCodes([]);
+    }
   };
 
   const handleConfirmMfa = async () => {
@@ -387,7 +442,8 @@ export const AdminConsoleApp: React.FC = () => {
     if (res.ok) {
       setMfaEnrollment(null);
       setMfaConfirmCode('');
-      setStatusBanner('Administrator TOTP MFA enabled.');
+      setMfaRecoveryCodes(Array.isArray(res.data.recoveryCodes) ? res.data.recoveryCodes : []);
+      setStatusBanner('Administrator TOTP MFA enabled. Save your single-use recovery codes below.');
     } else {
       setStatusBanner(res.data.error || 'Invalid 6-digit MFA code.');
     }
@@ -721,7 +777,7 @@ export const AdminConsoleApp: React.FC = () => {
                           <td className="py-2 font-mono uppercase">{o.paymentStatus}</td>
                           <td className="py-2">
                             <select
-                              value={o.status}
+                              value={o.fulfillmentStatus || o.status || 'pending_payment'}
                               onChange={(e) => handleOrderStatusChange(o.id, e.target.value)}
                               className="px-2 py-1 rounded bg-slate-900 border border-slate-700 text-xs text-white"
                             >
@@ -748,17 +804,54 @@ export const AdminConsoleApp: React.FC = () => {
               )}
             </div>
 
+            {paymentsData.refunds.length > 0 && (
+              <div className="p-5 rounded-xl bg-[#111827] border border-slate-800 space-y-3">
+                <h2 className="text-sm font-bold text-white">Refund Requests ({paymentsData.refunds.length})</h2>
+                <div className="space-y-2">
+                  {paymentsData.refunds.map((rf) => (
+                    <div key={rf.id} className="p-3 rounded-lg bg-slate-900 border border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <div>
+                        <span className="font-mono text-[#00C2C7]">{rf.id}</span> ·{' '}
+                        <span className="font-mono text-white">
+                          {rf.currency} {(rf.amountMinor / 100).toLocaleString('en-US')}
+                        </span>
+                        <p className="text-slate-400">{rf.reason} ({rf.status})</p>
+                      </div>
+                      {rf.status === 'requested' && (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleDecideRefund(rf.id, 'approved')}
+                            className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold cursor-pointer"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => handleDecideRefund(rf.id, 'rejected')}
+                            className="px-2.5 py-1 rounded bg-rose-700 hover:bg-rose-600 text-white font-semibold cursor-pointer"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="p-5 rounded-xl bg-[#111827] border border-slate-800 space-y-3">
                 <h2 className="text-sm font-bold text-white">Payment Gateways ({paymentsData.providers.length})</h2>
                 <div className="space-y-2">
                   {paymentsData.providers.map((p) => (
-                    <div key={p.provider} className="p-3 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-between text-xs">
+                    <div key={p.provider || p.id} className="p-3 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-between text-xs gap-2">
                       <div>
                         <span className="font-semibold text-white block">{p.displayName}</span>
-                        <span className="text-slate-400">{p.unavailableMessage}</span>
+                        <span className="text-slate-400">{p.unavailableMessage || p.readinessNote}</span>
                       </div>
-                      <span className="font-mono uppercase text-amber-300 shrink-0">{p.mode}</span>
+                      <span className="font-mono uppercase text-amber-300 shrink-0">
+                        {p.integrationStatus || p.mode || 'disabled'}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -812,13 +905,37 @@ export const AdminConsoleApp: React.FC = () => {
                 <p className="text-xs text-slate-500">No portal customers registered yet.</p>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {customers.map((c) => (
-                    <div key={c.id} className="p-3 rounded-lg bg-slate-900 border border-slate-800 text-xs">
-                      <p className="font-semibold text-white">{c.fullName || c.email}</p>
-                      <p className="font-mono text-[#00C2C7]">{c.email}</p>
-                      <p className="text-slate-400 mt-1">{c.companyName || 'Individual Client'}</p>
-                    </div>
-                  ))}
+                  {customers.map((entry) => {
+                    const user = entry.user || entry;
+                    const profile = entry.profile || entry;
+                    const isSuspended = user.accountStatus === 'suspended';
+                    return (
+                      <div key={user.id} className="p-3 rounded-lg bg-slate-900 border border-slate-800 text-xs space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="font-semibold text-white truncate">{profile.fullName || user.email}</p>
+                          <span className={`font-mono text-[10px] uppercase ${isSuspended ? 'text-rose-400' : 'text-emerald-400'}`}>
+                            {user.accountStatus || 'active'}
+                          </span>
+                        </div>
+                        <p className="font-mono text-[#00C2C7] truncate">{user.email}</p>
+                        <p className="text-slate-400">{profile.companyName || 'Individual Client'}</p>
+                        <div className="flex gap-2 pt-1">
+                          <button
+                            onClick={() => handleToggleCustomerSuspension(user.id, isSuspended)}
+                            className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-200 cursor-pointer"
+                          >
+                            {isSuspended ? 'Reactivate' : 'Suspend'}
+                          </button>
+                          <button
+                            onClick={() => handleGrantCustomerCredit(user.id)}
+                            className="px-2 py-1 rounded bg-[#00C2C7]/15 hover:bg-[#00C2C7]/30 text-[11px] text-[#00C2C7] cursor-pointer"
+                          >
+                            +$25 Credit
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -836,7 +953,7 @@ export const AdminConsoleApp: React.FC = () => {
                     <div key={proj.id} className="p-3 rounded-lg bg-slate-900 border border-slate-800 text-xs flex items-center justify-between gap-2">
                       <div>
                         <p className="font-semibold text-white">{proj.title}</p>
-                        <p className="font-mono text-slate-400">{proj.projectCode}</p>
+                        <p className="font-mono text-slate-400">{proj.referenceNumber || proj.projectCode}</p>
                       </div>
                       <select
                         value={proj.currentStage}
@@ -845,13 +962,13 @@ export const AdminConsoleApp: React.FC = () => {
                       >
                         {[
                           'order_confirmed',
-                          'brief_submitted',
-                          'planning_strategy',
+                          'requirements_submitted',
+                          'in_planning',
                           'in_production',
-                          'quality_assurance',
-                          'client_review',
+                          'review_feedback',
+                          'revision_stage',
                           'final_delivery',
-                          'project_completed',
+                          'completed',
                         ].map((st) => (
                           <option key={st} value={st}>
                             {st}
@@ -901,6 +1018,26 @@ export const AdminConsoleApp: React.FC = () => {
         {/* TAB 5: 25-AGENT ENTERPRISE AI WORKFORCE & CENTRAL KNOWLEDGE BASE */}
         {activeTab === 'ai' && (
           <div className="space-y-6">
+            {aiDashboard && (
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                {[
+                  { label: 'Active Agents', value: String(aiDashboard.totalAgents ?? agents.length) },
+                  { label: 'Total Executions', value: String(aiDashboard.totalExecutions ?? 0) },
+                  { label: 'Pending Approvals', value: String(aiDashboard.pendingApprovals ?? 0) },
+                  { label: 'Failed Runs', value: String(aiDashboard.failedExecutions ?? 0) },
+                  {
+                    label: 'Tokens / Est. Cost',
+                    value: `${aiDashboard.totalTokens ?? 0} ($${Number(aiDashboard.estimatedCostUsd ?? 0).toFixed(4)})`,
+                  },
+                ].map((m) => (
+                  <div key={m.label} className="p-3 rounded-xl bg-[#111827] border border-slate-800">
+                    <div className="text-[10px] font-mono uppercase text-slate-400">{m.label}</div>
+                    <div className="text-sm font-bold font-mono text-white mt-1 tabular-nums">{m.value}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               <div className="lg:col-span-7 p-5 rounded-xl bg-[#111827] border border-slate-800 space-y-4">
                 <h2 className="text-sm font-bold text-white">
@@ -937,38 +1074,47 @@ export const AdminConsoleApp: React.FC = () => {
                 </form>
 
                 <div className="space-y-2 max-h-[340px] overflow-y-auto">
-                  {executions.map((ex) => (
-                    <div key={ex.id} className="p-3 rounded-lg bg-slate-900 border border-slate-800 text-xs space-y-1.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-mono text-[#00C2C7]">
-                          {ex.agentCode} · {ex.agentName}
-                        </span>
-                        <span className="font-mono uppercase text-amber-300">{ex.status}</span>
-                      </div>
-                      <p className="text-slate-300">{ex.prompt}</p>
-                      {ex.output && (
-                        <pre className="p-2 rounded bg-slate-950 text-slate-200 whitespace-pre-wrap font-mono text-[11px]">
-                          {ex.output}
-                        </pre>
-                      )}
-                      {ex.status === 'pending_approval' && (
-                        <div className="flex gap-2 pt-1">
-                          <button
-                            onClick={() => handleDecideApproval(ex.id, 'approved')}
-                            className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold cursor-pointer"
-                          >
-                            Approve &amp; Execute
-                          </button>
-                          <button
-                            onClick={() => handleDecideApproval(ex.id, 'rejected')}
-                            className="px-2.5 py-1 rounded bg-rose-700 hover:bg-rose-600 text-white font-semibold cursor-pointer"
-                          >
-                            Reject
-                          </button>
+                  {executions.map((ex) => {
+                    const renderedOutput = ex.outputText || ex.output;
+                    return (
+                      <div key={ex.id} className="p-3 rounded-lg bg-slate-900 border border-slate-800 text-xs space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-mono text-[#00C2C7]">
+                            {ex.agentCode} · {ex.agentName}
+                          </span>
+                          <span className="font-mono uppercase text-amber-300">{ex.status}</span>
                         </div>
-                      )}
-                    </div>
-                  ))}
+                        <p className="text-slate-300">{ex.prompt}</p>
+                        {renderedOutput && (
+                          <pre className="p-2 rounded bg-slate-950 text-slate-200 whitespace-pre-wrap font-mono text-[11px]">
+                            {renderedOutput}
+                          </pre>
+                        )}
+                        {ex.status === 'pending_approval' && (
+                          <div className="flex flex-wrap gap-2 pt-1">
+                            <button
+                              onClick={() => handleDecideApproval(ex.id, 'approved')}
+                              className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold cursor-pointer"
+                            >
+                              Approve &amp; Execute
+                            </button>
+                            <button
+                              onClick={() => handleDecideApproval(ex.id, 'rejected')}
+                              className="px-2.5 py-1 rounded bg-rose-700 hover:bg-rose-600 text-white font-semibold cursor-pointer"
+                            >
+                              Reject
+                            </button>
+                            <button
+                              onClick={() => handleCancelApproval(ex.id)}
+                              className="px-2.5 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1105,6 +1251,11 @@ export const AdminConsoleApp: React.FC = () => {
                   ) : (
                     <div className="space-y-2">
                       <p className="font-mono text-[#00C2C7] break-all">Secret: {mfaEnrollment.secret}</p>
+                      {mfaEnrollment.otpAuthUri && (
+                        <p className="font-mono text-[10px] text-slate-400 break-all">
+                          URI: {mfaEnrollment.otpAuthUri}
+                        </p>
+                      )}
                       <div className="flex gap-2">
                         <input
                           type="text"
@@ -1120,6 +1271,16 @@ export const AdminConsoleApp: React.FC = () => {
                         >
                           Confirm MFA
                         </button>
+                      </div>
+                    </div>
+                  )}
+                  {mfaRecoveryCodes.length > 0 && (
+                    <div className="p-2.5 rounded bg-slate-950 border border-amber-500/40 space-y-1.5">
+                      <p className="font-semibold text-amber-300">Single-Use Recovery Codes (save securely now):</p>
+                      <div className="grid grid-cols-2 gap-1 font-mono text-[11px] text-slate-200">
+                        {mfaRecoveryCodes.map((code) => (
+                          <span key={code}>{code}</span>
+                        ))}
                       </div>
                     </div>
                   )}

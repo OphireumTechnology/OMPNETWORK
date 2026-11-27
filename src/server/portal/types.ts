@@ -91,7 +91,9 @@ export interface PortalUserRecord {
   pendingEmail?: string;
   pendingEmailTokenHash?: string;
   pendingEmailTokenExpiresAt?: string;
-  accountStatus: 'active' | 'pending_closure' | 'closed';
+  accountStatus: 'active' | 'suspended' | 'pending_closure' | 'closed';
+  suspendedAt?: string;
+  suspensionReason?: string;
   closureRequestedAt?: string;
   createdAt: string;
   updatedAt: string;
@@ -282,6 +284,7 @@ export interface OrderRecord {
   };
   cancellationRequested?: boolean;
   cancellationReason?: string;
+  expiresAt?: string;
   idempotencyKey?: string;
   items: OrderItemRecord[];
   timeline: OrderTimelineEntry[];
@@ -385,6 +388,9 @@ export interface SubscriptionRecord {
   inclusions: string[];
   currentPeriodStart?: string;
   currentPeriodEnd?: string;
+  gracePeriodEndsAt?: string;
+  failedRenewalCount?: number;
+  lastRenewalAt?: string;
   cancelRequestedAt?: string;
   provider?: PaymentProviderId;
   createdAt: string;
@@ -636,7 +642,12 @@ export interface PortalConsentRecord {
 export interface UserMfaState {
   enabled: boolean;
   secret?: string;
+  encryptedSecret?: string;
   enrolledAt?: string;
+  lastUsedStep?: number;
+  recoveryCodeHashes?: string[];
+  failedAttempts?: number;
+  lockedUntil?: string;
 }
 
 export interface PortalRepository {
@@ -663,6 +674,8 @@ export interface PortalRepository {
   requestEmailChange(userId: string, newEmail: string, tokenHash: string, expiresAt?: string): Promise<void>;
   confirmEmailChange(userId: string, tokenHash: string): Promise<PortalUserRecord | null>;
   requestAccountClosure(userId: string, reason: string): Promise<PortalUserRecord>;
+  suspendUser?(userId: string, reason: string, actor: string): Promise<PortalUserRecord | null>;
+  reactivateUser?(userId: string, actor: string): Promise<PortalUserRecord | null>;
   getUserMfaState?(userId: string): Promise<UserMfaState>;
   setUserMfaState?(userId: string, state: UserMfaState): Promise<void>;
 
@@ -733,6 +746,8 @@ export interface PortalRepository {
     entitlementsCreated?: DigitalEntitlementRecord[];
   }>;
   listDigitalEntitlements?(userId: string): Promise<DigitalEntitlementRecord[]>;
+  getDigitalEntitlementById?(userId: string, entitlementId: string): Promise<DigitalEntitlementRecord | null>;
+  revokeDigitalEntitlement?(entitlementId: string, reason: string, actor: string): Promise<DigitalEntitlementRecord | null>;
   recordDigitalDownload?(input: {
     userId: string;
     entitlementId: string;
@@ -740,6 +755,7 @@ export interface PortalRepository {
     userAgent: string;
   }): Promise<{ entitlement?: DigitalEntitlementRecord; log?: DigitalDownloadLogRecord; error?: string }>;
   listDigitalDownloadLogs?(userId: string): Promise<DigitalDownloadLogRecord[]>;
+  expireStaleOrders?(now?: Date): Promise<OrderRecord[]>;
 
   // Credits
   getWallet(userId: string): Promise<CreditWalletRecord>;
@@ -757,6 +773,9 @@ export interface PortalRepository {
   // Subscriptions
   listSubscriptions(userId: string): Promise<SubscriptionRecord[]>;
   requestSubscriptionCancel(userId: string, subscriptionId: string): Promise<SubscriptionRecord | null>;
+  renewSubscription?(subscriptionId: string, providerTransactionId?: string): Promise<{ subscription: SubscriptionRecord; creditsAllocated: number } | null>;
+  recordSubscriptionRenewalFailure?(subscriptionId: string, reason: string, graceDays?: number): Promise<SubscriptionRecord | null>;
+  changeSubscriptionPlan?(userId: string, subscriptionId: string, newPackageId: string): Promise<{ subscription?: SubscriptionRecord; error?: string }>;
 
   // Projects, Milestones, Messages, Deliverables, Revisions
   createProject(input: Omit<ProjectRecord, 'id' | 'referenceNumber' | 'assignedCoordinator' | 'assignedTeam' | 'currentStage' | 'progressPercent' | 'revisionsUsed' | 'approvalHistory' | 'createdAt' | 'updatedAt'>): Promise<{ project: ProjectRecord; milestones: ProjectMilestoneRecord[] }>;
@@ -819,6 +838,13 @@ export interface PortalRepository {
   adminReplySupportTicket?(ticketId: string, senderName: string, body: string, nextStatus?: SupportTicketStatus): Promise<SupportTicketRecord | null>;
   adminRequestRefund?(input: { paymentId: string; amountMinor: number; reason: string; requestedBy: string }): Promise<PaymentRefundRecord | null>;
   adminDecideRefund?(refundId: string, decision: 'approved' | 'rejected' | 'processed', actor: string): Promise<PaymentRefundRecord | null>;
+  adminCreateDeliverable?(input: {
+    projectId: string;
+    title: string;
+    description: string;
+    fileId: string;
+    actor: string;
+  }): Promise<ProjectDeliverableRecord | null>;
 }
 
 export const USD_TO_PHP_REFERENCE_RATE = 58;
