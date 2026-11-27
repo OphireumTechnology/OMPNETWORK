@@ -473,7 +473,7 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
           FLOATING LAUNCHER BUTTON (Bottom-Right)
           ========================================================================= */}
       {!isOpen && (
-        <div className="fixed bottom-6 right-6 z-40 flex items-center gap-3">
+        <div className="fixed bottom-6 right-6 z-[1000] flex items-center gap-3">
           {/* Subtle Callout Bubble */}
           {hasUnreadNotice && (
             <div className="hidden sm:flex items-center gap-2 px-3.5 py-2 bg-[#111827] border border-[#00C2C7]/30 text-xs text-slate-200 rounded-xl shadow-2xl animate-fade-in">
@@ -525,7 +525,7 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
           ========================================================================= */}
       {isOpen && (
         <div 
-          className={`fixed right-3 sm:right-6 bottom-3 sm:bottom-6 z-50 bg-[#0B1220] border border-slate-700 rounded-2xl shadow-2xl flex flex-col overflow-hidden transition-all duration-200 ${
+          className={`fixed right-3 sm:right-6 bottom-3 sm:bottom-6 z-[1000] bg-[#0B1220] border border-slate-700 rounded-2xl shadow-2xl flex flex-col overflow-hidden transition-all duration-200 ${
             isMinimized 
               ? 'w-80 h-16' 
               : 'w-[calc(100vw-24px)] sm:w-[460px] md:w-[500px] h-[calc(100vh-50px)] sm:h-[670px] max-h-[90vh]'
@@ -1099,7 +1099,7 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
           EXECUTIVE ESCALATION MODAL (Founder & CEO Direct Channel)
           ========================================================================= */}
       {isEscalationModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+        <div className="fixed inset-0 z-[1010] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
           <div className="relative w-full max-w-lg bg-[#0B1220] border border-[#00C2C7]/40 rounded-2xl shadow-2xl overflow-hidden p-6">
             <div className="flex items-center justify-between pb-4 border-b border-slate-800">
               <div className="flex items-center gap-3">
