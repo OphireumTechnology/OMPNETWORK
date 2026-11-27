@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Bot, X, Send, Calendar, FileText, Phone, Minimize2, 
   Maximize2, RotateCcw, Shield, Building,
@@ -467,7 +468,7 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
     }
   };
 
-  return (
+  return createPortal(
     <>
       {/* =========================================================================
           FLOATING LAUNCHER BUTTON (Bottom-Right)
@@ -1009,6 +1010,7 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
                 >
                   <input
                     type="text"
+                    aria-label="Chat message"
                     maxLength={2000}
                     value={inputMessage}
                     onChange={(e) => setInputMessage(e.target.value)}
@@ -1188,6 +1190,7 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
           </div>
         </div>
       )}
-    </>
+    </>,
+    document.body
   );
 };
