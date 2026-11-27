@@ -71,8 +71,25 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
     });
     // Exercise the actual input modality on touch-enabled devices.
     // tap retains Playwright actionability and hit-target checks; no forced events.
-    if (hasTouch) await launcher.tap();
-    else await launcher.click();
+    const snapshot = () => launcher.evaluate(button => {
+      const r = button.getBoundingClientRect();
+      const x = r.x + r.width / 2, y = r.y + r.height / 2;
+      const v = window.visualViewport;
+      return { rect: r.toJSON(), center: {x,y}, innerWidth, innerHeight,
+        layout: {width: document.documentElement.clientWidth, height: document.documentElement.clientHeight},
+        visual: v ? {width:v.width,height:v.height,scale:v.scale,offsetLeft:v.offsetLeft,offsetTop:v.offsetTop,pageLeft:v.pageLeft,pageTop:v.pageTop} : null,
+        devicePixelRatio, scrollX, scrollY,
+        hitStack: document.elementsFromPoint(x,y).map(e => ({tag:e.tagName,id:e.id,classes:e.getAttribute('class'),position:getComputedStyle(e).position,pointerEvents:getComputedStyle(e).pointerEvents,zIndex:getComputedStyle(e).zIndex})) };
+    });
+    if (hasTouch) {
+      await test.info().attach('viewport-before-tap.json', {body:JSON.stringify(await snapshot(),null,2),contentType:'application/json'});
+      try { await launcher.tap({timeout: 15000}); }
+      catch (error) {
+        await test.info().attach('viewport-after-failed-tap.json', {body:JSON.stringify(await snapshot(),null,2),contentType:'application/json'});
+        await test.info().attach('failed-tap.png', {body:await page.screenshot({timeout:5000}),contentType:'image/png'});
+        throw error;
+      }
+    } else await launcher.click();
     await expect(page.getByRole('textbox', { name: 'Chat message' })).toBeVisible();
 
     if (browserName !== 'chromium') {

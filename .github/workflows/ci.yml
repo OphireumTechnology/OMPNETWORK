@@ -96,6 +96,21 @@ jobs:
       - name: Execute Playwright Multi-Browser Desktop, Tablet & Mobile E2E Suite
         run: npm run test:e2e
 
+      - name: Reproduce failed mobile consultant interaction
+        if: failure()
+        run: npx playwright test e2e/public-and-ai.spec.ts --project=mobile --grep 'opens AI Solutions Consultant' --retries=0 --trace=on --output=mobile-diagnostics --reporter=list
+
+      - name: Upload focused mobile diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-consultant-diagnostics
+          path: |
+            mobile-diagnostics/**/*.zip
+            mobile-diagnostics/**/*.png
+            mobile-diagnostics/**/*.json
+          if-no-files-found: ignore
+
       - name: Upload Playwright report and failure artifacts
         if: always()
         uses: actions/upload-artifact@v4
