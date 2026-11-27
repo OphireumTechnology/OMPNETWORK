@@ -31,6 +31,13 @@ interface AIConsultantWidgetProps {
 }
 
 export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ externalOpenRequest }) => {
+  const layerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const layer = layerRef.current;
+    if (!layer || typeof layer.showPopover !== 'function') return;
+    layer.showPopover();
+    return () => { if (layer.matches(':popover-open')) layer.hidePopover(); };
+  }, []);
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [hasUnreadNotice, setHasUnreadNotice] = useState(true);
@@ -469,7 +476,9 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
   };
 
   return createPortal(
-    <>
+    <div ref={layerRef} className="opm-consultant-layer" popover={typeof HTMLElement !== 'undefined' && 'showPopover' in HTMLElement.prototype ? 'manual' : undefined}
+      style={{ position: 'fixed', inset: 0, width: '100%', height: '100%', maxWidth: 'none', maxHeight: 'none', margin: 0, padding: 0, border: 0, background: 'transparent', overflow: 'visible', pointerEvents: 'none', zIndex: 2147483000 }}>
+      <style>{'.opm-consultant-layer::backdrop { background: transparent; pointer-events: none; }'}</style>
       {/* =========================================================================
           FLOATING LAUNCHER BUTTON (Bottom-Right)
           ========================================================================= */}
@@ -1192,7 +1201,7 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
           </div>
         </div>
       )}
-    </>,
+    </div>,
     document.body
   );
 };
