@@ -65,6 +65,7 @@ export default defineConfig({
       name: 'tablet',
       use: {
         ...devices['iPad Pro 11'],
+        browserName: 'chromium',
         permissions: ['microphone'],
         launchOptions: chromiumMediaLaunchOptions,
       },
