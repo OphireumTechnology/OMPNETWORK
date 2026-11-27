@@ -20,15 +20,91 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
 
   test('opens AI Solutions Consultant widget, sends chat inquiry, and activates simulated-mic voice session', async ({
     page,
+    browserName,
+    hasTouch,
   }) => {
+    // Firefox and WebKit do not support Chromium fake-device flags. Supply a real Web Audio MediaStream at the capture boundary in these test browsers only.
+    if (browserName !== 'chromium') {
+      await page.addInitScript(() => {
+        const media = navigator.mediaDevices;
+        if (!media) throw new Error('MediaDevices unavailable in test context');
+        const capture = async () => {
+          const context = new AudioContext();
+          const destination = context.createMediaStreamDestination();
+          const oscillator = context.createOscillator();
+          const gain = context.createGain();
+          gain.gain.value = 0;
+          oscillator.connect(gain).connect(destination);
+          oscillator.start();
+          const track = destination.stream.getAudioTracks()[0];
+          const stop = track.stop.bind(track);
+          track.stop = () => { stop(); oscillator.stop(); void context.close(); };
+          return destination.stream;
+        };
+        // WebKit may return a fresh wrapper for mediaDevices on each access.
+        const fixture = { getUserMedia: capture };
+        Object.defineProperty(navigator, 'mediaDevices', { configurable: true, get: () => fixture });
+      });
+    }
     await page.goto('/');
 
     const launcher = page.getByRole('button', { name: /Open AI Solutions Consultant/i });
     await expect(launcher).toBeVisible();
-    await launcher.click();
+    // Verify the real pointer target, rather than forcing the click through an overlay.
+    // This detects CSS stacking/position regressions in the mobile viewport.
+    const launcherHitTarget = await launcher.evaluate((button) => {
+      const bounds = button.getBoundingClientRect();
+      const topElement = document.elementFromPoint(
+        bounds.left + bounds.width / 2,
+        bounds.top + bounds.height / 2
+      );
+      const layer = button.closest('.opm-consultant-layer');
+      const v = window.visualViewport;
+      const left = v?.offsetLeft ?? 0, top = v?.offsetTop ?? 0;
+      const right = left + (v?.width ?? innerWidth), bottom = top + (v?.height ?? innerHeight);
+      return {
+        insideViewport: bounds.left >= left - 1 && bounds.top >= top - 1 && bounds.right <= right + 1 && bounds.bottom <= bottom + 1,
+        clickable: !!topElement && (topElement === button || button.contains(topElement)),
+        position: layer ? getComputedStyle(layer).position : null,
+        zIndex: getComputedStyle(button.parentElement as HTMLElement).zIndex,
+        blocker: topElement?.tagName.toLowerCase() || null,
+      };
+    });
+    expect(launcherHitTarget, JSON.stringify(launcherHitTarget)).toMatchObject({
+      clickable: true,
+      insideViewport: true,
+      position: 'fixed',
+    });
+    // Exercise the actual input modality on touch-enabled devices.
+    // tap retains Playwright actionability and hit-target checks; no forced events.
+    const snapshot = () => launcher.evaluate(button => {
+      const r = button.getBoundingClientRect();
+      const x = r.x + r.width / 2, y = r.y + r.height / 2;
+      const v = window.visualViewport;
+      return { rect: r.toJSON(), center: {x,y}, innerWidth, innerHeight,
+        layout: {width: document.documentElement.clientWidth, height: document.documentElement.clientHeight},
+        visual: v ? {width:v.width,height:v.height,scale:v.scale,offsetLeft:v.offsetLeft,offsetTop:v.offsetTop,pageLeft:v.pageLeft,pageTop:v.pageTop} : null,
+        devicePixelRatio, scrollX, scrollY,
+        hitStack: document.elementsFromPoint(x,y).map(e => ({tag:e.tagName,id:e.id,classes:e.getAttribute('class'),position:getComputedStyle(e).position,pointerEvents:getComputedStyle(e).pointerEvents,zIndex:getComputedStyle(e).zIndex})) };
+    });
+    if (hasTouch) {
+      await test.info().attach('viewport-before-tap.json', {body:JSON.stringify(await snapshot(),null,2),contentType:'application/json'});
+      try { await launcher.tap({timeout: 15000}); }
+      catch (error) {
+        await test.info().attach('viewport-after-failed-tap.json', {body:JSON.stringify(await snapshot(),null,2),contentType:'application/json'});
+        await test.info().attach('failed-tap.png', {body:await page.screenshot({timeout:5000}),contentType:'image/png'});
+        throw error;
+      }
+    } else await launcher.click();
+    await expect(page.getByRole('textbox', { name: 'Chat message' })).toBeVisible();
+
+    if (browserName !== 'chromium') {
+      // Confirm the capture boundary is installed before exercising voice controls.
+      expect(await page.evaluate(() => Object.prototype.hasOwnProperty.call(navigator, 'mediaDevices'))).toBe(true);
+    }
 
     // Send a consultative chat message
-    const chatInput = page.locator('input[placeholder*="Type"], input[placeholder*="Voice is active"]');
+    const chatInput = page.getByRole("textbox", { name: "Chat message" });
     await expect(chatInput).toBeVisible();
     await chatInput.fill('We need an enterprise corporate website and AI chatbot with starting pricing.');
     await chatInput.press('Enter');
@@ -47,6 +123,9 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
     await expect(muteMicBtn).toBeVisible();
     await muteMicBtn.click();
     await expect(page.getByTitle(/Unmute Microphone/i)).toBeVisible();
+
+    await page.getByTitle(/^Unmute Microphone$/i).click();
+    await expect(page.getByTitle(/^Mute Microphone$/i)).toBeVisible();
 
     const endVoiceBtn = page.getByTitle(/End Voice Conversation/i);
     await endVoiceBtn.click();

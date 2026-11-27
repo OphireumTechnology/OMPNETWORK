@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Bot, X, Send, Calendar, FileText, Phone, Minimize2, 
   Maximize2, RotateCcw, Shield, Building,
@@ -30,6 +31,30 @@ interface AIConsultantWidgetProps {
 }
 
 export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ externalOpenRequest }) => {
+  const layerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const layer = layerRef.current;
+    if (!layer || typeof layer.showPopover !== 'function') return;
+    layer.showPopover();
+    return () => { if (layer.matches(':popover-open')) layer.hidePopover(); };
+  }, []);
+  // Anchor to the visible viewport, not the overflow-expanded mobile layout viewport.
+  const [viewport, setViewport] = useState(() => ({ width: document.documentElement.clientWidth, height: document.documentElement.clientHeight, left: 0, top: 0 }));
+  useEffect(() => {
+    const update = () => {
+      const v = window.visualViewport;
+      setViewport({ width: v?.width ?? document.documentElement.clientWidth, height: v?.height ?? document.documentElement.clientHeight, left: v?.offsetLeft ?? 0, top: v?.offsetTop ?? 0 });
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.visualViewport?.addEventListener('resize', update);
+    window.visualViewport?.addEventListener('scroll', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.visualViewport?.removeEventListener('resize', update);
+      window.visualViewport?.removeEventListener('scroll', update);
+    };
+  }, []);
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [hasUnreadNotice, setHasUnreadNotice] = useState(true);
@@ -467,13 +492,16 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
     }
   };
 
-  return (
-    <>
+  return createPortal(
+    <div ref={layerRef} className="opm-consultant-layer" popover={typeof HTMLElement !== 'undefined' && 'showPopover' in HTMLElement.prototype ? 'manual' : undefined}
+      style={{ position: 'fixed', left: viewport.left, top: viewport.top, right: 'auto', bottom: 'auto', width: viewport.width, height: viewport.height, maxWidth: 'none', maxHeight: 'none', margin: 0, padding: 0, border: 0, background: 'transparent', overflow: 'visible', pointerEvents: 'none', zIndex: 2147483000 }}>
+      <style>{'.opm-consultant-layer::backdrop { background: transparent; pointer-events: none; }'}</style>
       {/* =========================================================================
           FLOATING LAUNCHER BUTTON (Bottom-Right)
           ========================================================================= */}
       {!isOpen && (
-        <div className="fixed bottom-6 right-6 z-40 flex items-center gap-3">
+        <div className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] z-[2147483000] flex items-center gap-3 isolate pointer-events-auto"
+          style={{ position: 'absolute', right: 'max(16px, env(safe-area-inset-right))', bottom: 'max(16px, env(safe-area-inset-bottom))', zIndex: 2147483000, pointerEvents: 'auto' }}>
           {/* Subtle Callout Bubble */}
           {hasUnreadNotice && (
             <div className="hidden sm:flex items-center gap-2 px-3.5 py-2 bg-[#111827] border border-[#00C2C7]/30 text-xs text-slate-200 rounded-xl shadow-2xl animate-fade-in">
@@ -495,11 +523,11 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
               setIsMinimized(false);
               setHasUnreadNotice(false);
             }}
-            className="group relative flex items-center gap-3 px-4 py-3.5 bg-gradient-to-r from-[#111827] via-[#1a2336] to-[#0d1627] text-white rounded-2xl border border-[#00C2C7]/50 shadow-[0_10px_30px_rgba(0,194,199,0.25)] hover:shadow-[0_15px_35px_rgba(0,194,199,0.4)] transition-all duration-300 hover:scale-105 cursor-pointer"
+            className="group relative flex items-center gap-3 px-4 py-3.5 bg-gradient-to-r from-[#111827] via-[#1a2336] to-[#0d1627] text-white rounded-2xl border border-[#00C2C7]/50 shadow-[0_10px_30px_rgba(0,194,199,0.25)] hover:shadow-[0_15px_35px_rgba(0,194,199,0.4)] transition-all duration-300 sm:hover:scale-105 cursor-pointer touch-manipulation"
             aria-label="Open AI Solutions Consultant"
           >
             {/* Outer Glow Ring */}
-            <div className="absolute -inset-0.5 rounded-2xl bg-gradient-to-r from-[#00C2C7] via-[#D4AF37] to-[#00C2C7] opacity-25 group-hover:opacity-60 blur transition duration-300" />
+            <div className="pointer-events-none absolute -inset-0.5 rounded-2xl bg-gradient-to-r from-[#00C2C7] via-[#D4AF37] to-[#00C2C7] opacity-25 group-hover:opacity-60 blur transition duration-300" />
 
             <div className="relative flex items-center gap-2.5">
               <BrandLogo variant="emblem" size="md" ring="brand" decorative />
@@ -524,11 +552,12 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
           EXPANDABLE CHAT & VOICE PANEL
           ========================================================================= */}
       {isOpen && (
-        <div 
-          className={`fixed right-3 sm:right-6 bottom-3 sm:bottom-6 z-50 bg-[#0B1220] border border-slate-700 rounded-2xl shadow-2xl flex flex-col overflow-hidden transition-all duration-200 ${
+        <div
+          style={{ position: 'absolute', maxWidth: Math.max(0, viewport.width - 24), maxHeight: Math.max(0, viewport.height - 24), zIndex: 2147483000, pointerEvents: 'auto' }}
+          className={`fixed right-3 sm:right-6 bottom-3 sm:bottom-6 z-[2147483000] bg-[#0B1220] border border-slate-700 rounded-2xl shadow-2xl flex flex-col overflow-hidden transition-all duration-200 ${
             isMinimized 
-              ? 'w-80 h-16' 
-              : 'w-[calc(100vw-24px)] sm:w-[460px] md:w-[500px] h-[calc(100vh-50px)] sm:h-[670px] max-h-[90vh]'
+              ? 'w-[min(320px,calc(100vw-24px))] h-16' 
+              : 'w-[calc(100vw-24px)] sm:w-[460px] md:w-[500px] h-[calc(100dvh-50px)] sm:h-[670px] max-h-[90dvh]'
           }`}
         >
           {/* Top Header */}
@@ -1009,6 +1038,7 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
                 >
                   <input
                     type="text"
+                    aria-label="Chat message"
                     maxLength={2000}
                     value={inputMessage}
                     onChange={(e) => setInputMessage(e.target.value)}
@@ -1099,7 +1129,7 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
           EXECUTIVE ESCALATION MODAL (Founder & CEO Direct Channel)
           ========================================================================= */}
       {isEscalationModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+        <div className="fixed inset-0 z-[2147483001] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
           <div className="relative w-full max-w-lg bg-[#0B1220] border border-[#00C2C7]/40 rounded-2xl shadow-2xl overflow-hidden p-6">
             <div className="flex items-center justify-between pb-4 border-b border-slate-800">
               <div className="flex items-center gap-3">
@@ -1188,6 +1218,7 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
           </div>
         </div>
       )}
-    </>
+    </div>,
+    document.body
   );
 };

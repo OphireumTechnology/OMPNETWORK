@@ -2,7 +2,7 @@ name: CI Security, Migration, Lint, Production Smoke & Playwright E2E
 
 on:
   push:
-    branches: [main, 'repair/**', 'release/**', 'fix/**']
+    branches: [main]
   pull_request:
     branches: [main, 'repair/**', 'release/**', 'fix/**']
 
@@ -93,8 +93,26 @@ jobs:
       - name: Install Playwright browsers (Chromium, Firefox, WebKit)
         run: npx playwright install --with-deps chromium firefox webkit
 
+      - name: Build compiled application for browser acceptance
+        run: npm run build:all
+
       - name: Execute Playwright Multi-Browser Desktop, Tablet & Mobile E2E Suite
         run: npm run test:e2e
+
+      - name: Reproduce failed mobile consultant interaction
+        if: failure()
+        run: npx playwright test e2e/public-and-ai.spec.ts --project=mobile --grep 'opens AI Solutions Consultant' --retries=0 --trace=on --output=mobile-diagnostics --reporter=list
+
+      - name: Upload focused mobile diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-consultant-diagnostics
+          path: |
+            mobile-diagnostics/**/*.zip
+            mobile-diagnostics/**/*.png
+            mobile-diagnostics/**/*.json
+          if-no-files-found: ignore
 
       - name: Upload Playwright report and failure artifacts
         if: always()

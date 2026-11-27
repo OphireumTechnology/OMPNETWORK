@@ -57,10 +57,12 @@ test.describe('Phase 26 E2E — Client Portal Registration, Commerce, Orders, Pr
     expect(checkoutRes.status()).toBe(201);
     const orderData = await checkoutRes.json();
     expect(orderData.order.orderNumber).toBeTruthy();
-    expect(orderData.order.paymentStatus).toBe('unpaid');
+    // The checkout endpoint explicitly starts an unverified payment in the pending state.
+    // Only a verified provider webhook may transition it to paid.
+    expect(orderData.order.paymentStatus).toBe('pending');
 
     // Create a support ticket
-    const ticketRes = await request.post('/api/portal/support/tickets', {
+    const ticketRes = await request.post('/api/portal/support', {
       headers: { Authorization: `Bearer ${regJson.token}` },
       data: {
         category: 'Orders',
@@ -69,5 +71,10 @@ test.describe('Phase 26 E2E — Client Portal Registration, Commerce, Orders, Pr
       },
     });
     expect(ticketRes.status()).toBe(201);
+    const created = await ticketRes.json();
+    expect(created.ticket.id).toBeTruthy();
+    const listed = await request.get('/api/portal/support', { headers: { Authorization: `Bearer ${regJson.token}` } });
+    expect(listed.status()).toBe(200);
+    expect((await listed.json()).tickets.some((ticket: { id: string }) => ticket.id === created.ticket.id)).toBe(true);
   });
 });

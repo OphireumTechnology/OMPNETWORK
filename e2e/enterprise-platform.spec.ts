@@ -36,6 +36,19 @@ test.describe('Enterprise Reliability, Accessibility, Privacy & Legal Governance
     const overflow = await page.evaluate(() => {
       return document.documentElement.scrollWidth - window.innerWidth;
     });
+    if (overflow > 4) {
+      const offenders = await page.locator('body *').evaluateAll((elements) =>
+        elements
+          .map((element) => ({
+            tag: element.tagName.toLowerCase(),
+            className: typeof element.className === 'string' ? element.className.slice(0, 120) : '',
+            right: Math.round(element.getBoundingClientRect().right),
+          }))
+          .filter((element) => element.right > window.innerWidth + 4)
+          .slice(0, 12)
+      );
+      console.error('Horizontal overflow diagnostics', { overflow, offenders });
+    }
     expect(overflow).toBeLessThanOrEqual(4);
     expect(consoleErrors).toEqual([]);
   });
