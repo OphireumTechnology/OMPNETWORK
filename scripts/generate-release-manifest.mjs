@@ -4,7 +4,7 @@
  *
  * Emits dist/release-sbom-manifest.json containing:
  *  - Package identity, version, and Node engine constraints
- *  - SHA-256 checksums for compiled frontend/backend bundles and SQL migrations (000–006)
+ *  - SHA-256 checksums for compiled frontend/backend bundles and SQL migrations (000–007)
  *  - Resolved runtime dependency inventory from package-lock.json
  */
 

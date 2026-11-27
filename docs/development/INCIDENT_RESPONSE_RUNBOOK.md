@@ -41,10 +41,16 @@
 1. Auto-quarantine triggers automatically for detected payment cards, private keys, and credentials.
 2. For manual containment: invoke `POST /api/ai/knowledge/documents/:id/quarantine` (immediately strips chunks from retrieval and archives the document), then purge via `DELETE /api/ai/knowledge/documents/:id` after forensic capture.
 
-### D. Railway Backend Rollback / Graceful Drain
-1. Redeploy previous verified immutable release artifact in Railway.
-2. Confirm `SIGTERM` draining shifts `/api/ready` to `503 not_ready` while in-flight requests drain cleanly before process exit.
-3. For database recovery, execute `docs/development/BACKUP_RESTORATION_DR_RUNBOOK.md`.
+### D. AI Provider Cost Spike or Runaway Execution (Phase 58 Emergency Kill Switch)
+1. Invoke `PATCH /api/admin/ai/governance` (`super_admin` or `operations_admin`) with `{ "scopeKey": "global", "emergencySuspended": true, "suspensionReason": "Incident containment" }` (or set `AI_EMERGENCY_SUSPENDED=true` in Railway Variables).
+2. Inspect `GET /api/admin/ai/governance` to verify active executions, daily/monthly USD usage, and per-agent token limits.
+3. Resume selectively after root-cause remediation by setting `emergencySuspended: false`.
+
+### E. Railway Backend Rollback, Pool Exhaustion & Graceful Drain
+1. Inspect `GET /api/health` -> `database.provider`, `database.pool` (`totalCount`, `idleCount`, `waitingCount`), and slow-query logs (`postgres_slow_query`).
+2. Redeploy previous verified immutable release artifact in Railway (`railway.json` Railpack).
+3. Confirm `SIGTERM` draining shifts `/api/ready` to `503 not_ready` while draining in-flight requests and closing `PostgresPoolManager.close()` cleanly before process exit.
+4. For database recovery, execute `docs/development/BACKUP_RESTORATION_DR_RUNBOOK.md`.
 
 ## 4. Philippine Data Privacy Act (RA 10173) Breach Notification Rule
 - If a confirmed personal data breach meets National Privacy Commission (NPC) mandatory notification criteria (NPC Circular 16-03), notify the NPC and affected data subjects within **72 hours** of knowledge/reasonable belief, coordinated with OPHIREUM legal counsel and the Data Protection Officer.

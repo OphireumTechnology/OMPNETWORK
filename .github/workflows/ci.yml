@@ -34,8 +34,8 @@ jobs:
       - name: Run unit, security, AI workforce, conversation persistence, and Phase 31-46 tests
         run: npm run test:unit && npm run test:security
 
-      - name: Run real PostgreSQL 16 (PGlite) Migration 000-006 & DR drill suite
-        run: npm run test:migrations
+      - name: Run real PostgreSQL 16 (PGlite) Migration 000-007, native PG integration & DR drill suites
+        run: npm run test:migrations && npm run test:pg
 
       - name: Build production frontend and permanent backend server bundle
         run: npm run build:all
@@ -73,6 +73,51 @@ jobs:
         with:
           name: release-sbom-manifest
           path: dist/release-sbom-manifest.json
+
+  postgres-live-integration:
+    runs-on: ubuntu-latest
+    needs: verify
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: ophireum_ci
+          POSTGRES_PASSWORD: ophireum_ci_password
+          POSTGRES_DB: ophireum_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies cleanly from package-lock.json
+        run: npm ci --no-audit --no-fund
+
+      - name: Execute standalone Migrations 000-007 against live PostgreSQL 16 TCP service
+        env:
+          DATABASE_URL: postgresql://ophireum_ci:ophireum_ci_password@127.0.0.1:5432/ophireum_test
+          DATABASE_SSL: 'false'
+        run: |
+          npm run db:migrate:dry-run
+          npm run db:migrate
+          npm run db:migrate
+
+      - name: Execute Native PostgreSQL Repository, Multi-Replica AI & Portal E2E Suite against live PG16
+        env:
+          TEST_DATABASE_URL: postgresql://ophireum_ci:ophireum_ci_password@127.0.0.1:5432/ophireum_test
+          DATABASE_SSL: 'false'
+        run: npm run test:pg
 
   playwright-e2e:
     runs-on: ubuntu-latest

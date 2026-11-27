@@ -17,6 +17,8 @@ import {
   NotFoundError,
 } from './db/types';
 import { SupabaseDatabaseRepository } from './db/supabaseRepository';
+import { PostgresPoolManager, resolveConfiguredDatabaseProvider } from './db/postgresPool';
+import { PostgresDatabaseRepository } from './db/postgresRepository';
 import { AdminAuthService, AuthenticatedAdminRequest } from './auth';
 import { EmailTransport, ResendEmailTransport, TransactionalEmailService } from './services/emailService';
 import { GoogleCalendarService } from './services/calendarService';
@@ -33,6 +35,7 @@ import path from 'path';
 import { PortalRepository } from './portal/types';
 import { LocalPortalRepository } from './portal/localPortalRepository';
 import { SupabasePortalRepository } from './portal/supabasePortalRepository';
+import { PostgresPortalRepository } from './portal/postgresPortalRepository';
 import { createPortalRouter } from './portal/portalRoutes';
 import { buildAdminSessionCookieHeader } from './auth';
 import { DistributedRateLimiter } from './rateLimiter';
@@ -50,6 +53,8 @@ import {
   SessionAccessContext,
   createAiConversationStore,
 } from './ai/conversationService';
+import { PostgresAiConversationStore } from './ai/postgresConversationStore';
+import { AiProviderGovernanceService } from './ai/providerGovernance';
 import { ReceptionistToolExecutor } from './ai/receptionistTools';
 import { attachLiveVoiceGateway, GEMINI_LIVE_MODEL } from './ai/liveVoiceGateway';
 import {
@@ -63,6 +68,7 @@ export interface AppDependencies {
   db?: DatabaseRepository;
   portalRepo?: PortalRepository;
   conversationStore?: AiConversationStore;
+  postgresPool?: PostgresPoolManager;
   emailTransport?: EmailTransport;
   calendarService?: GoogleCalendarService;
   geminiClient?: GoogleGenAI | null;
@@ -212,18 +218,30 @@ export function createApp(deps: AppDependencies = {}): {
   conversationStore: AiConversationStore;
   receptionistToolExecutor: ReceptionistToolExecutor;
   workforceService: EnterpriseAiWorkforceService;
+  aiGovernance: AiProviderGovernanceService;
   attachLiveVoice: (httpServer: HttpServer) => { close: () => Promise<void> };
   runtimeLifecycle: RuntimeLifecycleState;
   circuitBreakers: CircuitBreakerRegistry;
+  close: () => Promise<void>;
 } {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
 
   const runtimeLifecycle = createRuntimeLifecycleState(400);
-  const circuitBreakers = new CircuitBreakerRegistry(['supabase', 'gemini', 'resend', 'calendar', 'payments']);
+  const circuitBreakers = new CircuitBreakerRegistry(['postgres', 'supabase', 'gemini', 'resend', 'calendar', 'payments']);
+  const aiGovernance = new AiProviderGovernanceService();
 
-  const db = deps.db || new SupabaseDatabaseRepository();
+  const activeDbProvider = deps.postgresPool ? 'postgres' : resolveConfiguredDatabaseProvider();
+  const sharedPgPool =
+    deps.postgresPool ||
+    (activeDbProvider === 'postgres' ? new PostgresPoolManager() : null);
+
+  const db: DatabaseRepository =
+    deps.db ||
+    (sharedPgPool && sharedPgPool.isConfigured
+      ? new PostgresDatabaseRepository(sharedPgPool)
+      : new SupabaseDatabaseRepository());
   const emailService = new TransactionalEmailService(
     db,
     deps.emailTransport || new ResendEmailTransport()
@@ -260,7 +278,10 @@ export function createApp(deps: AppDependencies = {}): {
   );
   const processedResendWebhookIds = new Set<string>();
   const conversationStore: AiConversationStore =
-    deps.conversationStore || createAiConversationStore();
+    deps.conversationStore ||
+    (sharedPgPool && sharedPgPool.isConfigured
+      ? new PostgresAiConversationStore(sharedPgPool)
+      : createAiConversationStore());
 
   // -----------------------------------------------------------------------
   // 1. SECURITY HEADERS, CORRELATION ID & CORS MIDDLEWARE
@@ -269,24 +290,23 @@ export function createApp(deps: AppDependencies = {}): {
     ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN.trim().replace(/^https?:\/\//, '').replace(/\/$/, '')}`
     : '';
 
-  const configuredOrigins = (
-    process.env.ALLOWED_ORIGINS ||
-    [
-      'https://ophireummultimedia.com',
-      'https://www.ophireummultimedia.com',
-      'https://ophireumtechnology.github.io',
-      'http://localhost:3000',
-      'http://127.0.0.1:3000',
-      'http://localhost:5173',
-      'http://127.0.0.1:5173',
-      railwayDomainOrigin,
-    ]
-      .filter(Boolean)
-      .join(',')
-  )
+  const baselineOrigins = [
+    'https://ophireummultimedia.com',
+    'https://www.ophireummultimedia.com',
+    'https://ophireumtechnology.github.io',
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    railwayDomainOrigin,
+  ].filter(Boolean);
+
+  const extraOrigins = (process.env.ALLOWED_ORIGINS || '')
     .split(',')
     .map((o) => o.trim().replace(/\/$/, ''))
     .filter(Boolean);
+
+  const configuredOrigins = Array.from(new Set([...baselineOrigins, ...extraOrigins]));
 
   app.use((req: Request & { correlationId?: string }, res: Response, next: NextFunction) => {
     const correlationId = createCorrelationId(req.headers['x-request-id']);
@@ -408,25 +428,30 @@ export function createApp(deps: AppDependencies = {}): {
     return strictJsonParser(req, res, next);
   });
 
-  // Initialize Portal Repository upfront — fail closed in production if Supabase is not configured!
+  // Initialize Portal Repository upfront — fail closed in production if neither Native PostgreSQL nor Supabase is configured!
   const supaUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
   const supaServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
   const isProdRuntime = process.env.NODE_ENV === 'production';
-  if (!deps.portalRepo && isProdRuntime && (!supaUrl || !supaServiceKey)) {
+  const hasNativePg = Boolean(sharedPgPool && sharedPgPool.isConfigured);
+  const hasSupabaseCreds = Boolean(supaUrl && supaServiceKey && !supaUrl.includes('your-ompnetwork-id'));
+
+  if (!deps.portalRepo && isProdRuntime && !hasNativePg && !hasSupabaseCreds) {
     throw new Error(
-      'Production deployment requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. Refusing local JSON fallback in production.'
+      'Production deployment requires DATABASE_URL (Native Railway PostgreSQL) or SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY. Refusing local JSON fallback in production.'
     );
   }
   const portalRepo: PortalRepository =
     deps.portalRepo ||
-    (supaUrl && supaServiceKey
-      ? new SupabasePortalRepository(supaUrl, supaServiceKey, { strictPersistence: isProdRuntime })
-      : new LocalPortalRepository({
-          persistDir:
-            process.env.NODE_ENV === 'test'
-              ? null
-              : path.resolve(process.cwd(), '.portal-data'),
-        }));
+    (hasNativePg
+      ? new PostgresPortalRepository(sharedPgPool!)
+      : hasSupabaseCreds
+        ? new SupabasePortalRepository(supaUrl, supaServiceKey, { strictPersistence: isProdRuntime })
+        : new LocalPortalRepository({
+            persistDir:
+              process.env.NODE_ENV === 'test'
+                ? null
+                : path.resolve(process.cwd(), '.portal-data'),
+          }));
 
   const knowledgeService = new CentralKnowledgeService(ai);
   const workforceService = new EnterpriseAiWorkforceService(knowledgeService, ai, { portalRepo, db });
@@ -519,9 +544,11 @@ export function createApp(deps: AppDependencies = {}): {
       correlationId: req.correlationId,
       dependencies: {
         database: {
+          provider: hasNativePg ? 'postgres' : hasSupabaseCreds ? 'supabase' : 'unconfigured',
           configured: dbPing.configured,
           connected: dbPing.ok,
           latencyMs: dbPing.latencyMs ?? null,
+          poolMetrics: sharedPgPool ? sharedPgPool.getPoolMetrics() : undefined,
           status: dbPing.ok ? 'healthy' : dbPing.configured ? 'provider_failure' : 'unconfigured',
         },
         portalPersistence: {
@@ -2177,6 +2204,49 @@ Tone & Voice Rules:
     })
   );
 
+  // Phase 58: Administrative AI Provider Reliability & Cost Governance Endpoints
+  app.get('/api/admin/ai/governance', authService.requireAdmin, (_req: AuthenticatedAdminRequest, res: Response) => {
+    res.json({
+      success: true,
+      governance: aiGovernance.getSnapshot(),
+    });
+  });
+
+  app.patch('/api/admin/ai/governance', authService.requireAdmin, (req: AuthenticatedAdminRequest, res: Response) => {
+    const role = req.adminUser?.role;
+    if (!role || !['super_admin', 'admin', 'operations_manager'].includes(role)) {
+      res.status(403).json({
+        success: false,
+        code: 'FORBIDDEN_ROLE',
+        error: 'Updating AI governance caps or emergency suspension requires super_admin, admin, or operations_manager role.',
+      });
+      return;
+    }
+    const scopeKey = sanitizePlainText(req.body?.scopeKey || 'global', 64) || 'global';
+    const updated = aiGovernance.updateLimit(scopeKey, {
+      scopeType: req.body?.scopeType,
+      maxTokensPerRequest:
+        req.body?.maxTokensPerRequest !== undefined ? Number(req.body.maxTokensPerRequest) : undefined,
+      dailySpendCapUsd: req.body?.dailySpendCapUsd !== undefined ? Number(req.body.dailySpendCapUsd) : undefined,
+      monthlySpendCapUsd:
+        req.body?.monthlySpendCapUsd !== undefined ? Number(req.body.monthlySpendCapUsd) : undefined,
+      maxConcurrentExecutions:
+        req.body?.maxConcurrentExecutions !== undefined ? Number(req.body.maxConcurrentExecutions) : undefined,
+      emergencySuspended:
+        req.body?.emergencySuspended !== undefined ? Boolean(req.body.emergencySuspended) : undefined,
+      suspensionReason:
+        typeof req.body?.suspensionReason === 'string'
+          ? sanitizePlainText(req.body.suspensionReason, 300)
+          : undefined,
+      updatedBy: req.adminUser?.email,
+    });
+    res.json({
+      success: true,
+      limit: updated,
+      governance: aiGovernance.getSnapshot(),
+    });
+  });
+
   app.use('/api/legal', createLegalRouter(portalRepo));
 
   // -----------------------------------------------------------------------
@@ -2256,6 +2326,12 @@ Tone & Voice Rules:
       allowedOrigins: configuredOrigins,
     });
 
+  const close = async () => {
+    if (sharedPgPool) {
+      await sharedPgPool.close();
+    }
+  };
+
   return {
     app,
     db,
@@ -2264,8 +2340,10 @@ Tone & Voice Rules:
     conversationStore,
     receptionistToolExecutor,
     workforceService,
+    aiGovernance,
     attachLiveVoice,
     runtimeLifecycle,
     circuitBreakers,
+    close,
   };
 }

@@ -651,8 +651,9 @@ export interface UserMfaState {
 }
 
 export interface PortalRepository {
-  readonly mode: 'supabase' | 'local_dev';
+  readonly mode: 'postgres' | 'supabase' | 'local_dev';
   readonly supabaseWritePersistenceImplemented?: boolean;
+  close?(): Promise<void>;
   // Auth & Users
   findUserByEmail(email: string): Promise<PortalUserRecord | null>;
   findUserById(userId: string): Promise<PortalUserRecord | null>;

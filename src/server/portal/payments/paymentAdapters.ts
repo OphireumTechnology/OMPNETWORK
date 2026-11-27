@@ -537,7 +537,11 @@ class PayPalPaymentAdapter implements PaymentProviderAdapter {
     return {
       clientId: (process.env.PAYPAL_CLIENT_ID_SANDBOX || '').trim(),
       clientSecret: (process.env.PAYPAL_CLIENT_SECRET_SANDBOX || '').trim(),
-      webhookSecret: (process.env.PAYPAL_WEBHOOK_SECRET || '').trim(),
+      webhookSecret: (
+        process.env.PAYPAL_WEBHOOK_SECRET_SANDBOX ||
+        process.env.PAYPAL_WEBHOOK_SECRET ||
+        ''
+      ).trim(),
     };
   }
 
@@ -786,9 +790,14 @@ class MayaPaymentAdapter implements PaymentProviderAdapter {
 
   private getCredentials() {
     return {
-      publicKey: (process.env.MAYA_PUBLIC_KEY_SANDBOX || '').trim(),
-      secretKey: (process.env.MAYA_SECRET_KEY_SANDBOX || '').trim(),
-      webhookSecret: (process.env.MAYA_WEBHOOK_SECRET || '').trim(),
+      publicKey: (process.env.MAYA_PUBLIC_KEY_SANDBOX || process.env.MAYA_PUBLIC_KEY_TEST || '').trim(),
+      secretKey: (process.env.MAYA_SECRET_KEY_SANDBOX || process.env.MAYA_SECRET_KEY_TEST || '').trim(),
+      webhookSecret: (
+        process.env.MAYA_WEBHOOK_SECRET_SANDBOX ||
+        process.env.MAYA_WEBHOOK_SECRET_TEST ||
+        process.env.MAYA_WEBHOOK_SECRET ||
+        ''
+      ).trim(),
     };
   }
 

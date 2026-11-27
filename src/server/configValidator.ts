@@ -1,8 +1,11 @@
 /**
- * OPHIREUM NETWORK — Staging & Production External Provider Configuration Validator (Phase 29)
+ * OPHIREUM NETWORK — Staging & Production External Provider Configuration Validator (Phases 29 & 50)
  * Inspects environment readiness without ever exposing secret values.
+ * Supports Native Railway PostgreSQL (DATABASE_URL) AND Supabase during controlled transition.
  * Enforces live_payments_enabled = false safety posture and deferred merchant onboarding rules.
  */
+
+import { resolveConfiguredDatabaseProvider } from './db/postgresPool';
 
 export interface ProviderReadinessItem {
   id: string;
@@ -16,6 +19,7 @@ export interface ProviderReadinessItem {
 
 export interface SystemReadinessReport {
   environment: string;
+  databaseProvider: 'postgres' | 'supabase' | 'local_dev';
   livePaymentsEnabled: false;
   stagingReady: boolean;
   checkedAt: string;
@@ -25,8 +29,19 @@ export interface SystemReadinessReport {
 function isPresent(name: string): boolean {
   const val = (process.env[name] || '').trim();
   if (!val) return false;
-  if (val.includes('your-') || val.includes('replace-with') || val === 'changeme') return false;
+  if (
+    val.includes('your-') ||
+    val.includes('replace-with') ||
+    val === 'changeme' ||
+    val.includes('postgres://user:pass@host')
+  ) {
+    return false;
+  }
   return true;
+}
+
+function isAnyPresent(names: string[]): boolean {
+  return names.some((n) => isPresent(n));
 }
 
 function missingOf(vars: string[]): string[] {
@@ -34,16 +49,58 @@ function missingOf(vars: string[]): string[] {
 }
 
 export function evaluateSystemReadiness(): SystemReadinessReport {
+  const databaseProvider = resolveConfiguredDatabaseProvider();
+  const hasNativePg = isPresent('DATABASE_URL');
+  const hasSupabase = missingOf(['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']).length === 0;
+
+  const dbProviderItem: ProviderReadinessItem =
+    databaseProvider === 'postgres'
+      ? {
+          id: 'railway_postgres',
+          name: 'Native Railway PostgreSQL (DATABASE_URL)',
+          category: 'infrastructure',
+          requiredForStaging: true,
+          missingEnvVars: hasNativePg ? [] : ['DATABASE_URL'],
+          status: hasNativePg ? 'configured' : 'unconfigured',
+          notes:
+            'Primary durable database backend using pg connection pool, migrations 000–007, advisory migration locking, and transaction-scoped RLS.',
+        }
+      : {
+          id: 'supabase_postgres',
+          name: 'Supabase PostgreSQL + Auth + Storage',
+          category: 'infrastructure',
+          requiredForStaging: true,
+          missingEnvVars: missingOf(['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']),
+          status: hasSupabase ? 'configured' : 'unconfigured',
+          notes: 'Required when DATABASE_PROVIDER=supabase or DATABASE_URL is not configured.',
+        };
+
+  const xenditMissing: string[] = [];
+  if (!isPresent('XENDIT_SECRET_KEY_TEST')) xenditMissing.push('XENDIT_SECRET_KEY_TEST');
+  if (!isAnyPresent(['XENDIT_WEBHOOK_TOKEN_TEST', 'XENDIT_WEBHOOK_SECRET', 'XENDIT_CALLBACK_TOKEN'])) {
+    xenditMissing.push('XENDIT_WEBHOOK_TOKEN_TEST');
+  }
+
+  const paypalMissing: string[] = [];
+  if (!isPresent('PAYPAL_CLIENT_ID_SANDBOX')) paypalMissing.push('PAYPAL_CLIENT_ID_SANDBOX');
+  if (!isPresent('PAYPAL_CLIENT_SECRET_SANDBOX')) paypalMissing.push('PAYPAL_CLIENT_SECRET_SANDBOX');
+  if (!isAnyPresent(['PAYPAL_WEBHOOK_SECRET_SANDBOX', 'PAYPAL_WEBHOOK_SECRET'])) {
+    paypalMissing.push('PAYPAL_WEBHOOK_SECRET_SANDBOX');
+  }
+
+  const mayaMissing: string[] = [];
+  if (!isAnyPresent(['MAYA_PUBLIC_KEY_SANDBOX', 'MAYA_PUBLIC_KEY_TEST'])) {
+    mayaMissing.push('MAYA_PUBLIC_KEY_SANDBOX');
+  }
+  if (!isAnyPresent(['MAYA_SECRET_KEY_SANDBOX', 'MAYA_SECRET_KEY_TEST'])) {
+    mayaMissing.push('MAYA_SECRET_KEY_SANDBOX');
+  }
+  if (!isAnyPresent(['MAYA_WEBHOOK_SECRET_SANDBOX', 'MAYA_WEBHOOK_SECRET_TEST', 'MAYA_WEBHOOK_SECRET'])) {
+    mayaMissing.push('MAYA_WEBHOOK_SECRET_SANDBOX');
+  }
+
   const providers: ProviderReadinessItem[] = [
-    {
-      id: 'supabase_postgres',
-      name: 'Supabase PostgreSQL + Auth + Storage',
-      category: 'infrastructure',
-      requiredForStaging: true,
-      missingEnvVars: missingOf(['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']),
-      status: missingOf(['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']).length === 0 ? 'configured' : 'unconfigured',
-      notes: 'Required for durable multi-replica persistence, RLS, migrations 000–005, pgvector, and 6 private buckets.',
-    },
+    dbProviderItem,
     {
       id: 'security_secrets',
       name: 'Session, Portal & MFA Cryptographic Keys',
@@ -58,7 +115,7 @@ export function evaluateSystemReadiness(): SystemReadinessReport {
     },
     {
       id: 'gemini_ai',
-      name: 'Gemini AI (Text, Live Voice gemini-3.8-live, TTS, STT, gemini-embedding-2)',
+      name: 'Gemini AI (gemini-4-hydrogen, gemini-3.8-live, gemini-3.5-transcribe, gemini-3.8-flash-lite-tts, gemini-embedding-2)',
       category: 'ai',
       requiredForStaging: true,
       missingEnvVars: missingOf(['GEMINI_API_KEY']),
@@ -91,11 +148,8 @@ export function evaluateSystemReadiness(): SystemReadinessReport {
       name: 'Xendit Sandbox Gateway',
       category: 'payments',
       requiredForStaging: false,
-      missingEnvVars: missingOf(['XENDIT_SECRET_KEY_TEST', 'XENDIT_WEBHOOK_SECRET']),
-      status:
-        missingOf(['XENDIT_SECRET_KEY_TEST', 'XENDIT_WEBHOOK_SECRET']).length === 0
-          ? 'sandbox_ready'
-          : 'unconfigured',
+      missingEnvVars: xenditMissing,
+      status: xenditMissing.length === 0 ? 'sandbox_ready' : 'unconfigured',
       notes: 'Sandbox only; live charges remain hard-locked off.',
     },
     {
@@ -103,11 +157,8 @@ export function evaluateSystemReadiness(): SystemReadinessReport {
       name: 'PayPal Sandbox Gateway',
       category: 'payments',
       requiredForStaging: false,
-      missingEnvVars: missingOf(['PAYPAL_CLIENT_ID_SANDBOX', 'PAYPAL_CLIENT_SECRET_SANDBOX', 'PAYPAL_WEBHOOK_SECRET']),
-      status:
-        missingOf(['PAYPAL_CLIENT_ID_SANDBOX', 'PAYPAL_CLIENT_SECRET_SANDBOX', 'PAYPAL_WEBHOOK_SECRET']).length === 0
-          ? 'sandbox_ready'
-          : 'unconfigured',
+      missingEnvVars: paypalMissing,
+      status: paypalMissing.length === 0 ? 'sandbox_ready' : 'unconfigured',
       notes: 'Sandbox only; live charges remain hard-locked off.',
     },
     {
@@ -115,11 +166,8 @@ export function evaluateSystemReadiness(): SystemReadinessReport {
       name: 'Maya Sandbox Gateway',
       category: 'payments',
       requiredForStaging: false,
-      missingEnvVars: missingOf(['MAYA_PUBLIC_KEY_SANDBOX', 'MAYA_SECRET_KEY_SANDBOX', 'MAYA_WEBHOOK_SECRET']),
-      status:
-        missingOf(['MAYA_PUBLIC_KEY_SANDBOX', 'MAYA_SECRET_KEY_SANDBOX', 'MAYA_WEBHOOK_SECRET']).length === 0
-          ? 'sandbox_ready'
-          : 'unconfigured',
+      missingEnvVars: mayaMissing,
+      status: mayaMissing.length === 0 ? 'sandbox_ready' : 'unconfigured',
       notes: 'Sandbox only; live charges remain hard-locked off.',
     },
     {
@@ -148,6 +196,7 @@ export function evaluateSystemReadiness(): SystemReadinessReport {
 
   return {
     environment: process.env.NODE_ENV || 'development',
+    databaseProvider,
     livePaymentsEnabled: false,
     stagingReady,
     checkedAt: new Date().toISOString(),

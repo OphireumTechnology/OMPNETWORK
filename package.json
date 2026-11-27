@@ -1,7 +1,7 @@
 {
   "name": "ophireum-network",
   "private": true,
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0-rc.2",
   "type": "module",
   "engines": {
     "node": ">=22.0.0 <23.0.0"
@@ -16,23 +16,28 @@
     "clean": "rm -rf dist server.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint --max-warnings=0 src server.ts tests e2e playwright.config.ts",
+    "db:migrate": "node scripts/run-migrations.mjs",
+    "db:migrate:dry-run": "node scripts/run-migrations.mjs --dry-run",
     "test": "node --import tsx --test tests/*.test.ts",
     "test:unit": "node --import tsx --test tests/phase1-stabilization.test.ts tests/client-portal.test.ts tests/commerce-subscriptions-fulfillment.test.ts tests/deployment-integration.test.ts tests/enterprise-remediation.test.ts tests/ai-workforce-functional.test.ts tests/ai-conversation-live-voice.test.ts tests/enterprise-phases31-46.test.ts",
     "test:security": "node --import tsx --test tests/security-negative.test.ts tests/enterprise-phases31-46.test.ts",
     "test:migrations": "node --import tsx --test tests/postgres-migrations.test.ts",
+    "test:pg": "node --import tsx --test tests/native-postgres-integration.test.ts",
     "smoke:prod": "node scripts/prod-smoke-check.mjs",
     "sbom": "node scripts/generate-release-manifest.mjs",
     "test:e2e": "playwright test",
     "test:e2e:list": "playwright test --list"
   },
   "dependencies": {
-    "@google/genai": "^2.4.0",
+    "@google/genai": "^3.6.1",
     "@supabase/supabase-js": "^2.119.0",
+    "@types/pg": "^8.23.1",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "otpauth": "^9.6.0",
+    "pg": "^8.23.1",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "ws": "^8.23.0"

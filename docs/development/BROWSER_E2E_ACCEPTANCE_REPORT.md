@@ -1,7 +1,7 @@
 # OPHIREUM NETWORK — Browser E2E Acceptance Report
 
 > **Project**: OPHIREUM MULTIMEDIA PRODUCTION (`OMPNETWORK`)  
-> **Release Candidate**: `ophireum-network@1.0.0-rc.1`  
+> **Release Candidate**: `ophireum-network@1.0.0-rc.2`  
 > **Browser E2E Execution Acceptance (Local Sandbox)**: **0% (`0 / 45` executed locally — `BLOCKED_EXTERNAL_DEPENDENCY`)**  
 > **E2E Authoring, Matrix Registration & CI Wiring**: **100% (`45 / 45` Playwright test cases discovered across 5 device/browser projects and wired into `.github/workflows/ci.yml`)**
 
@@ -9,9 +9,9 @@
 
 ## 1. Honest Execution Disclosure (Anti-Fabrication)
 
-- **Local Execution Environment Limitation**: The Google AI Studio workspace container does **not** have Chromium, Firefox, or WebKit system binaries installed (`~/.cache/ms-playwright` is absent and container OS lacks browser runtime libraries).
+- **Local Execution Environment Limitation**: This local workspace container does **not** have Chromium, Firefox, or WebKit system binaries installed (`~/.cache/ms-playwright` is absent and container OS lacks browser runtime libraries).
 - **Zero Fabricated Browser Results**: No browser screenshots, video captures, Playwright trace archives, or Core Web Vitals browser measurements were generated in this local workspace.
-- **Automated Execution Path**: Full multi-browser Playwright execution is configured in `.github/workflows/ci.yml` (`browser-e2e` job on `ubuntu-latest`), which installs browser binaries via `npx playwright install --with-deps chromium firefox webkit`, starts the compiled production server (`dist/server/index.mjs`), executes the suite, and uploads Playwright HTML reports, traces, videos, and failure screenshots as CI artifacts.
+- **Automated Execution Path**: Full multi-browser Playwright execution is configured in `.github/workflows/ci.yml` (`playwright-e2e` job on `ubuntu-latest`), which installs browser binaries via `npx playwright install --with-deps chromium firefox webkit`, starts the compiled production server (`dist/server/index.mjs`), executes the suite, and uploads Playwright HTML reports, traces, videos, and failure screenshots as CI artifacts. Windows operators can also execute the suite locally using `docs/development/WINDOWS_POWERSHELL_EXECUTION_GUIDE.md`.
 
 ---
 

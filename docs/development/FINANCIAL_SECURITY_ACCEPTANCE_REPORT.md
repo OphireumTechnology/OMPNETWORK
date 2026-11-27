@@ -38,6 +38,10 @@
 6. **Server-Authoritative Pricing & Currency Integrity**:
    - Checkout recalculates all catalog prices, discounts, and currency conversions server-side from authoritative records; client-supplied price mutations are ignored and verified by negative security tests.
 
-## 3. External Blockers Preventing Live Payment Acceptance
+## 3. Phase 47–80 Financial & Adapter Reconciliation Updates (`1.0.0-rc.2`)
+- **Native Railway PostgreSQL Parity**: `PostgresPortalRepository` executes checkout, signed webhook ingestion, atomic `public.allocate_ophireum_payment_ref()`, invoice generation, and RA 10173 export natively over `pg` with zero Supabase dependency (verified on real PG16 in `tests/native-postgres-integration.test.ts`).
+- **Environment Variable Alias Reconciliation**: PayPal and Maya sandbox adapters (`src/server/portal/payments/paymentAdapters.ts`) and `configValidator.ts` accept both `*_SANDBOX` and `*_TEST` naming conventions without weakening raw-body signature verification.
+
+## 4. External Blockers Preventing Live Payment Acceptance
 - No live/sandbox merchant API keys or webhook secrets for Xendit, PayPal, or Maya exist in this sandbox environment (**External Payment Sandbox Acceptance: 0%**).
-- Live commercial charges remain strictly blocked pending staging sandbox reconciliation, BIR invoicing / Philippine merchant compliance verification, and explicit written authorization from the Owner/CEO.
+- Live commercial charges remain strictly blocked (`live_payments_enabled = false`) pending staging sandbox reconciliation, BIR invoicing / Philippine merchant compliance verification, and explicit written authorization from the Owner/CEO.

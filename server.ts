@@ -39,7 +39,7 @@ function resolveDistDirectory(): string | null {
 }
 
 async function startServer() {
-  const { app, db, emailService, attachLiveVoice, runtimeLifecycle } = createApp();
+  const { app, db, emailService, attachLiveVoice, runtimeLifecycle, close } = createApp();
 
   // Always fail closed with 404 JSON for unmatched /api/* routes before SPA/Vite fallback
   app.all('/api/*', (_req: Request, res: Response) => {
@@ -126,8 +126,10 @@ async function startServer() {
     }
     void liveVoice.close().finally(() => {
       httpServer.close(() => {
-        logStructured('info', 'server_shutdown_complete', { signal });
-        process.exit(0);
+        void close().finally(() => {
+          logStructured('info', 'server_shutdown_complete', { signal });
+          process.exit(0);
+        });
       });
     });
     setTimeout(() => {

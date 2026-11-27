@@ -16,6 +16,7 @@ const MIGRATION_FILES = [
   '004_reconciliation_hardening.sql',
   '005_ai_conversation_persistence.sql',
   '006_enterprise_reliability_and_ai_memory.sql',
+  '007_native_postgresql_runtime_support.sql',
 ];
 
 async function bootstrapSupabaseFixtures(pg: PGlite) {
@@ -99,7 +100,7 @@ async function bootstrapSupabaseFixtures(pg: PGlite) {
   `);
 }
 
-describe('Real PostgreSQL 16 Migration Chain (000–006), RLS, Storage, Atomic RPC & DR Verification', () => {
+describe('Real PostgreSQL 16 Migration Chain (000–007), RLS, Storage, Atomic RPC & DR Verification', () => {
   let pg: PGlite;
 
   before(async () => {
@@ -111,7 +112,7 @@ describe('Real PostgreSQL 16 Migration Chain (000–006), RLS, Storage, Atomic R
     await pg.close();
   });
 
-  it('executes complete migration chain 000 -> 006 cleanly and verifies 004, 005 & 006 idempotency', async () => {
+  it('executes complete migration chain 000 -> 007 cleanly and verifies 004, 005, 006 & 007 idempotency', async () => {
     for (const file of MIGRATION_FILES) {
       const fullPath = path.join(MIGRATIONS_DIR, file);
       assert.ok(fs.existsSync(fullPath), `Migration missing: ${file}`);
@@ -119,11 +120,12 @@ describe('Real PostgreSQL 16 Migration Chain (000–006), RLS, Storage, Atomic R
       await pg.exec(sql);
     }
 
-    // Re-run 004, 005, and 006 to confirm idempotent upgrade compatibility
+    // Re-run 004, 005, 006, and 007 to confirm idempotent upgrade compatibility
     for (const idempFile of [
       '004_reconciliation_hardening.sql',
       '005_ai_conversation_persistence.sql',
       '006_enterprise_reliability_and_ai_memory.sql',
+      '007_native_postgresql_runtime_support.sql',
     ]) {
       const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, idempFile), 'utf8');
       await pg.exec(sql);
@@ -133,7 +135,7 @@ describe('Real PostgreSQL 16 Migration Chain (000–006), RLS, Storage, Atomic R
       `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name`
     );
     const names = new Set(tablesRes.rows.map((r) => r.table_name));
-    assert.ok(names.size >= 60, `Expected >= 60 public tables after Migration 006, found ${names.size}`);
+    assert.ok(names.size >= 68, `Expected >= 68 public tables after Migration 007, found ${names.size}`);
 
     for (const required of [
       'admin_users',
@@ -162,9 +164,24 @@ describe('Real PostgreSQL 16 Migration Chain (000–006), RLS, Storage, Atomic R
       'mfa_credentials',
       'mfa_recovery_codes',
       'background_jobs',
+      'schema_migrations',
+      'portal_auth_users',
+      'portal_auth_sessions',
+      'portal_carts',
+      'portal_custom_inquiries',
+      'portal_attachments',
+      'portal_activity_logs',
+      'portal_domain_records',
+      'ai_usage_governance_limits',
     ]) {
       assert.ok(names.has(required), `Missing required table: ${required}`);
     }
+
+    // Verify native PG principal helper functions and zero permissive USING(true) RLS policies
+    const rlsTrue = await pg.query<{ tablename: string; policyname: string }>(
+      `SELECT tablename, policyname FROM pg_policies WHERE schemaname = 'public' AND qual = 'true'`
+    );
+    assert.equal(rlsTrue.rows.length, 0, `Forbidden permissive RLS USING (true) policies found: ${JSON.stringify(rlsTrue.rows)}`);
   });
 
   it('provisions all 6 private storage buckets with public = false and RLS policies', async () => {

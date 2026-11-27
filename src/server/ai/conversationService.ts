@@ -248,7 +248,8 @@ export function assertSessionAuthorized(
 }
 
 export interface AiConversationStore {
-  readonly backend: 'postgres_supabase' | 'memory_shared';
+  readonly backend: 'postgres_native' | 'postgres_supabase' | 'memory_shared';
+  close?(): Promise<void>;
   createOrResumeSession(input: {
     sessionKey?: string;
     channelMode?: 'chat' | 'voice' | 'live_audio' | 'unified';

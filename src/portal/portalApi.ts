@@ -58,12 +58,22 @@ export async function portalRequest<T = any>(
     headers['Idempotency-Key'] = createIdempotencyKey();
   }
 
-  const res = await fetch(apiUrl(`/api/portal${path.startsWith('/') ? path : `/${path}`}`), {
-    method: options?.method || 'GET',
-    credentials: 'include',
-    headers,
-    body: options?.body !== undefined ? JSON.stringify(options.body) : undefined,
-  });
+  const targetUrl = apiUrl(`/api/portal${path.startsWith('/') ? path : `/${path}`}`);
+  let res: Response;
+  try {
+    res = await fetch(targetUrl, {
+      method: options?.method || 'GET',
+      credentials: 'include',
+      headers,
+      body: options?.body !== undefined ? JSON.stringify(options.body) : undefined,
+    });
+  } catch {
+    throw new PortalApiError(
+      0,
+      'Unable to connect to the OPHIREUM API Gateway. Please verify your internet connection or try again shortly.',
+      'API_UNREACHABLE'
+    );
+  }
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
