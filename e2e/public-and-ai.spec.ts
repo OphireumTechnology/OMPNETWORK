@@ -26,7 +26,7 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
     if (browserName !== 'chromium') {
       await page.addInitScript(() => {
         const media = navigator.mediaDevices;
-        Object.defineProperty(media, 'getUserMedia', { configurable: true, value: async () => {
+        const capture = async () => {
           const context = new AudioContext();
           const destination = context.createMediaStreamDestination();
           const oscillator = context.createOscillator();
@@ -38,7 +38,9 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
           const stop = track.stop.bind(track);
           track.stop = () => { stop(); oscillator.stop(); void context.close(); };
           return destination.stream;
-        }});
+        };
+        Object.defineProperty(Object.getPrototypeOf(media), 'getUserMedia', { configurable: true, writable: true, value: capture });
+        Object.defineProperty(media, 'getUserMedia', { configurable: true, writable: true, value: capture });
       });
     }
     await page.goto('/');
@@ -46,6 +48,11 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
     const launcher = page.getByRole('button', { name: /Open AI Solutions Consultant/i });
     await expect(launcher).toBeVisible();
     await launcher.click();
+
+    if (browserName !== 'chromium') {
+      // Confirm the capture boundary is installed before exercising voice controls.
+      expect(await page.evaluate(() => Object.prototype.hasOwnProperty.call(navigator.mediaDevices, 'getUserMedia'))).toBe(true);
+    }
 
     // Send a consultative chat message
     const chatInput = page.getByRole("textbox", { name: "Chat message" });
@@ -67,6 +74,9 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
     await expect(muteMicBtn).toBeVisible();
     await muteMicBtn.click();
     await expect(page.getByTitle(/Unmute Microphone/i)).toBeVisible();
+
+    await page.getByTitle(/^Unmute Microphone$/i).click();
+    await expect(page.getByTitle(/^Mute Microphone$/i)).toBeVisible();
 
     const endVoiceBtn = page.getByTitle(/End Voice Conversation/i);
     await endVoiceBtn.click();

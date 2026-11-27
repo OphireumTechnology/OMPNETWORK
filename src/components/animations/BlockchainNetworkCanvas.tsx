@@ -261,8 +261,8 @@ export const BlockchainNetworkCanvas: React.FC<BlockchainNetworkCanvasProps> = (
     };
 
     if (interactive && containerRef.current) {
-      containerRef.current.addEventListener('mousemove', handleMouseMove);
-      containerRef.current.addEventListener('mouseleave', handleMouseLeave);
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('blur', handleMouseLeave);
     }
 
     return () => {
@@ -270,15 +270,15 @@ export const BlockchainNetworkCanvas: React.FC<BlockchainNetworkCanvasProps> = (
       if (animationFrameId.current) cancelAnimationFrame(animationFrameId.current);
       observer.disconnect();
       if (containerRef.current) {
-        containerRef.current.removeEventListener('mousemove', handleMouseMove);
-        containerRef.current.removeEventListener('mouseleave', handleMouseLeave);
+        window.removeEventListener('mousemove', handleMouseMove);
+        window.removeEventListener('blur', handleMouseLeave);
       }
     };
   }, [nodeCount, interactive]);
 
   return (
-    <div ref={containerRef} className={`relative overflow-hidden pointer-events-auto ${className}`}>
-      <canvas ref={canvasRef} className="block w-full h-full" />
+    <div ref={containerRef} style={{ pointerEvents: 'none' }} className={`relative overflow-hidden ${className} pointer-events-none`}>
+      <canvas ref={canvasRef} className="block w-full h-full pointer-events-none" aria-hidden="true" style={{ pointerEvents: 'none' }} />
     </div>
   );
 };
