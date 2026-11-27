@@ -38,6 +38,23 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
     layer.showPopover();
     return () => { if (layer.matches(':popover-open')) layer.hidePopover(); };
   }, []);
+  // Anchor to the visible viewport, not the overflow-expanded mobile layout viewport.
+  const [viewport, setViewport] = useState(() => ({ width: document.documentElement.clientWidth, height: document.documentElement.clientHeight, left: 0, top: 0 }));
+  useEffect(() => {
+    const update = () => {
+      const v = window.visualViewport;
+      setViewport({ width: v?.width ?? document.documentElement.clientWidth, height: v?.height ?? document.documentElement.clientHeight, left: v?.offsetLeft ?? 0, top: v?.offsetTop ?? 0 });
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.visualViewport?.addEventListener('resize', update);
+    window.visualViewport?.addEventListener('scroll', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.visualViewport?.removeEventListener('resize', update);
+      window.visualViewport?.removeEventListener('scroll', update);
+    };
+  }, []);
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [hasUnreadNotice, setHasUnreadNotice] = useState(true);
@@ -477,14 +494,14 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
 
   return createPortal(
     <div ref={layerRef} className="opm-consultant-layer" popover={typeof HTMLElement !== 'undefined' && 'showPopover' in HTMLElement.prototype ? 'manual' : undefined}
-      style={{ position: 'fixed', inset: 0, width: '100%', height: '100%', maxWidth: 'none', maxHeight: 'none', margin: 0, padding: 0, border: 0, background: 'transparent', overflow: 'visible', pointerEvents: 'none', zIndex: 2147483000 }}>
+      style={{ position: 'fixed', left: viewport.left, top: viewport.top, right: 'auto', bottom: 'auto', width: viewport.width, height: viewport.height, maxWidth: 'none', maxHeight: 'none', margin: 0, padding: 0, border: 0, background: 'transparent', overflow: 'visible', pointerEvents: 'none', zIndex: 2147483000 }}>
       <style>{'.opm-consultant-layer::backdrop { background: transparent; pointer-events: none; }'}</style>
       {/* =========================================================================
           FLOATING LAUNCHER BUTTON (Bottom-Right)
           ========================================================================= */}
       {!isOpen && (
         <div className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] z-[2147483000] flex items-center gap-3 isolate pointer-events-auto"
-          style={{ position: 'fixed', right: 'max(16px, env(safe-area-inset-right))', bottom: 'max(16px, env(safe-area-inset-bottom))', zIndex: 2147483000, pointerEvents: 'auto' }}>
+          style={{ position: 'absolute', right: 'max(16px, env(safe-area-inset-right))', bottom: 'max(16px, env(safe-area-inset-bottom))', zIndex: 2147483000, pointerEvents: 'auto' }}>
           {/* Subtle Callout Bubble */}
           {hasUnreadNotice && (
             <div className="hidden sm:flex items-center gap-2 px-3.5 py-2 bg-[#111827] border border-[#00C2C7]/30 text-xs text-slate-200 rounded-xl shadow-2xl animate-fade-in">
@@ -536,7 +553,7 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
           ========================================================================= */}
       {isOpen && (
         <div
-          style={{ position: 'fixed', zIndex: 2147483000, pointerEvents: 'auto' }}
+          style={{ position: 'absolute', maxWidth: Math.max(0, viewport.width - 24), maxHeight: Math.max(0, viewport.height - 24), zIndex: 2147483000, pointerEvents: 'auto' }}
           className={`fixed right-3 sm:right-6 bottom-3 sm:bottom-6 z-[2147483000] bg-[#0B1220] border border-slate-700 rounded-2xl shadow-2xl flex flex-col overflow-hidden transition-all duration-200 ${
             isMinimized 
               ? 'w-[min(320px,calc(100vw-24px))] h-16' 
