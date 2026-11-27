@@ -34,6 +34,12 @@ import { PortalRepository } from './portal/types';
 import { LocalPortalRepository } from './portal/localPortalRepository';
 import { SupabasePortalRepository } from './portal/supabasePortalRepository';
 import { createPortalRouter } from './portal/portalRoutes';
+import { ADMIN_SESSION_COOKIE } from './auth';
+import { CentralKnowledgeService } from './ai/knowledgeService';
+import { EnterpriseAiWorkforceService } from './ai/workforceService';
+import { createAdminCommandRouter } from './routes/adminRoutes';
+import { createAiRouter } from './routes/aiRoutes';
+import { createLegalRouter } from './routes/legalRoutes';
 
 export interface AppDependencies {
   db?: DatabaseRepository;
@@ -46,7 +52,7 @@ export interface AppDependencies {
 }
 
 const APP_STARTED_AT = Date.now();
-const APP_VERSION = process.env.APP_VERSION || process.env.GITHUB_SHA || 'phase1-stabilization-local';
+const APP_VERSION = process.env.APP_VERSION || process.env.GITHUB_SHA || '2.0.0-enterprise';
 
 const CATALOG_SUMMARY_FOR_AI = CATALOG_CATEGORIES.filter((c) => c.id !== 'all')
   .map((cat) => {
@@ -87,10 +93,26 @@ const findCatalogMatches = (query: string, limit = 3) => {
 
 class SlidingWindowRateLimiter {
   private readonly store = new Map<string, number[]>();
-  constructor(private readonly windowMs: number, private readonly maxRequests: number) {}
+  constructor(
+    private readonly windowMs: number,
+    private readonly maxRequests: number,
+    private readonly maxKeys = 5000
+  ) {}
 
   check(key: string): boolean {
     const now = Date.now();
+    if (!this.store.has(key) && this.store.size >= this.maxKeys) {
+      // Evict expired or oldest keys to keep memory bounded
+      for (const [k, timestamps] of this.store.entries()) {
+        const active = timestamps.filter((ts) => now - ts < this.windowMs);
+        if (active.length === 0) this.store.delete(k);
+        if (this.store.size < this.maxKeys) break;
+      }
+      if (this.store.size >= this.maxKeys) {
+        const oldest = this.store.keys().next().value;
+        if (oldest) this.store.delete(oldest);
+      }
+    }
     const recent = (this.store.get(key) || []).filter((ts) => now - ts < this.windowMs);
     if (recent.length >= this.maxRequests) {
       this.store.set(key, recent);
@@ -103,11 +125,15 @@ class SlidingWindowRateLimiter {
 }
 
 function getClientIp(req: Request): string {
-  const fwd = req.headers['x-forwarded-for'];
-  if (typeof fwd === 'string' && fwd.trim()) {
-    return fwd.split(',')[0].trim();
-  }
+  // Honor Express `trust proxy` setting via req.ip instead of manually trusting raw X-Forwarded-For
   return req.ip || 'unknown';
+}
+
+function constantTimeHexEquals(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
 }
 
 function parsePagination(req: Request): { limit: number; offset: number } {
@@ -262,7 +288,11 @@ export function createApp(deps: AppDependencies = {}): {
   const strictJsonParser = express.json({
     limit: '100kb',
     verify: (req: any, _res, buf) => {
-      if (req.originalUrl && req.originalUrl.startsWith('/api/portal/webhooks/')) {
+      if (
+        req.originalUrl &&
+        (req.originalUrl.startsWith('/api/portal/webhooks/') ||
+          req.originalUrl.startsWith('/api/webhooks/'))
+      ) {
         req.rawBody = buf.toString('utf8');
       }
     },
@@ -293,8 +323,11 @@ export function createApp(deps: AppDependencies = {}): {
               : path.resolve(process.cwd(), '.portal-data'),
         }));
 
+  const knowledgeService = new CentralKnowledgeService(ai);
+  const workforceService = new EnterpriseAiWorkforceService(knowledgeService, ai);
+
   // -----------------------------------------------------------------------
-  // 2. HEALTH & CATALOG ENDPOINTS
+  // 2. HEALTH, READINESS, VERSION & CATALOG ENDPOINTS
   // -----------------------------------------------------------------------
   const healthHandler = async (req: Request & { correlationId?: string }, res: Response) => {
     const dbPing = await db.ping();
@@ -316,7 +349,7 @@ export function createApp(deps: AppDependencies = {}): {
         },
         portalPersistence: {
           mode: portalRepo.mode,
-          supabaseWritePersistenceImplemented: false,
+          supabaseWritePersistenceImplemented: Boolean(portalRepo.supabaseWritePersistenceImplemented),
         },
         email: {
           configured: emailService.isConfigured(),
@@ -336,11 +369,42 @@ export function createApp(deps: AppDependencies = {}): {
       },
       catalogCount: SERVICE_CATALOG.length,
       categoryCount: CATALOG_CATEGORIES.filter((c) => c.id !== 'all').length,
+      aiWorkforceCount: workforceService.listAgents().length,
     });
   };
 
   app.get('/api/health', healthHandler);
   app.get('/health', healthHandler);
+
+  // Readiness probe: returns HTTP 503 whenever mandatory database dependency is unavailable
+  app.get('/api/ready', async (req: Request & { correlationId?: string }, res: Response) => {
+    const dbPing = await db.ping();
+    const ready = dbPing.ok;
+    res.status(ready ? 200 : 503).json({
+      ready,
+      status: ready ? 'ready' : 'not_ready',
+      correlationId: req.correlationId,
+      timestamp: new Date().toISOString(),
+      checks: {
+        database: {
+          configured: dbPing.configured,
+          connected: dbPing.ok,
+          latencyMs: dbPing.latencyMs ?? null,
+        },
+      },
+    });
+  });
+
+  app.get('/api/version', (_req: Request, res: Response) => {
+    res.status(200).json({
+      success: true,
+      service: 'OPHIREUM NETWORK API Gateway',
+      version: APP_VERSION,
+      environment: process.env.NODE_ENV || 'development',
+      uptimeSeconds: Math.floor((Date.now() - APP_STARTED_AT) / 1000),
+      timestamp: new Date().toISOString(),
+    });
+  });
 
   app.get('/api/catalog', (_req: Request, res: Response) => {
     res.json({
@@ -407,12 +471,31 @@ export function createApp(deps: AppDependencies = {}): {
     const adminRecord = (await db.findActiveAdminByEmail(email)) || {
       id: 'env-bootstrap-admin',
       email,
-      fullName: 'OPHIRIUM Administrator',
+      fullName: 'OPHIREUM Administrator',
       role: 'super_admin' as const,
       isActive: true,
     };
 
-    const token = authService.issueSessionToken(adminRecord, 3600);
+    const mfaEnabled = authService.isAdminMfaEnabled(adminRecord.email);
+    const totpCode = typeof req.body?.totpCode === 'string' ? req.body.totpCode.trim() : '';
+    if (mfaEnabled && !authService.verifyAdminMfaCode(adminRecord.email, totpCode)) {
+      res.status(401).json({
+        success: false,
+        code: 'MFA_REQUIRED',
+        mfaRequired: true,
+        error: 'Valid 6-digit authenticator code required for this administrator account.',
+      });
+      return;
+    }
+
+    const token = authService.issueSessionToken(adminRecord, 3600, mfaEnabled);
+    res.setHeader(
+      'Set-Cookie',
+      `${ADMIN_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600${
+        process.env.NODE_ENV === 'production' ? '; Secure' : ''
+      }`
+    );
+
     await db.writeAuditLog({
       correlationId: req.correlationId,
       actor: adminRecord.email,
@@ -420,7 +503,7 @@ export function createApp(deps: AppDependencies = {}): {
       action: 'admin_session_issued',
       entityType: 'admin_auth',
       entityId: adminRecord.id,
-      details: { ip: clientIp },
+      details: { ip: clientIp, mfaVerified: mfaEnabled },
     });
 
     res.json({
@@ -431,6 +514,7 @@ export function createApp(deps: AppDependencies = {}): {
         email: adminRecord.email,
         fullName: adminRecord.fullName,
         role: adminRecord.role,
+        mfaEnabled,
       },
     });
   });
@@ -782,23 +866,12 @@ export function createApp(deps: AppDependencies = {}): {
             ? 'KMC | One West Aeropark, 5th Floor & Penthouse, Clark Freeport Zone, Mabalacat City, 2010 Pampanga, Philippines'
             : undefined;
 
-        const calResult = await calendarService.createConsultationEvent({
-          referenceCode,
-          fullName: data.fullName,
-          email: data.email,
-          companyName: data.companyName,
-          consultationType: data.consultationType,
-          scheduledDate: data.scheduledDate,
-          scheduledTimeSlot: data.scheduledTimeSlot,
-          clientTimezone: data.clientTimezone,
-          location: officeLocation,
-          correlationId: req.correlationId,
-        });
+        // Persist appointment in DB FIRST before calling Google Calendar to prevent orphan calendar events
+        const initialCalendarStatus: 'pending' | 'unconfigured' = calendarService.isConfigured()
+          ? 'pending'
+          : 'unconfigured';
 
-        // Strictly reflect real integration status: never confirm calendar or fabricate Meet links when unconfigured!
-        const status: 'confirmed' | 'pending_review' = calResult.synced ? 'confirmed' : 'pending_review';
-
-        const { record, created } = await db.createAppointment({
+        const { record: persistedRecord, created } = await db.createAppointment({
           referenceCode,
           idempotencyKey: data.idempotencyKey,
           fullName: data.fullName,
@@ -811,15 +884,44 @@ export function createApp(deps: AppDependencies = {}): {
           scheduledTimeSlot: data.scheduledTimeSlot,
           durationMinutes: 30,
           clientTimezone: data.clientTimezone,
-          meetingLink: calResult.synced ? calResult.meetingLink : undefined,
+          meetingLink: undefined,
           meetingLocation: officeLocation,
           assignedConsultant: 'Dhenze Languisan (Founder & CEO)',
-          status,
-          calendarSyncStatus: calResult.calendarSyncStatus,
-          calendarEventId: calResult.eventId,
+          status: 'pending_review',
+          calendarSyncStatus: initialCalendarStatus,
+          calendarEventId: undefined,
           managementTokenHash,
           notes: data.notes,
         });
+
+        let record = persistedRecord;
+        let calSynced = false;
+
+        if (created) {
+          const calResult = await calendarService.createConsultationEvent({
+            referenceCode: record.referenceCode,
+            fullName: record.fullName,
+            email: record.email,
+            companyName: record.companyName,
+            consultationType: record.consultationType,
+            scheduledDate: record.scheduledDate,
+            scheduledTimeSlot: record.scheduledTimeSlot,
+            clientTimezone: record.clientTimezone,
+            location: officeLocation,
+            correlationId: req.correlationId,
+          });
+          calSynced = calResult.synced;
+          if (calResult.synced || calResult.calendarSyncStatus !== initialCalendarStatus) {
+            record = await db.updateAppointment(record.referenceCode, {
+              status: calResult.synced ? 'confirmed' : 'pending_review',
+              calendarSyncStatus: calResult.calendarSyncStatus,
+              calendarEventId: calResult.eventId,
+              meetingLink: calResult.synced ? calResult.meetingLink : undefined,
+            });
+          }
+        } else {
+          calSynced = record.calendarSyncStatus === 'synced';
+        }
 
         let emailOutcome = { customerStatus: 'unconfigured', adminStatus: 'unconfigured' };
         if (created) {
@@ -858,7 +960,7 @@ export function createApp(deps: AppDependencies = {}): {
           deduplicated: !created,
           appointment: safeAppointment,
           managementToken: created ? managementToken : undefined,
-          calendarSynced: calResult.synced,
+          calendarSynced: calSynced,
           emailDelivery: emailOutcome,
         });
       } catch (err) {
@@ -871,6 +973,15 @@ export function createApp(deps: AppDependencies = {}): {
     '/api/appointments/:referenceCode',
     async (req: AuthenticatedAdminRequest, res: Response, next: NextFunction) => {
       try {
+        const clientIp = getClientIp(req);
+        if (!inquiryLimiter.check(`apt-patch:${clientIp}`)) {
+          res.status(429).json({
+            success: false,
+            error: 'Too many appointment modification attempts. Please wait a few minutes.',
+          });
+          return;
+        }
+
         const referenceCode = sanitizePlainText(req.params.referenceCode, 60);
         const existing = await db.getAppointmentByReference(referenceCode);
         if (!existing) {
@@ -884,7 +995,7 @@ export function createApp(deps: AppDependencies = {}): {
 
         const tokenAuthorized =
           Boolean(token && existing.managementTokenHash) &&
-          hashToken(token) === existing.managementTokenHash &&
+          constantTimeHexEquals(hashToken(token), existing.managementTokenHash!) &&
           (!providedEmail || providedEmail === existing.email.toLowerCase());
 
         if (!resolvedAdmin.adminUser && !tokenAuthorized) {
@@ -897,7 +1008,42 @@ export function createApp(deps: AppDependencies = {}): {
 
         const action = typeof req.body?.action === 'string' ? req.body.action.trim() : '';
         if (action === 'cancel') {
+          await calendarService.cancelConsultationEvent({
+            eventId: existing.calendarEventId,
+            referenceCode,
+            correlationId: req.correlationId,
+          });
           const updated = await db.updateAppointment(referenceCode, { status: 'cancelled' });
+          await emailService.enqueueAndSendAppointmentUpdateEmails(updated, 'cancelled', req.correlationId).catch(() => undefined);
+          await db.writeAuditLog({
+            correlationId: req.correlationId,
+            actor: resolvedAdmin.adminUser?.email || existing.email,
+            actorRole: resolvedAdmin.adminUser?.role || 'client',
+            action: 'consultation_cancelled',
+            entityType: 'consultation_appointments',
+            entityId: referenceCode,
+            details: { previousStatus: existing.status },
+          });
+          const { managementTokenHash: _hidden, ...safeUpdated } = updated;
+          res.json({ success: true, appointment: safeUpdated });
+          return;
+        }
+
+        if (action === 'confirm' && resolvedAdmin.adminUser) {
+          const updated = await db.updateAppointment(referenceCode, {
+            status: 'confirmed',
+            meetingLink: typeof req.body?.meetingLink === 'string' ? sanitizePlainText(req.body.meetingLink, 300) : existing.meetingLink,
+          });
+          await emailService.enqueueAndSendAppointmentUpdateEmails(updated, 'confirmed', req.correlationId).catch(() => undefined);
+          await db.writeAuditLog({
+            correlationId: req.correlationId,
+            actor: resolvedAdmin.adminUser.email,
+            actorRole: resolvedAdmin.adminUser.role,
+            action: 'consultation_confirmed',
+            entityType: 'consultation_appointments',
+            entityId: referenceCode,
+            details: { meetingLink: updated.meetingLink || null },
+          });
           const { managementTokenHash: _hidden, ...safeUpdated } = updated;
           res.json({ success: true, appointment: safeUpdated });
           return;
@@ -910,16 +1056,50 @@ export function createApp(deps: AppDependencies = {}): {
             res.status(400).json({ success: false, error: 'Valid replacement date and slot are required.' });
             return;
           }
+          const parsedDate = new Date(`${newDate}T00:00:00+08:00`);
+          const todayManila = new Date(
+            new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }) + 'T00:00:00+08:00'
+          );
+          if (Number.isNaN(parsedDate.getTime()) || parsedDate < todayManila) {
+            res.status(400).json({ success: false, error: 'Replacement date cannot be in the past.' });
+            return;
+          }
+          const dow = parsedDate.getDay();
+          if (dow === 0 || dow === 6) {
+            res.status(400).json({ success: false, error: 'Consultations are available Monday through Friday only.' });
+            return;
+          }
+
           const booked = await db.getBookedSlotsForDate(newDate);
           if (booked.includes(newSlot)) {
             res.status(409).json({ success: false, error: 'Requested replacement slot is already booked.' });
             return;
           }
+
+          const calUpdate = await calendarService.updateConsultationEvent({
+            eventId: existing.calendarEventId,
+            referenceCode,
+            scheduledDate: newDate,
+            scheduledTimeSlot: newSlot,
+            correlationId: req.correlationId,
+          });
+
           const updated = await db.updateAppointment(referenceCode, {
             scheduledDate: newDate,
             scheduledTimeSlot: newSlot,
-            status: 'pending_review',
-            calendarSyncStatus: 'pending',
+            status: calUpdate.synced ? 'confirmed' : 'pending_review',
+            calendarSyncStatus: calUpdate.calendarSyncStatus,
+            meetingLink: calUpdate.meetingLink || existing.meetingLink,
+          });
+          await emailService.enqueueAndSendAppointmentUpdateEmails(updated, 'rescheduled', req.correlationId).catch(() => undefined);
+          await db.writeAuditLog({
+            correlationId: req.correlationId,
+            actor: resolvedAdmin.adminUser?.email || existing.email,
+            actorRole: resolvedAdmin.adminUser?.role || 'client',
+            action: 'consultation_rescheduled',
+            entityType: 'consultation_appointments',
+            entityId: referenceCode,
+            details: { newDate, newSlot, calendarSyncStatus: updated.calendarSyncStatus },
           });
           const { managementTokenHash: _hidden, ...safeUpdated } = updated;
           res.json({ success: true, appointment: safeUpdated });
@@ -1286,8 +1466,78 @@ Tone & Voice Rules:
     }
   });
 
+  // Text-to-Speech via Gemini TTS (returns 503 honestly if GEMINI_API_KEY is unconfigured)
+  app.post('/api/voice/speak', async (req: Request & { correlationId?: string }, res: Response) => {
+    const clientIp = getClientIp(req);
+    if (!aiLimiter.check(clientIp)) {
+      res.status(429).json({ error: 'Rate limit exceeded for voice synthesis.' });
+      return;
+    }
+    const text = sanitizePlainText(req.body?.text, 800);
+    if (!text) {
+      res.status(400).json({ error: 'text is required for speech synthesis.' });
+      return;
+    }
+    if (!ai) {
+      res.status(503).json({
+        error: 'Server-side Gemini speech synthesis is not configured.',
+      });
+      return;
+    }
+    try {
+      const response: any = await ai.models.generateContent({
+        model: 'gemini-3.8-flash-lite-tts',
+        contents: [{ role: 'user', parts: [{ text }] }],
+        config: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
+          },
+        } as any,
+      });
+      const inlineAudio = response?.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+      if (!inlineAudio?.data) {
+        res.status(502).json({ error: 'Speech synthesis provider returned empty audio payload.' });
+        return;
+      }
+      res.json({
+        success: true,
+        mimeType: inlineAudio.mimeType || 'audio/pcm',
+        audioBase64: inlineAudio.data,
+      });
+    } catch (error: any) {
+      logStructured('error', 'voice_tts_failed', {
+        correlationId: req.correlationId,
+        error: error?.message,
+      });
+      res.status(500).json({ error: 'Speech synthesis failed' });
+    }
+  });
+
+  // Signed Resend Transactional Email Delivery Webhook
+  app.post('/api/webhooks/resend', async (req: Request & { rawBody?: string }, res: Response) => {
+    const webhookSecret = (process.env.RESEND_WEBHOOK_SECRET || '').trim();
+    if (!webhookSecret) {
+      res.status(503).json({
+        success: false,
+        error: 'RESEND_WEBHOOK_SECRET is not configured on the server.',
+      });
+      return;
+    }
+    const providedSig = String(req.headers['svix-signature'] || req.headers['x-resend-signature'] || '').trim();
+    const rawBody = req.rawBody || JSON.stringify(req.body || {});
+    const expectedHmac = crypto.createHmac('sha256', webhookSecret).update(rawBody, 'utf8').digest('hex');
+    const cleanSig = providedSig.replace(/^sha256=/i, '');
+    if (!cleanSig || !constantTimeHexEquals(cleanSig, expectedHmac)) {
+      res.status(401).json({ success: false, error: 'Invalid webhook signature.' });
+      return;
+    }
+    const outcome = await emailService.processResendWebhookEvent(req.body || {});
+    res.status(200).json({ success: true, ...outcome });
+  });
+
   // -----------------------------------------------------------------------
-  // 6B. CLIENT PORTAL API ROUTER (/api/portal/*)
+  // 6B. CLIENT PORTAL, ADMIN COMMAND CENTER, AI WORKFORCE & LEGAL ROUTERS
   // -----------------------------------------------------------------------
   app.use(
     '/api/portal',
@@ -1296,6 +1546,33 @@ Tone & Voice Rules:
       signingSecret: deps.sessionSecret,
     })
   );
+
+  app.use(
+    '/api/admin',
+    createAdminCommandRouter({
+      authService,
+      db,
+      portalRepo,
+      emailService,
+      calendarService,
+      workforceService,
+      knowledgeService,
+      geminiConfigured: Boolean(ai),
+    })
+  );
+
+  app.use(
+    '/api/ai',
+    createAiRouter({
+      authService,
+      db,
+      workforceService,
+      knowledgeService,
+      aiClient: ai,
+    })
+  );
+
+  app.use('/api/legal', createLegalRouter(portalRepo));
 
   // -----------------------------------------------------------------------
   // 7. SAFE CENTRALIZED ERROR HANDLER (Never leak stack traces to clients)

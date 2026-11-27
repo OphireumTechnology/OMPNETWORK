@@ -10,12 +10,16 @@ import { EnterpriseModal } from './components/EnterpriseModal';
 import { AIConsultantWidget } from './components/consultant/AIConsultantWidget';
 import { Footer } from './components/Footer';
 import { BrandLogo } from './components/BrandLogo';
-import { isPortalRoute } from './portal/PortalRouter';
+import { isAdminRoute, isLegalRoute, isPortalRoute } from './portal/PortalRouter';
 
 const ClientPortalApp = lazy(() => import('./portal/ClientPortalApp'));
+const AdminConsoleApp = lazy(() => import('./admin/AdminConsoleApp'));
+const LegalPagesApp = lazy(() => import('./legal/LegalPagesApp'));
 
 export default function App() {
-  const [inPortal, setInPortal] = useState<boolean>(() => isPortalRoute());
+  const [routeMode, setRouteMode] = useState<'public' | 'portal' | 'admin' | 'legal'>(() =>
+    isPortalRoute() ? 'portal' : isAdminRoute() ? 'admin' : isLegalRoute() ? 'legal' : 'public'
+  );
   const [activeSection, setActiveSection] = useState('hero');
   const [isEnterpriseModalOpen, setIsEnterpriseModalOpen] = useState(false);
   const [enterpriseModalTab, setEnterpriseModalTab] = useState<'portal' | 'studio' | 'agents' | 'admin'>('portal');
@@ -26,14 +30,17 @@ export default function App() {
   } | null>(null);
 
   useEffect(() => {
-    const syncPortalRoute = () => setInPortal(isPortalRoute());
-    window.addEventListener('popstate', syncPortalRoute);
-    window.addEventListener('hashchange', syncPortalRoute);
-    window.addEventListener('opm:routechange', syncPortalRoute);
+    const syncAppRoute = () =>
+      setRouteMode(
+        isPortalRoute() ? 'portal' : isAdminRoute() ? 'admin' : isLegalRoute() ? 'legal' : 'public'
+      );
+    window.addEventListener('popstate', syncAppRoute);
+    window.addEventListener('hashchange', syncAppRoute);
+    window.addEventListener('opm:routechange', syncAppRoute);
     return () => {
-      window.removeEventListener('popstate', syncPortalRoute);
-      window.removeEventListener('hashchange', syncPortalRoute);
-      window.removeEventListener('opm:routechange', syncPortalRoute);
+      window.removeEventListener('popstate', syncAppRoute);
+      window.removeEventListener('hashchange', syncAppRoute);
+      window.removeEventListener('opm:routechange', syncAppRoute);
     };
   }, []);
 
@@ -93,7 +100,7 @@ export default function App() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  if (inPortal) {
+  if (routeMode === 'portal') {
     return (
       <Suspense
         fallback={
@@ -107,6 +114,41 @@ export default function App() {
         }
       >
         <ClientPortalApp />
+      </Suspense>
+    );
+  }
+
+  if (routeMode === 'admin') {
+    return (
+      <Suspense
+        fallback={
+          <div className="min-h-screen bg-[#0B1220] text-slate-200 flex items-center justify-center p-6">
+            <div className="text-center space-y-3 flex flex-col items-center">
+              <BrandLogo variant="emblem" size="lg" ring="gold" eager />
+              <div className="w-6 h-6 rounded-full border-2 border-[#00C2C7] border-t-transparent animate-spin" />
+              <p className="text-xs font-mono text-slate-400">Loading Ophireum Admin Command Center...</p>
+            </div>
+          </div>
+        }
+      >
+        <AdminConsoleApp />
+      </Suspense>
+    );
+  }
+
+  if (routeMode === 'legal') {
+    return (
+      <Suspense
+        fallback={
+          <div className="min-h-screen bg-[#0B1220] text-slate-200 flex items-center justify-center p-6">
+            <div className="text-center space-y-3 flex flex-col items-center">
+              <BrandLogo variant="emblem" size="lg" ring="gold" eager />
+              <p className="text-xs font-mono text-slate-400">Loading Legal &amp; Compliance Center...</p>
+            </div>
+          </div>
+        }
+      >
+        <LegalPagesApp />
       </Suspense>
     );
   }

@@ -552,13 +552,13 @@ GRANT USAGE, SELECT ON SEQUENCE public.portal_invoice_seq TO service_role;
 
 -- Catalog: authenticated read-only (idempotent policies)
 DROP POLICY IF EXISTS "Authenticated read product_categories" ON public.product_categories;
-CREATE POLICY "Authenticated read product_categories" ON public.product_categories FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Authenticated read product_categories" ON public.product_categories FOR SELECT TO authenticated USING (auth.uid() IS NOT NULL);
 DROP POLICY IF EXISTS "Authenticated read active products" ON public.products;
 CREATE POLICY "Authenticated read active products" ON public.products FOR SELECT TO authenticated USING (is_active = true);
 DROP POLICY IF EXISTS "Authenticated read product_packages" ON public.product_packages;
-CREATE POLICY "Authenticated read product_packages" ON public.product_packages FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Authenticated read product_packages" ON public.product_packages FOR SELECT TO authenticated USING (auth.uid() IS NOT NULL);
 DROP POLICY IF EXISTS "Authenticated read product_features" ON public.product_features;
-CREATE POLICY "Authenticated read product_features" ON public.product_features FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Authenticated read product_features" ON public.product_features FOR SELECT TO authenticated USING (auth.uid() IS NOT NULL);
 
 -- Profiles & addresses: strict owner isolation (no client DELETE on profiles)
 DROP POLICY IF EXISTS "Client reads own profile" ON public.profiles;

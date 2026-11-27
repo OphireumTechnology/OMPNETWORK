@@ -91,21 +91,33 @@ export interface AppointmentRecord {
   updatedAt: string;
 }
 
+export type EmailDeliveryState =
+  | 'queued'
+  | 'provider_accepted'
+  | 'sent'
+  | 'delivered'
+  | 'bounced'
+  | 'failed'
+  | 'retrying'
+  | 'unconfigured';
+
 export interface EmailOutboxRecord {
   id: string;
   dedupeKey: string;
-  entityType: 'solution_request' | 'appointment';
+  entityType: 'solution_request' | 'appointment' | 'order' | 'support' | 'security';
   entityReference: string;
   recipientEmail: string;
   notificationType:
     | 'customer_confirmation'
     | 'admin_alert'
     | 'appointment_request'
-    | 'appointment_update';
+    | 'appointment_update'
+    | 'order_update'
+    | 'security_alert';
   subject: string;
   htmlBody: string;
   textBody: string;
-  status: 'queued' | 'sent' | 'failed' | 'unconfigured';
+  status: EmailDeliveryState;
   provider: string;
   providerReference?: string;
   deliveryAttempts: number;
@@ -129,12 +141,24 @@ export interface AuditLogRecord {
   createdAt: string;
 }
 
+export type AdminRole =
+  | 'super_admin'
+  | 'admin'
+  | 'operations_manager'
+  | 'finance_officer'
+  | 'sales_officer'
+  | 'project_manager'
+  | 'developer'
+  | 'support_officer'
+  | 'auditor';
+
 export interface AdminUserRecord {
   id: string;
   email: string;
   fullName: string;
-  role: 'admin' | 'super_admin';
+  role: AdminRole;
   isActive: boolean;
+  mfaEnabled?: boolean;
 }
 
 export interface CreateSolutionRequestInput {
@@ -199,6 +223,10 @@ export interface DatabaseRepository {
     referenceCode: string,
     emailDeliveryStatus: 'pending' | 'sent' | 'failed' | 'unconfigured'
   ): Promise<void>;
+  updateSolutionRequestStatus?(
+    referenceCode: string,
+    status: SolutionRequestRecord['status']
+  ): Promise<SolutionRequestRecord>;
   listSolutionRequests(options: {
     limit: number;
     offset: number;
@@ -227,7 +255,7 @@ export interface DatabaseRepository {
 
   createOutboxRecord(input: {
     dedupeKey: string;
-    entityType: 'solution_request' | 'appointment';
+    entityType: EmailOutboxRecord['entityType'];
     entityReference: string;
     recipientEmail: string;
     notificationType: EmailOutboxRecord['notificationType'];
@@ -247,6 +275,11 @@ export interface DatabaseRepository {
       sentAt?: string | null;
     }
   ): Promise<void>;
+  updateOutboxByProviderReference?(
+    providerReference: string,
+    status: EmailDeliveryState,
+    lastError?: string
+  ): Promise<boolean>;
   listRetryableOutbox(limit?: number): Promise<EmailOutboxRecord[]>;
 
   writeAuditLog(input: Omit<AuditLogRecord, 'id' | 'createdAt'>): Promise<void>;

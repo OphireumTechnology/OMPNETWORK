@@ -558,8 +558,90 @@ export interface CustomPackageInquiryRecord {
   createdAt: string;
 }
 
+export interface CustomerOrganizationRecord {
+  id: string;
+  ownerUserId: string;
+  legalName: string;
+  tradeName: string;
+  taxId: string;
+  industry: string;
+  billingEmail: string;
+  billingAddress: string;
+  country: string;
+  members: Array<{
+    id: string;
+    email: string;
+    role: 'owner' | 'billing_admin' | 'project_manager' | 'member';
+    status: 'invited' | 'active' | 'revoked';
+    addedAt: string;
+  }>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DigitalEntitlementRecord {
+  id: string;
+  userId: string;
+  orderId: string;
+  orderNumber: string;
+  productId: string;
+  productName: string;
+  packageName: string;
+  licenseKey: string;
+  versionLabel: string;
+  maxDownloads: number;
+  downloadCount: number;
+  status: 'active' | 'revoked' | 'expired';
+  expiresAt?: string;
+  createdAt: string;
+}
+
+export interface DigitalDownloadLogRecord {
+  id: string;
+  entitlementId: string;
+  userId: string;
+  ipAddress: string;
+  userAgent: string;
+  downloadedAt: string;
+}
+
+export interface PaymentRefundRecord {
+  id: string;
+  paymentId: string;
+  orderId: string;
+  orderNumber: string;
+  amountMinor: number;
+  currency: PortalCurrency;
+  reason: string;
+  status: 'pending_approval' | 'approved' | 'processed' | 'rejected' | 'failed';
+  requestedBy: string;
+  approvedBy?: string;
+  providerRefundId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PortalConsentRecord {
+  id: string;
+  userId?: string;
+  email: string;
+  policySlug: string;
+  policyVersion: string;
+  accepted: boolean;
+  ipAddress: string;
+  userAgent: string;
+  recordedAt: string;
+}
+
+export interface UserMfaState {
+  enabled: boolean;
+  secret?: string;
+  enrolledAt?: string;
+}
+
 export interface PortalRepository {
   readonly mode: 'supabase' | 'local_dev';
+  readonly supabaseWritePersistenceImplemented?: boolean;
   // Auth & Users
   findUserByEmail(email: string): Promise<PortalUserRecord | null>;
   findUserById(userId: string): Promise<PortalUserRecord | null>;
@@ -581,6 +663,8 @@ export interface PortalRepository {
   requestEmailChange(userId: string, newEmail: string, tokenHash: string, expiresAt?: string): Promise<void>;
   confirmEmailChange(userId: string, tokenHash: string): Promise<PortalUserRecord | null>;
   requestAccountClosure(userId: string, reason: string): Promise<PortalUserRecord>;
+  getUserMfaState?(userId: string): Promise<UserMfaState>;
+  setUserMfaState?(userId: string, state: UserMfaState): Promise<void>;
 
   // Sessions
   createSession(input: Omit<PortalSessionRecord, 'id' | 'createdAt' | 'lastSeenAt'>): Promise<PortalSessionRecord>;
@@ -591,19 +675,26 @@ export interface PortalRepository {
   revokeOtherUserSessions(userId: string, keepTokenHash: string): Promise<void>;
   revokeAllUserSessions(userId: string): Promise<void>;
 
-  // Profile & Addresses
+  // Profile, Organization & Addresses
   getProfile(userId: string): Promise<PortalProfileRecord | null>;
   updateProfile(userId: string, patch: Partial<PortalProfileRecord>): Promise<PortalProfileRecord>;
+  getOrganization?(userId: string): Promise<CustomerOrganizationRecord | null>;
+  upsertOrganization?(
+    userId: string,
+    input: Partial<Omit<CustomerOrganizationRecord, 'id' | 'ownerUserId' | 'createdAt' | 'updatedAt'>>
+  ): Promise<CustomerOrganizationRecord>;
   listAddresses(userId: string): Promise<ClientAddressRecord[]>;
   upsertAddress(userId: string, address: Omit<ClientAddressRecord, 'id' | 'userId' | 'createdAt' | 'updatedAt'> & { id?: string }): Promise<ClientAddressRecord>;
   deleteAddress(userId: string, addressId: string): Promise<boolean>;
 
-  // Catalog
+  // Catalog & Promotions
   listCategories(): Promise<ProductCategoryRecord[]>;
   listProducts(filters?: { categorySlug?: string; search?: string }): Promise<ProductRecord[]>;
   getProductBySlug(slug: string): Promise<ProductRecord | null>;
   getPackageById(packageId: string): Promise<{ product: ProductRecord; pkg: ProductPackageRecord } | null>;
   getDiscountCode(code: string): Promise<DiscountCodeRecord | null>;
+  listDiscountCodes?(includeInactive?: boolean): Promise<DiscountCodeRecord[]>;
+  upsertDiscountCode?(record: DiscountCodeRecord): Promise<DiscountCodeRecord>;
 
   // Custom Enterprise Inquiry
   createCustomInquiry(input: Omit<CustomPackageInquiryRecord, 'id' | 'referenceNumber' | 'status' | 'createdAt'>): Promise<CustomPackageInquiryRecord>;
@@ -613,7 +704,8 @@ export interface PortalRepository {
   getCart(userId: string): Promise<ShoppingCartRecord>;
   saveCart(cart: ShoppingCartRecord): Promise<ShoppingCartRecord>;
 
-  // Orders, Payments, Invoices
+  // Orders, Payments, Invoices, Refunds & Digital Entitlements
+  allocatePaymentReference?(date?: Date): Promise<string>;
   findOrderByIdempotencyKey(userId: string, key: string): Promise<OrderRecord | null>;
   createOrder(input: Omit<OrderRecord, 'id' | 'orderNumber' | 'createdAt' | 'updatedAt'>): Promise<{ order: OrderRecord; invoice: InvoiceRecord; payment: PaymentRecord }>;
   listOrders(userId: string): Promise<OrderRecord[]>;
@@ -632,7 +724,22 @@ export interface PortalRepository {
     currency: PortalCurrency;
     eventStatus: 'paid' | 'failed' | 'refunded';
     payloadSummary: Record<string, unknown>;
-  }): Promise<{ deduplicated: boolean; order?: OrderRecord; creditsAllocated: number; projectCreated?: ProjectRecord }>;
+  }): Promise<{
+    deduplicated: boolean;
+    order?: OrderRecord;
+    creditsAllocated: number;
+    projectCreated?: ProjectRecord;
+    ophireumPaymentReference?: string;
+    entitlementsCreated?: DigitalEntitlementRecord[];
+  }>;
+  listDigitalEntitlements?(userId: string): Promise<DigitalEntitlementRecord[]>;
+  recordDigitalDownload?(input: {
+    userId: string;
+    entitlementId: string;
+    ipAddress: string;
+    userAgent: string;
+  }): Promise<{ entitlement?: DigitalEntitlementRecord; log?: DigitalDownloadLogRecord; error?: string }>;
+  listDigitalDownloadLogs?(userId: string): Promise<DigitalDownloadLogRecord[]>;
 
   // Credits
   getWallet(userId: string): Promise<CreditWalletRecord>;
@@ -687,13 +794,31 @@ export interface PortalRepository {
   listSupportTickets(userId: string): Promise<SupportTicketRecord[]>;
   replySupportTicket(userId: string, ticketId: string, senderName: string, body: string, attachmentIds: string[]): Promise<SupportTicketRecord | null>;
 
-  // Notifications & Activities
+  // Notifications, Activities, Consents & Privacy
   listNotifications(userId: string): Promise<NotificationRecord[]>;
   markNotificationRead(userId: string, notificationId: string): Promise<boolean>;
   markAllNotificationsRead(userId: string): Promise<void>;
   addNotification(input: Omit<NotificationRecord, 'id' | 'isRead' | 'createdAt'>): Promise<NotificationRecord>;
   listActivities(userId: string, limit?: number): Promise<ClientActivityLogRecord[]>;
   addActivity(input: Omit<ClientActivityLogRecord, 'id' | 'createdAt'>): Promise<ClientActivityLogRecord>;
+  recordConsent?(input: Omit<PortalConsentRecord, 'id' | 'recordedAt'>): Promise<PortalConsentRecord>;
+  listConsents?(userId: string): Promise<PortalConsentRecord[]>;
+  exportUserPersonalData?(userId: string): Promise<Record<string, unknown>>;
+
+  // Admin Command Center & BI Operations
+  adminListUsers?(): Promise<Array<{ user: Omit<PortalUserRecord, 'passwordHash'>; profile: PortalProfileRecord | null }>>;
+  adminListOrders?(): Promise<OrderRecord[]>;
+  adminListPayments?(): Promise<PaymentRecord[]>;
+  adminListInvoices?(): Promise<InvoiceRecord[]>;
+  adminListSubscriptions?(): Promise<SubscriptionRecord[]>;
+  adminListProjects?(): Promise<ProjectRecord[]>;
+  adminListSupportTickets?(): Promise<SupportTicketRecord[]>;
+  adminListRefunds?(): Promise<PaymentRefundRecord[]>;
+  adminUpdateOrderStatus?(orderId: string, status: OrderStatus, actor: string, note: string): Promise<OrderRecord | null>;
+  adminUpdateProjectStage?(projectId: string, stage: ProjectStage, actor: string, note: string): Promise<ProjectRecord | null>;
+  adminReplySupportTicket?(ticketId: string, senderName: string, body: string, nextStatus?: SupportTicketStatus): Promise<SupportTicketRecord | null>;
+  adminRequestRefund?(input: { paymentId: string; amountMinor: number; reason: string; requestedBy: string }): Promise<PaymentRefundRecord | null>;
+  adminDecideRefund?(refundId: string, decision: 'approved' | 'rejected' | 'processed', actor: string): Promise<PaymentRefundRecord | null>;
 }
 
 export const USD_TO_PHP_REFERENCE_RATE = 58;

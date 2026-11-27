@@ -23,6 +23,12 @@ import {
   X,
   ArrowLeft,
   ChevronDown,
+  Building2,
+  Tag,
+  Download,
+  Calendar,
+  Bot,
+  Lock,
 } from 'lucide-react';
 import { BrandLogo } from '../../components/BrandLogo';
 import { usePortalAuth } from '../PortalAuthContext';
@@ -60,6 +66,7 @@ export const PortalLayout: React.FC<{
         { label: 'Dashboard', path: '/portal/dashboard', icon: LayoutDashboard },
         { label: 'My Services', path: '/portal/services', icon: Briefcase },
         { label: 'Service Store', path: '/portal/store', icon: Store, matchPrefixes: ['/portal/store'] },
+        { label: 'Offers & Promotions', path: '/portal/offers', icon: Tag },
         { label: 'My Orders', path: '/portal/orders', icon: ShoppingBag, matchPrefixes: ['/portal/orders'] },
       ],
     },
@@ -69,6 +76,9 @@ export const PortalLayout: React.FC<{
         { label: 'My Projects', path: '/portal/projects', icon: FolderKanban, matchPrefixes: ['/portal/projects'] },
         { label: 'Project Discussions', path: '/portal/messages', icon: MessageSquare },
         { label: 'My Files & Deliverables', path: '/portal/files', icon: FolderOpen },
+        { label: 'Digital Downloads', path: '/portal/downloads', icon: Download },
+        { label: 'Consultations', path: '/portal/consultations', icon: Calendar },
+        { label: 'AI Consultant', path: '/portal/consultant', icon: Bot },
       ],
     },
     {
@@ -91,6 +101,8 @@ export const PortalLayout: React.FC<{
           badge: unreadNotifications > 0 ? unreadNotifications : undefined,
         },
         { label: 'Profile & Account', path: '/portal/profile', icon: UserRound },
+        { label: 'Organization', path: '/portal/organization', icon: Building2 },
+        { label: 'Privacy & MFA', path: '/portal/privacy', icon: Lock },
         { label: 'Security Settings', path: '/portal/security', icon: ShieldCheck },
         { label: 'Preferences', path: '/portal/settings', icon: Settings },
       ],

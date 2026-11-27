@@ -424,6 +424,95 @@ export class TransactionalEmailService {
     return { customerStatus, adminStatus };
   }
 
+  public async enqueueAndSendAppointmentUpdateEmails(
+    appointment: AppointmentRecord,
+    action: 'rescheduled' | 'cancelled' | 'confirmed',
+    correlationId?: string
+  ): Promise<{
+    customerStatus: EmailOutboxRecord['status'];
+    adminStatus: EmailOutboxRecord['status'];
+  }> {
+    const labelMap: Record<typeof action, string> = {
+      rescheduled: 'Consultation Rescheduled',
+      cancelled: 'Consultation Cancelled',
+      confirmed: 'Consultation Confirmed',
+    };
+    const statusLabel = labelMap[action];
+    const subject = `Ophireum Consultation Update (${statusLabel}) [${appointment.referenceCode}]`;
+    const htmlBody = `
+      <div style="font-family:Inter,Arial,sans-serif;background:#0B1220;color:#E2E8F0;padding:24px;border-radius:12px;">
+        ${renderOfficialEmailHeader(statusLabel)}
+        <p>Reference Code: <strong>${escapeHtml(appointment.referenceCode)}</strong></p>
+        <p>Status: <strong>${escapeHtml(appointment.status)}</strong><br/>
+        Date: ${escapeHtml(appointment.scheduledDate)}<br/>
+        Time Slot: ${escapeHtml(appointment.scheduledTimeSlot)} (${escapeHtml(appointment.clientTimezone)})</p>
+      </div>
+    `;
+    const textBody = `${statusLabel}: ${appointment.referenceCode}\nStatus: ${appointment.status}\nDate: ${appointment.scheduledDate} | Slot: ${appointment.scheduledTimeSlot}`;
+    const dedupeSuffix = `${action}-${appointment.updatedAt}`;
+
+    const custOutbox = await this.db.createOutboxRecord({
+      dedupeKey: `apt-upd-cust-${appointment.referenceCode}-${dedupeSuffix}`,
+      entityType: 'appointment',
+      entityReference: appointment.referenceCode,
+      recipientEmail: appointment.email,
+      notificationType: 'appointment_update',
+      subject,
+      htmlBody,
+      textBody,
+    });
+    const customerStatus =
+      custOutbox.record.status === 'sent'
+        ? 'sent'
+        : await this.dispatchOutboxItem(custOutbox.record, correlationId);
+
+    const admOutbox = await this.db.createOutboxRecord({
+      dedupeKey: `apt-upd-adm-${appointment.referenceCode}-${dedupeSuffix}`,
+      entityType: 'appointment',
+      entityReference: appointment.referenceCode,
+      recipientEmail: this.adminInbox,
+      notificationType: 'admin_alert',
+      subject: `[${statusLabel}] ${appointment.referenceCode}`,
+      htmlBody,
+      textBody,
+    });
+    const adminStatus =
+      admOutbox.record.status === 'sent'
+        ? 'sent'
+        : await this.dispatchOutboxItem(admOutbox.record, correlationId);
+
+    return { customerStatus, adminStatus };
+  }
+
+  public async processResendWebhookEvent(event: {
+    type?: string;
+    data?: { email_id?: string; bounce_type?: string; reason?: string };
+  }): Promise<{ updated: boolean; mappedStatus?: EmailOutboxRecord['status'] }> {
+    const emailId = event?.data?.email_id;
+    const type = String(event?.type || '').toLowerCase();
+    if (!emailId || !this.db.updateOutboxByProviderReference) {
+      return { updated: false };
+    }
+    const statusMap: Record<string, EmailOutboxRecord['status']> = {
+      'email.sent': 'provider_accepted',
+      'email.delivered': 'delivered',
+      'email.bounced': 'bounced',
+      'email.delivery_delayed': 'retrying',
+      'email.complained': 'failed',
+      'email.failed': 'failed',
+    };
+    const mappedStatus = statusMap[type];
+    if (!mappedStatus) {
+      return { updated: false };
+    }
+    const updated = await this.db.updateOutboxByProviderReference(
+      emailId,
+      mappedStatus,
+      event?.data?.reason || event?.data?.bounce_type
+    );
+    return { updated, mappedStatus };
+  }
+
   public async processRetryQueue(limit = 20): Promise<number> {
     const items = await this.db.listRetryableOutbox(limit);
     let processed = 0;

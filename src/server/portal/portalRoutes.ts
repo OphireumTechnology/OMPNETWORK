@@ -1803,5 +1803,229 @@ export function createPortalRouter(options: {
     });
   });
 
+  // ---- Customer Organization ----
+  router.get('/organization', async (req: PortalAuthenticatedRequest, res: Response) => {
+    const org = repo.getOrganization ? await repo.getOrganization(req.portalUser!.id) : null;
+    res.status(200).json({ success: true, organization: org });
+  });
+
+  router.patch('/organization', async (req: PortalAuthenticatedRequest, res: Response) => {
+    if (!repo.upsertOrganization) {
+      res.status(503).json({ success: false, error: 'Organization module unavailable.' });
+      return;
+    }
+    const membersRaw = Array.isArray(req.body?.members) ? req.body.members : undefined;
+    const members = membersRaw
+      ? membersRaw.slice(0, 25).map((m: any) => ({
+          id: sanitizeText(m?.id, 80) || crypto.randomUUID(),
+          email: sanitizeText(m?.email, 180).toLowerCase(),
+          role: ['owner', 'billing_admin', 'project_manager', 'member'].includes(m?.role) ? m.role : 'member',
+          status: ['invited', 'active', 'revoked'].includes(m?.status) ? m.status : 'invited',
+          addedAt: sanitizeText(m?.addedAt, 40) || new Date().toISOString(),
+        }))
+      : undefined;
+
+    const org = await repo.upsertOrganization(req.portalUser!.id, {
+      legalName: req.body?.legalName !== undefined ? sanitizeText(req.body.legalName, 160) : undefined,
+      tradeName: req.body?.tradeName !== undefined ? sanitizeText(req.body.tradeName, 160) : undefined,
+      taxId: req.body?.taxId !== undefined ? sanitizeText(req.body.taxId, 80) : undefined,
+      industry: req.body?.industry !== undefined ? sanitizeText(req.body.industry, 100) : undefined,
+      billingEmail: req.body?.billingEmail !== undefined ? sanitizeText(req.body.billingEmail, 180).toLowerCase() : undefined,
+      billingAddress: req.body?.billingAddress !== undefined ? sanitizeText(req.body.billingAddress, 400) : undefined,
+      country: req.body?.country !== undefined ? sanitizeText(req.body.country, 80) : undefined,
+      members,
+    });
+    res.status(200).json({ success: true, organization: org });
+  });
+
+  // ---- Promotions & Offers ----
+  router.get('/offers', async (_req: PortalAuthenticatedRequest, res: Response) => {
+    const offers = repo.listDiscountCodes ? await repo.listDiscountCodes(false) : [];
+    res.status(200).json({ success: true, offers });
+  });
+
+  // ---- Guest Cart Merge ----
+  router.post('/cart/merge', async (req: PortalAuthenticatedRequest, res: Response) => {
+    const itemsRaw = Array.isArray(req.body?.items) ? req.body.items : [];
+    const userId = req.portalUser!.id;
+    const cart = await repo.getCart(userId);
+    let mergedCount = 0;
+
+    for (const raw of itemsRaw.slice(0, 20)) {
+      const packageId = sanitizeText(raw?.packageId, 80);
+      const quantity = Math.min(20, Math.max(1, Number(raw?.quantity || 1)));
+      if (!packageId) continue;
+      const found = await repo.getPackageById(packageId);
+      if (!found || found.pkg.isCustomQuote) continue;
+      const existing = cart.items.find((i) => i.packageId === packageId && !i.savedForLater);
+      if (existing) {
+        existing.quantity = Math.min(20, existing.quantity + quantity);
+        existing.updatedAt = new Date().toISOString();
+      } else {
+        const now = new Date().toISOString();
+        cart.items.push({
+          id: crypto.randomUUID(),
+          cartId: cart.id,
+          productId: found.product.id,
+          packageId: found.pkg.id,
+          quantity,
+          savedForLater: false,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+      mergedCount += 1;
+    }
+
+    await repo.saveCart(cart);
+    res.status(200).json({ success: true, mergedCount, cart });
+  });
+
+  // ---- Digital Entitlements & Downloads ----
+  router.get('/downloads', async (req: PortalAuthenticatedRequest, res: Response) => {
+    const userId = req.portalUser!.id;
+    const [entitlements, logs] = await Promise.all([
+      repo.listDigitalEntitlements ? repo.listDigitalEntitlements(userId) : [],
+      repo.listDigitalDownloadLogs ? repo.listDigitalDownloadLogs(userId) : [],
+    ]);
+    res.status(200).json({ success: true, entitlements, logs });
+  });
+
+  router.post('/downloads/:entitlementId/download', async (req: PortalAuthenticatedRequest, res: Response) => {
+    if (!repo.recordDigitalDownload) {
+      res.status(503).json({ success: false, error: 'Digital downloads module unavailable.' });
+      return;
+    }
+    const entitlementId = sanitizeText(req.params.entitlementId, 80);
+    const outcome = await repo.recordDigitalDownload({
+      userId: req.portalUser!.id,
+      entitlementId,
+      ipAddress: req.ip || 'unknown',
+      userAgent: String(req.headers['user-agent'] || '').slice(0, 200),
+    });
+    if (outcome.error || !outcome.entitlement) {
+      res.status(400).json({ success: false, error: outcome.error || 'Unable to authorize download.' });
+      return;
+    }
+    const manifest = {
+      platform: 'OPHIREUM MULTIMEDIA PRODUCTION',
+      entitlementId: outcome.entitlement.id,
+      orderNumber: outcome.entitlement.orderNumber,
+      productName: outcome.entitlement.productName,
+      packageName: outcome.entitlement.packageName,
+      licenseKey: outcome.entitlement.licenseKey,
+      version: outcome.entitlement.versionLabel,
+      downloadsUsed: `${outcome.entitlement.downloadCount}/${outcome.entitlement.maxDownloads}`,
+      issuedAt: new Date().toISOString(),
+      terms: 'Licensed strictly to the verified purchasing client account under OPHIREUM Digital Product Licensing Terms.',
+    };
+    res.status(200).json({
+      success: true,
+      entitlement: outcome.entitlement,
+      downloadLog: outcome.log,
+      licenseManifest: manifest,
+    });
+  });
+
+  // ---- Customer Optional TOTP MFA ----
+  router.get('/security/mfa', async (req: PortalAuthenticatedRequest, res: Response) => {
+    const state = repo.getUserMfaState ? await repo.getUserMfaState(req.portalUser!.id) : { enabled: false };
+    res.status(200).json({
+      success: true,
+      mfa: { enabled: state.enabled, enrolledAt: state.enrolledAt || null },
+    });
+  });
+
+  router.post('/security/mfa/enroll', async (req: PortalAuthenticatedRequest, res: Response) => {
+    if (!repo.setUserMfaState) {
+      res.status(503).json({ success: false, error: 'MFA unavailable.' });
+      return;
+    }
+    const { generateTotpSecret, buildTotpOtpAuthUri } = await import('../auth');
+    const secret = generateTotpSecret();
+    await repo.setUserMfaState(req.portalUser!.id, { enabled: false, secret });
+    res.status(200).json({
+      success: true,
+      secret,
+      otpAuthUri: buildTotpOtpAuthUri(req.portalUser!.email, secret, 'OPHIREUM Client Portal'),
+    });
+  });
+
+  router.post('/security/mfa/confirm', async (req: PortalAuthenticatedRequest, res: Response) => {
+    if (!repo.getUserMfaState || !repo.setUserMfaState) {
+      res.status(503).json({ success: false, error: 'MFA unavailable.' });
+      return;
+    }
+    const code = sanitizeText(req.body?.code, 12);
+    const state = await repo.getUserMfaState(req.portalUser!.id);
+    if (!state.secret) {
+      res.status(400).json({ success: false, error: 'Initiate MFA enrollment first.' });
+      return;
+    }
+    const { verifyTotpCode } = await import('../auth');
+    if (!verifyTotpCode(state.secret, code)) {
+      res.status(400).json({ success: false, error: 'Invalid 6-digit authenticator code.' });
+      return;
+    }
+    await repo.setUserMfaState(req.portalUser!.id, {
+      enabled: true,
+      secret: state.secret,
+      enrolledAt: new Date().toISOString(),
+    });
+    res.status(200).json({ success: true, mfaEnabled: true });
+  });
+
+  router.post('/security/mfa/disable', async (req: PortalAuthenticatedRequest, res: Response) => {
+    if (!repo.setUserMfaState) {
+      res.status(503).json({ success: false, error: 'MFA unavailable.' });
+      return;
+    }
+    const currentPassword = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
+    if (!verifyPassword(currentPassword, req.portalUser!.passwordHash)) {
+      res.status(403).json({ success: false, error: 'Current password verification required to disable MFA.' });
+      return;
+    }
+    await repo.setUserMfaState(req.portalUser!.id, { enabled: false });
+    res.status(200).json({ success: true, mfaEnabled: false });
+  });
+
+  // ---- Privacy, Consent Ledger & Personal Data Export (RA 10173 / GDPR) ----
+  router.get('/privacy/consents', async (req: PortalAuthenticatedRequest, res: Response) => {
+    const consents = repo.listConsents ? await repo.listConsents(req.portalUser!.id) : [];
+    res.status(200).json({ success: true, consents });
+  });
+
+  router.post('/privacy/consents', async (req: PortalAuthenticatedRequest, res: Response) => {
+    if (!repo.recordConsent) {
+      res.status(503).json({ success: false, error: 'Consent ledger unavailable.' });
+      return;
+    }
+    const policySlug = sanitizeText(req.body?.policySlug, 80).toLowerCase();
+    const policyVersion = sanitizeText(req.body?.policyVersion, 40) || '2026.1-draft';
+    if (!policySlug) {
+      res.status(400).json({ success: false, error: 'policySlug is required.' });
+      return;
+    }
+    const consent = await repo.recordConsent({
+      userId: req.portalUser!.id,
+      email: req.portalUser!.email,
+      policySlug,
+      policyVersion,
+      accepted: req.body?.accepted !== false,
+      ipAddress: req.ip || 'unknown',
+      userAgent: String(req.headers['user-agent'] || '').slice(0, 200),
+    });
+    res.status(201).json({ success: true, consent });
+  });
+
+  router.get('/privacy/export', async (req: PortalAuthenticatedRequest, res: Response) => {
+    if (!repo.exportUserPersonalData) {
+      res.status(503).json({ success: false, error: 'Data export unavailable.' });
+      return;
+    }
+    const exportBundle = await repo.exportUserPersonalData(req.portalUser!.id);
+    res.status(200).json({ success: true, exportBundle });
+  });
+
   return router;
 }

@@ -482,12 +482,12 @@ export const ContactSection: React.FC<ContactSectionProps> = ({
 
                   <div>
                     <label className="block text-xs font-medium text-slate-300 mb-1">
-                      Project Brief or Reference File Name (Optional)
+                      Reference Brief Filename (Optional — Metadata Only; Full Uploads Inside Client Portal)
                     </label>
                     <div className="flex items-center gap-3">
                       <label className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-medium text-slate-200 cursor-pointer transition-colors">
                         <Paperclip className="w-3.5 h-3.5 text-[#00C2C7]" />
-                        <span>Choose File</span>
+                        <span>Select Reference File</span>
                         <input
                           type="file"
                           onChange={handleFileUpload}
@@ -501,7 +501,7 @@ export const ContactSection: React.FC<ContactSectionProps> = ({
                           {formData.fileName}
                         </span>
                       ) : (
-                        <span className="text-xs text-slate-500">PDF, Word, ZIP or Image</span>
+                        <span className="text-xs text-slate-500">Logs filename reference only (PDF, Word, ZIP, Image)</span>
                       )}
                     </div>
                     {errors.fileName && <p className="text-[11px] text-rose-400 mt-1">{errors.fileName}</p>}

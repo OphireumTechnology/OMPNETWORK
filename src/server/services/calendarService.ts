@@ -8,7 +8,7 @@ interface ServiceAccountCredentials {
 
 export interface CalendarCreateResult {
   synced: boolean;
-  calendarSyncStatus: 'synced' | 'failed' | 'unconfigured';
+  calendarSyncStatus: 'synced' | 'pending' | 'failed' | 'unconfigured';
   eventId?: string;
   meetingLink?: string;
   error?: string;
@@ -180,6 +180,100 @@ export class GoogleCalendarService {
         calendarSyncStatus: 'failed',
         error: err?.message || 'Google Calendar integration error',
       };
+    }
+  }
+
+  public async updateConsultationEvent(params: {
+    eventId?: string;
+    referenceCode: string;
+    scheduledDate: string;
+    scheduledTimeSlot: string;
+    correlationId?: string;
+  }): Promise<CalendarCreateResult> {
+    if (!this.isConfigured() || !params.eventId) {
+      return {
+        synced: false,
+        calendarSyncStatus: this.isConfigured() ? 'pending' : 'unconfigured',
+        error: this.isConfigured()
+          ? 'No existing calendar event ID linked to this appointment.'
+          : 'Google Calendar credentials are not configured.',
+      };
+    }
+    try {
+      const accessToken = await this.getAccessToken();
+      const [startTimeStr] = params.scheduledTimeSlot.split(' - ');
+      const [timePart, period] = startTimeStr.trim().split(' ');
+      const [h, m] = timePart.split(':').map(Number);
+      let hours = h;
+      if (period === 'PM' && hours < 12) hours += 12;
+      if (period === 'AM' && hours === 12) hours = 0;
+      const startIso = `${params.scheduledDate}T${String(hours).padStart(2, '0')}:${String(m || 0).padStart(2, '0')}:00+08:00`;
+      const endDate = new Date(new Date(startIso).getTime() + 30 * 60 * 1000);
+
+      const calRes = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
+          this.calendarId
+        )}/events/${encodeURIComponent(params.eventId)}`,
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            start: { dateTime: startIso, timeZone: 'Asia/Manila' },
+            end: { dateTime: endDate.toISOString(), timeZone: 'Asia/Manila' },
+          }),
+        }
+      );
+      const calData = await calRes.json().catch(() => ({}));
+      if (!calRes.ok) {
+        return {
+          synced: false,
+          calendarSyncStatus: 'failed',
+          error: calData?.error?.message || `Google Calendar PATCH HTTP ${calRes.status}`,
+        };
+      }
+      return {
+        synced: true,
+        calendarSyncStatus: 'synced',
+        eventId: calData.id || params.eventId,
+        meetingLink: calData.hangoutLink || calData.htmlLink || undefined,
+      };
+    } catch (err: any) {
+      return {
+        synced: false,
+        calendarSyncStatus: 'failed',
+        error: err?.message || 'Google Calendar update error',
+      };
+    }
+  }
+
+  public async cancelConsultationEvent(params: {
+    eventId?: string;
+    referenceCode: string;
+    correlationId?: string;
+  }): Promise<{ synced: boolean; error?: string }> {
+    if (!this.isConfigured() || !params.eventId) {
+      return { synced: false };
+    }
+    try {
+      const accessToken = await this.getAccessToken();
+      const calRes = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
+          this.calendarId
+        )}/events/${encodeURIComponent(params.eventId)}`,
+        {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }
+      );
+      if (!calRes.ok && calRes.status !== 404 && calRes.status !== 410) {
+        return { synced: false, error: `Google Calendar DELETE HTTP ${calRes.status}` };
+      }
+      return { synced: true };
+    } catch (err: any) {
+      return { synced: false, error: err?.message || 'Google Calendar cancellation error' };
     }
   }
 }

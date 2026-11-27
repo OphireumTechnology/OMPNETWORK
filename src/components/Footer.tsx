@@ -2,6 +2,7 @@ import React from 'react';
 import { Building, Shield, MapPin, ArrowUpRight, Phone, Mail, ExternalLink, User } from 'lucide-react';
 import { COMPANY_CONFIG } from '../data/companyConfig';
 import { BrandLogo } from './BrandLogo';
+import { navigateToAppPath } from '../portal/PortalRouter';
 
 interface FooterProps {
   onNavigate: (sectionId: string) => void;
@@ -157,10 +158,10 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenPortal }) => {
               </li>
               <li>
                 <button
-                  onClick={onOpenPortal}
+                  onClick={() => navigateToAppPath('/admin')}
                   className="hover:text-[#00C2C7] transition-colors cursor-pointer flex items-center gap-1"
                 >
-                  <span>Super Admin Center (Phase 9)</span>
+                  <span>Admin Command Center</span>
                   <ArrowUpRight className="w-3 h-3 text-[#00C2C7]" />
                 </button>
               </li>
@@ -178,10 +179,46 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenPortal }) => {
           <div>
             © 2026 {COMPANY_CONFIG.name}. All rights reserved.
           </div>
-          <div className="flex flex-wrap items-center gap-4 text-slate-400">
-            <span>Privacy Policy</span>
+          <div className="flex flex-wrap items-center gap-3 text-slate-400">
+            <button
+              type="button"
+              onClick={() => navigateToAppPath('/legal/privacy-policy')}
+              className="hover:text-[#00C2C7] transition-colors cursor-pointer"
+            >
+              Privacy Policy
+            </button>
             <span>·</span>
-            <span>Terms of Use</span>
+            <button
+              type="button"
+              onClick={() => navigateToAppPath('/legal/terms-of-service')}
+              className="hover:text-[#00C2C7] transition-colors cursor-pointer"
+            >
+              Terms of Service
+            </button>
+            <span>·</span>
+            <button
+              type="button"
+              onClick={() => navigateToAppPath('/legal/refund-policy')}
+              className="hover:text-[#00C2C7] transition-colors cursor-pointer"
+            >
+              Refund Policy
+            </button>
+            <span>·</span>
+            <button
+              type="button"
+              onClick={() => navigateToAppPath('/legal/ai-disclosure')}
+              className="hover:text-[#00C2C7] transition-colors cursor-pointer"
+            >
+              AI Disclosure
+            </button>
+            <span>·</span>
+            <button
+              type="button"
+              onClick={() => navigateToAppPath('/legal/data-subject-request')}
+              className="hover:text-[#00C2C7] transition-colors cursor-pointer"
+            >
+              Data Requests
+            </button>
             <span>·</span>
             <span>Clark Freeport Zone, Pampanga</span>
           </div>

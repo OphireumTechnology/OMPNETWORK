@@ -11,9 +11,9 @@ const PortalRouterContext = createContext<PortalRouterContextValue | null>(null)
 
 export function getCurrentPortalLocation(): { pathname: string; search: string } {
   if (typeof window === 'undefined') return { pathname: '/', search: '' };
-  // Support hash fallback (#/portal/...) for static GitHub Pages deployments
+  // Support hash fallback (#/portal/..., #/admin/..., #/legal/...) for static GitHub Pages deployments
   const hash = window.location.hash || '';
-  if (hash.startsWith('#/portal')) {
+  if (hash.startsWith('#/portal') || hash.startsWith('#/admin') || hash.startsWith('#/legal')) {
     const clean = hash.slice(1);
     const [p, s = ''] = clean.split('?');
     return { pathname: p, search: s ? `?${s}` : '' };
@@ -26,22 +26,45 @@ export function isPortalRoute(pathname?: string): boolean {
   return target === '/portal' || target.startsWith('/portal/');
 }
 
-export function navigateToPortalPath(to: string, replace = false) {
+export function isAdminRoute(pathname?: string): boolean {
+  const target = pathname ?? getCurrentPortalLocation().pathname;
+  return target === '/admin' || target.startsWith('/admin/');
+}
+
+export function isLegalRoute(pathname?: string): boolean {
+  const target = pathname ?? getCurrentPortalLocation().pathname;
+  return target === '/legal' || target.startsWith('/legal/');
+}
+
+export function navigateToAppPath(to: string, replace = false) {
   if (typeof window === 'undefined') return;
   const cleanTarget = to.startsWith('/') ? to : `/${to}`;
   const isStaticPagesHost =
     window.location.hostname.endsWith('github.io') ||
     (window.location.pathname.includes('/OMPNETWORK/') && !cleanTarget.startsWith('/OMPNETWORK'));
 
-  if (isStaticPagesHost && cleanTarget.startsWith('/portal')) {
+  const isSpaSubApp =
+    cleanTarget.startsWith('/portal') ||
+    cleanTarget.startsWith('/admin') ||
+    cleanTarget.startsWith('/legal');
+
+  if (isStaticPagesHost && isSpaSubApp) {
     const nextHash = `#${cleanTarget}`;
     if (replace) window.history.replaceState(null, '', nextHash);
     else window.history.pushState(null, '', nextHash);
+  } else if (cleanTarget === '/' && (window.location.hash.startsWith('#/portal') || window.location.hash.startsWith('#/admin') || window.location.hash.startsWith('#/legal'))) {
+    if (replace) window.history.replaceState(null, '', window.location.pathname);
+    else window.history.pushState(null, '', window.location.pathname);
   } else {
     if (replace) window.history.replaceState(null, '', cleanTarget);
     else window.history.pushState(null, '', cleanTarget);
   }
   window.dispatchEvent(new Event('opm:routechange'));
+  window.scrollTo({ top: 0, behavior: 'auto' });
+}
+
+export function navigateToPortalPath(to: string, replace = false) {
+  navigateToAppPath(to, replace);
 }
 
 export const PortalRouterProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -60,19 +83,11 @@ export const PortalRouterProvider: React.FC<{ children: React.ReactNode }> = ({ 
   }, []);
 
   const navigate = useCallback((to: string, options?: { replace?: boolean }) => {
-    navigateToPortalPath(to, Boolean(options?.replace));
-    window.scrollTo({ top: 0, behavior: 'auto' });
+    navigateToAppPath(to, Boolean(options?.replace));
   }, []);
 
   const exitToPublicSite = useCallback(() => {
-    if (typeof window === 'undefined') return;
-    if (window.location.hash.startsWith('#/portal')) {
-      window.history.pushState(null, '', window.location.pathname);
-    } else {
-      window.history.pushState(null, '', '/');
-    }
-    window.dispatchEvent(new Event('opm:routechange'));
-    window.scrollTo({ top: 0, behavior: 'auto' });
+    navigateToAppPath('/');
   }, []);
 
   return (

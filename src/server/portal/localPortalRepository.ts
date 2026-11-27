@@ -7,14 +7,20 @@ import {
   CreditTransactionRecord,
   CreditTransactionType,
   CreditWalletRecord,
+  CustomerOrganizationRecord,
   CustomPackageInquiryRecord,
+  DigitalDownloadLogRecord,
+  DigitalEntitlementRecord,
   DiscountCodeRecord,
   InvoiceRecord,
   NotificationRecord,
   OrderRecord,
+  OrderStatus,
   PaymentProviderId,
   PaymentRecord,
+  PaymentRefundRecord,
   PaymentWebhookEventRecord,
+  PortalConsentRecord,
   PortalCurrency,
   PortalProfileRecord,
   PortalRepository,
@@ -34,16 +40,21 @@ import {
   SubscriptionRecord,
   SupportTicketCategory,
   SupportTicketRecord,
+  SupportTicketStatus,
+  UserMfaState,
 } from './types';
 import {
   PORTAL_DISCOUNT_CODES,
   PORTAL_INITIAL_PRODUCTS,
   PORTAL_PRODUCT_CATEGORIES,
 } from './catalogSeed';
+import { AtomicPaymentReferenceAllocator } from './paymentReference';
 
 interface PortalStoreState {
   users: PortalUserRecord[];
   profiles: PortalProfileRecord[];
+  organizations: CustomerOrganizationRecord[];
+  userMfa: Record<string, UserMfaState>;
   addresses: ClientAddressRecord[];
   sessions: PortalSessionRecord[];
   categories: ProductCategoryRecord[];
@@ -53,8 +64,11 @@ interface PortalStoreState {
   carts: ShoppingCartRecord[];
   orders: OrderRecord[];
   payments: PaymentRecord[];
+  refunds: PaymentRefundRecord[];
   webhookEvents: PaymentWebhookEventRecord[];
   invoices: InvoiceRecord[];
+  digitalEntitlements: DigitalEntitlementRecord[];
+  digitalDownloadLogs: DigitalDownloadLogRecord[];
   wallets: CreditWalletRecord[];
   creditTransactions: CreditTransactionRecord[];
   subscriptions: SubscriptionRecord[];
@@ -67,6 +81,7 @@ interface PortalStoreState {
   supportTickets: SupportTicketRecord[];
   notifications: NotificationRecord[];
   activities: ClientActivityLogRecord[];
+  consents: PortalConsentRecord[];
   counters: {
     order: number;
     invoice: number;
@@ -94,6 +109,8 @@ function createEmptyState(): PortalStoreState {
   return {
     users: [],
     profiles: [],
+    organizations: [],
+    userMfa: {},
     addresses: [],
     sessions: [],
     categories: structuredClone(PORTAL_PRODUCT_CATEGORIES),
@@ -103,8 +120,11 @@ function createEmptyState(): PortalStoreState {
     carts: [],
     orders: [],
     payments: [],
+    refunds: [],
     webhookEvents: [],
     invoices: [],
+    digitalEntitlements: [],
+    digitalDownloadLogs: [],
     wallets: [],
     creditTransactions: [],
     subscriptions: [],
@@ -117,16 +137,19 @@ function createEmptyState(): PortalStoreState {
     supportTickets: [],
     notifications: [],
     activities: [],
+    consents: [],
     counters: { order: 1000, invoice: 1000, project: 100, ticket: 100, revision: 1, inquiry: 100 },
   };
 }
 
 export class LocalPortalRepository implements PortalRepository {
-  public readonly mode = 'local_dev' as const;
-  private state: PortalStoreState;
+  public readonly mode: 'supabase' | 'local_dev' = 'local_dev';
+  public readonly supabaseWritePersistenceImplemented: boolean = false;
+  protected state: PortalStoreState;
   private readonly persistDir: string | null;
   private readonly filesDir: string | null;
   private readonly memoryFileBlobs = new Map<string, Buffer>();
+  protected readonly paymentRefAllocator = new AtomicPaymentReferenceAllocator();
 
   constructor(options?: { persistDir?: string | null }) {
     this.persistDir = options?.persistDir ?? null;
@@ -866,7 +889,14 @@ export class LocalPortalRepository implements PortalRepository {
     currency: PortalCurrency;
     eventStatus: 'paid' | 'failed' | 'refunded';
     payloadSummary: Record<string, unknown>;
-  }): Promise<{ deduplicated: boolean; order?: OrderRecord; creditsAllocated: number; projectCreated?: ProjectRecord }> {
+  }): Promise<{
+    deduplicated: boolean;
+    order?: OrderRecord;
+    creditsAllocated: number;
+    projectCreated?: ProjectRecord;
+    ophireumPaymentReference?: string;
+    entitlementsCreated?: DigitalEntitlementRecord[];
+  }> {
     const existingEvent = this.state.webhookEvents.find(
       (e) => e.provider === input.provider && e.providerEventId === input.providerEventId
     );
@@ -936,13 +966,14 @@ export class LocalPortalRepository implements PortalRepository {
         throw new Error(`Order in status "${order.paymentStatus}" cannot transition to paid`);
       }
 
+      const ophireumPaymentReference = await this.allocatePaymentReference();
       order.paymentStatus = 'paid';
-      order.paymentReference = input.providerTransactionId;
+      order.paymentReference = ophireumPaymentReference;
       order.fulfillmentStatus = order.projectRequirements?.instructions ? 'confirmed' : 'awaiting_project_brief';
       order.timeline.push({
         status: 'confirmed',
         label: 'Payment Verified & Order Confirmed',
-        note: `Verified via ${input.provider} webhook (${input.providerTransactionId}).`,
+        note: `Verified via ${input.provider} webhook (${input.providerTransactionId}). Payment Reference: ${ophireumPaymentReference}.`,
         timestamp: ts,
       });
       order.updatedAt = ts;
@@ -968,11 +999,34 @@ export class LocalPortalRepository implements PortalRepository {
             ? 'subscription_allocation'
             : 'package_purchase',
           amount: totalCredits,
-          description: `Verified payment allocation for order ${order.orderNumber}`,
+          description: `Verified payment allocation for order ${order.orderNumber} (${ophireumPaymentReference})`,
           relatedOrderId: order.id,
           idempotencyKey: `credit-alloc:${order.id}`,
         });
         creditsAllocated = totalCredits;
+      }
+
+      // Provision digital entitlements for confirmed orders
+      const entitlementsCreated: DigitalEntitlementRecord[] = [];
+      for (const item of order.items) {
+        const entitlement: DigitalEntitlementRecord = {
+          id: crypto.randomUUID(),
+          userId: order.userId,
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          productId: item.productId,
+          productName: item.productName,
+          packageName: item.packageName,
+          licenseKey: `OPM-LIC-${crypto.randomBytes(4).toString('hex').toUpperCase()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`,
+          versionLabel: '1.0.0',
+          maxDownloads: 10,
+          downloadCount: 0,
+          status: 'active',
+          expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+          createdAt: ts,
+        };
+        this.state.digitalEntitlements.push(entitlement);
+        entitlementsCreated.push(entitlement);
       }
 
       // Activate ONLY pending subscriptions belonging strictly to THIS order
@@ -1009,12 +1063,24 @@ export class LocalPortalRepository implements PortalRepository {
       await this.addNotification({
         userId: order.userId,
         type: 'payment_confirmed',
-        title: `Payment Confirmed for ${order.orderNumber}`,
+        title: `Payment Confirmed (${ophireumPaymentReference})`,
         body: creditsAllocated > 0
-          ? `Payment verified and ${creditsAllocated.toLocaleString()} credits added to your wallet.`
-          : 'Your payment has been verified and production intake is now active.',
+          ? `Order ${order.orderNumber} verified and ${creditsAllocated.toLocaleString()} credits added to your wallet.`
+          : `Order ${order.orderNumber} verified. Production intake and digital entitlements are now active.`,
         linkPath: `/portal/orders/${order.id}`,
       });
+
+      webhookRecord.processingStatus = 'processed';
+      webhookRecord.processedAt = this.now();
+      this.persist();
+      return {
+        deduplicated: false,
+        order,
+        creditsAllocated,
+        projectCreated,
+        ophireumPaymentReference,
+        entitlementsCreated,
+      };
     } else if (input.eventStatus === 'failed') {
       if (!['unpaid', 'pending', 'processing'].includes(order.paymentStatus)) {
         webhookRecord.processingStatus = 'failed';
@@ -1064,6 +1130,12 @@ export class LocalPortalRepository implements PortalRepository {
         payment.updatedAt = ts;
       }
       if (invoice) invoice.paymentStatus = 'refunded';
+      // Revoke digital entitlements on refunded order
+      for (const ent of this.state.digitalEntitlements) {
+        if (ent.orderId === order.id) {
+          ent.status = 'revoked';
+        }
+      }
     }
 
     webhookRecord.processingStatus = 'processed';
@@ -1646,5 +1718,392 @@ export class LocalPortalRepository implements PortalRepository {
     this.state.activities.push(record);
     this.persist();
     return record;
+  }
+
+  // ---- Atomic Asia/Manila Payment Reference ----
+  async allocatePaymentReference(date?: Date): Promise<string> {
+    return this.paymentRefAllocator.allocate(date);
+  }
+
+  // ---- Customer MFA ----
+  async getUserMfaState(userId: string): Promise<UserMfaState> {
+    return this.state.userMfa[userId] || { enabled: false };
+  }
+
+  async setUserMfaState(userId: string, state: UserMfaState): Promise<void> {
+    this.state.userMfa[userId] = state;
+    this.persist();
+  }
+
+  // ---- Customer Organization ----
+  async getOrganization(userId: string): Promise<CustomerOrganizationRecord | null> {
+    return this.state.organizations.find((o) => o.ownerUserId === userId) || null;
+  }
+
+  async upsertOrganization(
+    userId: string,
+    input: Partial<Omit<CustomerOrganizationRecord, 'id' | 'ownerUserId' | 'createdAt' | 'updatedAt'>>
+  ): Promise<CustomerOrganizationRecord> {
+    const ts = this.now();
+    let org = this.state.organizations.find((o) => o.ownerUserId === userId);
+    const profile = await this.getProfile(userId);
+    if (!org) {
+      org = {
+        id: crypto.randomUUID(),
+        ownerUserId: userId,
+        legalName: input.legalName?.trim() || profile?.companyName || 'My Organization',
+        tradeName: input.tradeName?.trim() || '',
+        taxId: input.taxId?.trim() || profile?.taxId || '',
+        industry: input.industry?.trim() || '',
+        billingEmail: input.billingEmail?.trim() || profile?.email || '',
+        billingAddress: input.billingAddress?.trim() || '',
+        country: input.country?.trim() || 'Philippines',
+        members: input.members || [
+          {
+            id: crypto.randomUUID(),
+            email: profile?.email || '',
+            role: 'owner',
+            status: 'active',
+            addedAt: ts,
+          },
+        ],
+        createdAt: ts,
+        updatedAt: ts,
+      };
+      this.state.organizations.push(org);
+    } else {
+      if (input.legalName !== undefined) org.legalName = input.legalName.trim();
+      if (input.tradeName !== undefined) org.tradeName = input.tradeName.trim();
+      if (input.taxId !== undefined) org.taxId = input.taxId.trim();
+      if (input.industry !== undefined) org.industry = input.industry.trim();
+      if (input.billingEmail !== undefined) org.billingEmail = input.billingEmail.trim();
+      if (input.billingAddress !== undefined) org.billingAddress = input.billingAddress.trim();
+      if (input.country !== undefined) org.country = input.country.trim();
+      if (Array.isArray(input.members)) org.members = input.members;
+      org.updatedAt = ts;
+    }
+    this.persist();
+    return org;
+  }
+
+  // ---- Promotions ----
+  async listDiscountCodes(includeInactive = false): Promise<DiscountCodeRecord[]> {
+    const now = Date.now();
+    return this.state.discountCodes.filter((d) => {
+      if (includeInactive) return true;
+      if (!d.isActive) return false;
+      if (d.expiresAt && Date.parse(d.expiresAt) < now) return false;
+      return true;
+    });
+  }
+
+  async upsertDiscountCode(record: DiscountCodeRecord): Promise<DiscountCodeRecord> {
+    const cleanCode = record.code.trim().toUpperCase();
+    const normalized: DiscountCodeRecord = { ...record, code: cleanCode };
+    const idx = this.state.discountCodes.findIndex((d) => d.code === cleanCode);
+    if (idx >= 0) this.state.discountCodes[idx] = normalized;
+    else this.state.discountCodes.push(normalized);
+    this.persist();
+    return normalized;
+  }
+
+  // ---- Digital Entitlements & Downloads ----
+  async listDigitalEntitlements(userId: string): Promise<DigitalEntitlementRecord[]> {
+    return this.state.digitalEntitlements
+      .filter((e) => e.userId === userId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async recordDigitalDownload(input: {
+    userId: string;
+    entitlementId: string;
+    ipAddress: string;
+    userAgent: string;
+  }): Promise<{ entitlement?: DigitalEntitlementRecord; log?: DigitalDownloadLogRecord; error?: string }> {
+    const ent = this.state.digitalEntitlements.find(
+      (e) => e.id === input.entitlementId && e.userId === input.userId
+    );
+    if (!ent) return { error: 'Digital entitlement not found.' };
+    if (ent.status !== 'active') return { error: `Entitlement is ${ent.status} and cannot be downloaded.` };
+    if (ent.expiresAt && Date.parse(ent.expiresAt) < Date.now()) {
+      ent.status = 'expired';
+      this.persist();
+      return { error: 'Digital entitlement license has expired.' };
+    }
+    if (ent.downloadCount >= ent.maxDownloads) {
+      return { error: `Maximum download limit (${ent.maxDownloads}) reached for this entitlement.` };
+    }
+    ent.downloadCount += 1;
+    const log: DigitalDownloadLogRecord = {
+      id: crypto.randomUUID(),
+      entitlementId: ent.id,
+      userId: input.userId,
+      ipAddress: input.ipAddress,
+      userAgent: input.userAgent,
+      downloadedAt: this.now(),
+    };
+    this.state.digitalDownloadLogs.push(log);
+    this.persist();
+    return { entitlement: ent, log };
+  }
+
+  async listDigitalDownloadLogs(userId: string): Promise<DigitalDownloadLogRecord[]> {
+    return this.state.digitalDownloadLogs
+      .filter((l) => l.userId === userId)
+      .sort((a, b) => b.downloadedAt.localeCompare(a.downloadedAt));
+  }
+
+  // ---- Consents & Personal Data Export ----
+  async recordConsent(input: Omit<PortalConsentRecord, 'id' | 'recordedAt'>): Promise<PortalConsentRecord> {
+    const record: PortalConsentRecord = {
+      ...input,
+      id: crypto.randomUUID(),
+      recordedAt: this.now(),
+    };
+    this.state.consents.push(record);
+    this.persist();
+    return record;
+  }
+
+  async listConsents(userId: string): Promise<PortalConsentRecord[]> {
+    return this.state.consents
+      .filter((c) => c.userId === userId)
+      .sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
+  }
+
+  async exportUserPersonalData(userId: string): Promise<Record<string, unknown>> {
+    const user = await this.findUserById(userId);
+    const safeUser = user
+      ? {
+          id: user.id,
+          email: user.email,
+          emailVerified: user.emailVerified,
+          accountStatus: user.accountStatus,
+          createdAt: user.createdAt,
+        }
+      : null;
+    return {
+      exportedAt: this.now(),
+      complianceFramework: 'Republic Act No. 10173 (Philippine Data Privacy Act) & GDPR Data Portability',
+      account: safeUser,
+      profile: await this.getProfile(userId),
+      organization: await this.getOrganization(userId),
+      addresses: await this.listAddresses(userId),
+      orders: await this.listOrders(userId),
+      payments: await this.listPayments(userId),
+      invoices: await this.listInvoices(userId),
+      subscriptions: await this.listSubscriptions(userId),
+      digitalEntitlements: await this.listDigitalEntitlements(userId),
+      projects: await this.listProjects(userId),
+      supportTickets: await this.listSupportTickets(userId),
+      consents: await this.listConsents(userId),
+      activities: await this.listActivities(userId, 200),
+    };
+  }
+
+  // ---- Admin Command Center & BI Operations ----
+  async adminListUsers(): Promise<Array<{ user: Omit<PortalUserRecord, 'passwordHash'>; profile: PortalProfileRecord | null }>> {
+    return this.state.users.map((u) => {
+      const { passwordHash: _pw, verificationTokenHash: _vt, resetTokenHash: _rt, pendingEmailTokenHash: _pt, ...safe } = u;
+      return {
+        user: safe,
+        profile: this.state.profiles.find((p) => p.userId === u.id) || null,
+      };
+    });
+  }
+
+  async adminListOrders(): Promise<OrderRecord[]> {
+    return [...this.state.orders].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async adminListPayments(): Promise<PaymentRecord[]> {
+    return [...this.state.payments].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async adminListInvoices(): Promise<InvoiceRecord[]> {
+    return [...this.state.invoices].sort((a, b) => b.issuedAt.localeCompare(a.issuedAt));
+  }
+
+  async adminListSubscriptions(): Promise<SubscriptionRecord[]> {
+    return [...this.state.subscriptions].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async adminListProjects(): Promise<ProjectRecord[]> {
+    return [...this.state.projects].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  async adminListSupportTickets(): Promise<SupportTicketRecord[]> {
+    return [...this.state.supportTickets].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  async adminListRefunds(): Promise<PaymentRefundRecord[]> {
+    return [...this.state.refunds].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async adminUpdateOrderStatus(
+    orderId: string,
+    status: OrderStatus,
+    actor: string,
+    note: string
+  ): Promise<OrderRecord | null> {
+    const order = this.state.orders.find((o) => o.id === orderId);
+    if (!order) return null;
+    const ts = this.now();
+    order.fulfillmentStatus = status;
+    order.timeline.push({
+      status,
+      label: `Updated by ${actor}`,
+      note: note.trim() || `Status transitioned to ${status}`,
+      timestamp: ts,
+    });
+    order.updatedAt = ts;
+    await this.addNotification({
+      userId: order.userId,
+      type: 'order_created',
+      title: `Order ${order.orderNumber} Status Updated`,
+      body: `Status is now ${status.replace(/_/g, ' ')}. ${note.trim()}`,
+      linkPath: `/portal/orders/${order.id}`,
+    });
+    this.persist();
+    return order;
+  }
+
+  async adminUpdateProjectStage(
+    projectId: string,
+    stage: ProjectStage,
+    actor: string,
+    note: string
+  ): Promise<ProjectRecord | null> {
+    const project = this.state.projects.find((p) => p.id === projectId);
+    if (!project) return null;
+    const ts = this.now();
+    const stageIdx = DEFAULT_MILESTONE_STAGES.findIndex((s) => s.stageKey === stage);
+    project.currentStage = stage;
+    if (stageIdx >= 0) {
+      project.progressPercent = Math.round(((stageIdx + 1) / DEFAULT_MILESTONE_STAGES.length) * 100);
+      for (const m of this.state.milestones) {
+        if (m.projectId !== projectId) continue;
+        const mIdx = DEFAULT_MILESTONE_STAGES.findIndex((s) => s.stageKey === m.stageKey);
+        if (mIdx < stageIdx) {
+          m.status = 'completed';
+          if (!m.completedAt) m.completedAt = ts;
+        } else if (mIdx === stageIdx) {
+          m.status = stage === 'project_completed' ? 'completed' : 'in_progress';
+          if (stage === 'project_completed') m.completedAt = ts;
+        } else {
+          m.status = 'pending';
+        }
+      }
+    }
+    project.approvalHistory.push({
+      action: `stage_${stage}`,
+      actor,
+      note: note.trim() || `Advanced to ${stage}`,
+      timestamp: ts,
+    });
+    project.updatedAt = ts;
+    await this.addNotification({
+      userId: project.userId,
+      type: 'project_update',
+      title: `Project ${project.referenceNumber} Updated`,
+      body: `Stage moved to ${stage.replace(/_/g, ' ')}. ${note.trim()}`,
+      linkPath: `/portal/projects/${project.id}`,
+    });
+    this.persist();
+    return project;
+  }
+
+  async adminReplySupportTicket(
+    ticketId: string,
+    senderName: string,
+    body: string,
+    nextStatus: SupportTicketStatus = 'waiting_for_client'
+  ): Promise<SupportTicketRecord | null> {
+    const ticket = this.state.supportTickets.find((t) => t.id === ticketId);
+    if (!ticket) return null;
+    const ts = this.now();
+    ticket.messages.push({
+      id: crypto.randomUUID(),
+      ticketId,
+      senderRole: 'support',
+      senderName,
+      body: body.trim(),
+      attachmentIds: [],
+      createdAt: ts,
+    });
+    ticket.status = nextStatus;
+    ticket.updatedAt = ts;
+    await this.addNotification({
+      userId: ticket.userId,
+      type: 'support_reply',
+      title: `Support Reply on ${ticket.ticketNumber}`,
+      body: body.trim().slice(0, 140),
+      linkPath: '/portal/support',
+    });
+    this.persist();
+    return ticket;
+  }
+
+  async adminRequestRefund(input: {
+    paymentId: string;
+    amountMinor: number;
+    reason: string;
+    requestedBy: string;
+  }): Promise<PaymentRefundRecord | null> {
+    const payment = this.state.payments.find((p) => p.id === input.paymentId);
+    if (!payment || payment.status !== 'paid') return null;
+    if (input.amountMinor <= 0 || input.amountMinor + payment.refundedMinor > payment.amountMinor) {
+      return null;
+    }
+    const ts = this.now();
+    const record: PaymentRefundRecord = {
+      id: crypto.randomUUID(),
+      paymentId: payment.id,
+      orderId: payment.orderId,
+      orderNumber: payment.orderNumber,
+      amountMinor: input.amountMinor,
+      currency: payment.currency,
+      reason: input.reason.trim(),
+      status: 'pending_approval',
+      requestedBy: input.requestedBy,
+      createdAt: ts,
+      updatedAt: ts,
+    };
+    this.state.refunds.push(record);
+    this.persist();
+    return record;
+  }
+
+  async adminDecideRefund(
+    refundId: string,
+    decision: 'approved' | 'rejected' | 'processed',
+    actor: string
+  ): Promise<PaymentRefundRecord | null> {
+    const refund = this.state.refunds.find((r) => r.id === refundId);
+    if (!refund) return null;
+    const ts = this.now();
+    refund.status = decision;
+    refund.approvedBy = actor;
+    refund.updatedAt = ts;
+    if (decision === 'processed') {
+      const payment = this.state.payments.find((p) => p.id === refund.paymentId);
+      const order = this.state.orders.find((o) => o.id === refund.orderId);
+      const invoice = this.state.invoices.find((i) => i.orderId === refund.orderId);
+      if (payment) {
+        payment.refundedMinor = Math.min(payment.amountMinor, payment.refundedMinor + refund.amountMinor);
+        payment.status = payment.refundedMinor >= payment.amountMinor ? 'refunded' : 'partially_refunded';
+        payment.updatedAt = ts;
+      }
+      if (order && payment) {
+        order.paymentStatus = payment.status;
+        if (payment.status === 'refunded') order.fulfillmentStatus = 'cancelled';
+        order.updatedAt = ts;
+      }
+      if (invoice && payment) {
+        invoice.paymentStatus = payment.status;
+      }
+    }
+    this.persist();
+    return refund;
   }
 }

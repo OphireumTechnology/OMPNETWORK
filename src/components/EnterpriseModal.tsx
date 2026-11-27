@@ -23,7 +23,7 @@ import {
 import { AIProcessingVisualizer } from './animations/AIProcessingVisualizer';
 import { COMPANY_CONFIG } from '../data/companyConfig';
 import { apiUrl } from '../lib/apiClient';
-import { navigateToPortalPath } from '../portal/PortalRouter';
+import { navigateToAppPath, navigateToPortalPath } from '../portal/PortalRouter';
 
 interface EnterpriseModalProps {
   isOpen: boolean;
@@ -39,14 +39,8 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({
   const [activeTab, setActiveTab] = useState<'portal' | 'studio' | 'agents' | 'admin'>(defaultTab);
   const [adminSubTab, setAdminSubTab] = useState<'appointments' | 'inquiries' | 'audit'>('inquiries');
 
-  // Admin auth session state (server-verified JWT/session token only)
-  const [adminToken, setAdminToken] = useState<string>(() => {
-    try {
-      return sessionStorage.getItem('opm_admin_token') || '';
-    } catch {
-      return '';
-    }
-  });
+  // Admin auth session state (strictly in-memory + HttpOnly cookie, zero browser web storage)
+  const [adminToken, setAdminToken] = useState<string>('');
   const [adminProfile, setAdminProfile] = useState<{ email: string; role: string } | null>(null);
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -62,27 +56,23 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({
   const [promptInput, setPromptInput] = useState('');
   const [studioGenerating, setStudioGenerating] = useState(false);
   const [studioOutput, setStudioOutput] = useState<string | null>(null);
+  const [studioProvider, setStudioProvider] = useState<string | null>(null);
+  const [publicAgents, setPublicAgents] = useState<any[]>([]);
 
   const loadAuthorizedAdminData = useCallback(async (tokenToUse: string) => {
-    if (!tokenToUse) {
-      setAdminProfile(null);
-      return;
-    }
-
     setIsLoadingAdminData(true);
     setAdminDataError(null);
 
     try {
-      const headers = { Authorization: `Bearer ${tokenToUse}` };
-      const sessionRes = await fetch(apiUrl('/api/admin/auth/session'), { headers });
+      const headers: Record<string, string> = {};
+      if (tokenToUse) headers['Authorization'] = `Bearer ${tokenToUse}`;
+      const sessionRes = await fetch(apiUrl('/api/admin/auth/session'), {
+        headers,
+        credentials: 'include',
+      });
       if (!sessionRes.ok) {
-        const errData = await sessionRes.json().catch(() => ({}));
         setAdminToken('');
         setAdminProfile(null);
-        try {
-          sessionStorage.removeItem('opm_admin_token');
-        } catch {}
-        setAuthError(errData.error || 'Administrator session expired. Please sign in again.');
         setIsLoadingAdminData(false);
         return;
       }
@@ -91,9 +81,9 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({
       setAdminProfile(sessionJson.admin || null);
 
       const [reqRes, aptRes, auditRes] = await Promise.all([
-        fetch(apiUrl('/api/admin/solution-requests?limit=25&offset=0'), { headers }),
-        fetch(apiUrl('/api/admin/appointments?limit=25&offset=0'), { headers }),
-        fetch(apiUrl('/api/admin/audit-logs?limit=25&offset=0'), { headers }),
+        fetch(apiUrl('/api/admin/solution-requests?limit=25&offset=0'), { headers, credentials: 'include' }),
+        fetch(apiUrl('/api/admin/appointments?limit=25&offset=0'), { headers, credentials: 'include' }),
+        fetch(apiUrl('/api/admin/audit-logs?limit=25&offset=0'), { headers, credentials: 'include' }),
       ]);
 
       const reqJson = await reqRes.json().catch(() => ({}));
@@ -121,10 +111,23 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({
   }, [defaultTab]);
 
   useEffect(() => {
-    if (isOpen && activeTab === 'admin' && adminToken) {
+    if (isOpen && activeTab === 'admin') {
       void loadAuthorizedAdminData(adminToken);
     }
   }, [isOpen, activeTab, adminToken, loadAuthorizedAdminData]);
+
+  useEffect(() => {
+    if (isOpen && activeTab === 'agents' && publicAgents.length === 0) {
+      fetch(apiUrl('/api/ai/agents/public'))
+        .then((r) => r.json())
+        .then((d) => {
+          if (Array.isArray(d.agents) && d.agents.length > 0) {
+            setPublicAgents(d.agents);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [isOpen, activeTab, publicAgents.length]);
 
   if (!isOpen) return null;
 
@@ -136,6 +139,7 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({
     try {
       const res = await fetch(apiUrl('/api/admin/auth/login'), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: loginEmail.trim(),
@@ -150,9 +154,6 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({
       setAdminToken(data.token);
       setAdminProfile(data.admin || null);
       setLoginPassword('');
-      try {
-        sessionStorage.setItem('opm_admin_token', data.token);
-      } catch {}
       await loadAuthorizedAdminData(data.token);
     } catch (err: any) {
       setAuthError(err?.message || 'Unable to verify administrator credentials.');
@@ -161,27 +162,47 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({
     }
   };
 
-  const handleAdminLogout = () => {
+  const handleAdminLogout = async () => {
+    try {
+      const headers: Record<string, string> = {};
+      if (adminToken) headers['Authorization'] = `Bearer ${adminToken}`;
+      await fetch(apiUrl('/api/admin/auth/logout'), {
+        method: 'POST',
+        credentials: 'include',
+        headers,
+      });
+    } catch {}
     setAdminToken('');
     setAdminProfile(null);
     setSolutionRequests([]);
     setAppointments([]);
     setAuditLogs([]);
     setAdminDataError(null);
-    try {
-      sessionStorage.removeItem('opm_admin_token');
-    } catch {}
   };
 
-  const handleRunStudioSimulation = () => {
-    if (!promptInput.trim()) return;
+  const handleRunStudioBlueprint = async () => {
+    const idea = promptInput.trim();
+    if (!idea || studioGenerating) return;
     setStudioGenerating(true);
-    setTimeout(() => {
+    setStudioOutput(null);
+    setStudioProvider(null);
+    try {
+      const res = await fetch(apiUrl('/api/ai/studio/blueprint'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idea }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.blueprint) {
+        throw new Error(data.error || 'Unable to synthesize architecture blueprint.');
+      }
+      setStudioOutput(data.blueprint);
+      setStudioProvider(data.provider || 'ophireum-blueprint-engine');
+    } catch (err: any) {
+      setStudioOutput(`Error: ${err?.message || 'Blueprint API unavailable.'}`);
+    } finally {
       setStudioGenerating(false);
-      setStudioOutput(
-        `// Ophireum AI Studio Architecture Blueprint Preview\n// Prompt: "${promptInput}"\n\nimport React from 'react';\n\nexport const EnterpriseView: React.FC = () => {\n  return (\n    <section className="bg-slate-950 p-8 rounded-2xl border border-cyan-500/30 shadow-2xl">\n      <h2 className="text-xl font-bold text-white tracking-tight">Ophireum Distributed Media Hub</h2>\n      <p className="text-sm text-slate-400 mt-2">Verified Architecture Specification Blueprint</p>\n    </section>\n  );\n};`
-      );
-    }, 800);
+    }
   };
 
   return (
@@ -250,8 +271,8 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({
             }`}
           >
             <Cpu className="w-3.5 h-3.5" />
-            <span>AI Agent Workforce (12 Roles)</span>
-            <span className="text-[10px] opacity-75 font-mono">PHASE 5/7</span>
+            <span>AI Agent Workforce (25 Roles)</span>
+            <span className="text-[10px] opacity-75 font-mono">A00–A24</span>
           </button>
 
           <button
@@ -396,7 +417,7 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({
                     className="flex-1 px-3.5 py-2.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#00C2C7]"
                   />
                   <button
-                    onClick={handleRunStudioSimulation}
+                    onClick={handleRunStudioBlueprint}
                     disabled={studioGenerating || !promptInput.trim()}
                     className="px-4 py-2.5 text-xs font-semibold text-[#0B1220] bg-[#00C2C7] hover:bg-[#00d6dc] disabled:opacity-50 rounded-lg flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
                   >
@@ -405,12 +426,19 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({
                     ) : (
                       <Send className="w-3.5 h-3.5" />
                     )}
-                    <span>Generate Preview</span>
+                    <span>Generate Blueprint</span>
                   </button>
                 </div>
                 {studioOutput && (
-                  <div className="mt-4 p-4 rounded-lg bg-slate-950 border border-slate-800 font-mono text-xs text-[#00C2C7] overflow-x-auto">
-                    <pre>{studioOutput}</pre>
+                  <div className="mt-4 p-4 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
+                    {studioProvider && (
+                      <div className="text-[10px] font-mono text-slate-400 uppercase">
+                        Synthesizer Engine: {studioProvider}
+                      </div>
+                    )}
+                    <pre className="font-mono text-xs text-[#00C2C7] whitespace-pre-wrap overflow-x-auto">
+                      {studioOutput}
+                    </pre>
                   </div>
                 )}
               </div>
@@ -419,21 +447,41 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({
 
           {activeTab === 'agents' && (
             <div className="space-y-6">
-              <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex items-start justify-between">
+              <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex items-start justify-between gap-4 flex-wrap">
                 <div>
                   <span className="text-[11px] font-mono text-[#00C2C7] uppercase">
-                    Autonomous Workforce Architecture
+                    Governed Enterprise AI Workforce Registry
                   </span>
                   <h3 className="text-lg font-bold text-white mt-0.5">
-                    12 Specialized AI Development Agents
+                    {publicAgents.length > 0 ? `${publicAgents.length} Commissioned AI Workforce Agents (A00–A24)` : '25 Specialized Enterprise AI Agents'}
                   </h3>
                   <p className="text-xs text-slate-300 mt-1 max-w-2xl">
-                    Operating through server-side adapters (@google/genai SDK) within strict permission boundaries and immutable audit logs.
+                    Operating strictly via server-side adapters (@google/genai SDK) with role allowlists, high-risk human approval queues, and immutable audit logs.
                   </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    navigateToAppPath('/admin');
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#00C2C7] hover:bg-[#00d6dc] text-[#0B1220] text-xs font-semibold cursor-pointer"
+                >
+                  <span>Orchestrate in Admin Center</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </button>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {aiAgentsData.map((agent) => (
+                {(publicAgents.length > 0
+                  ? publicAgents.map((a) => ({
+                      id: a.code,
+                      code: a.code,
+                      name: a.name,
+                      focus: `${a.department} — ${a.description}`,
+                      status: a.requiresHumanApproval ? 'Approval Gated' : 'Active',
+                    }))
+                  : aiAgentsData
+                ).map((agent) => (
                   <div
                     key={agent.id}
                     className="p-4 rounded-xl bg-[#111827] border border-slate-800 flex flex-col justify-between space-y-3"
@@ -472,28 +520,42 @@ export const EnterpriseModal: React.FC<EnterpriseModalProps> = ({
                     Super Administrator Operations Center
                   </h3>
                   <p className="text-xs text-slate-300 mt-1">
-                    Access to customer inquiries, solution requests, appointments, and audit logs is strictly protected by server-side RBAC authentication.
+                    Access to customer inquiries, solution requests, appointments, BI analytics, and AI workforce controls is protected by server-side RBAC.
                   </p>
                 </div>
 
-                {adminProfile && (
-                  <div className="flex items-center gap-3">
-                    <div className="text-right text-xs">
-                      <div className="text-white font-semibold">{adminProfile.email}</div>
-                      <div className="text-[10px] font-mono text-emerald-400 uppercase">
-                        Role: {adminProfile.role}
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      navigateToAppPath('/admin');
+                    }}
+                    className="px-3.5 py-2 rounded-lg bg-[#00C2C7] hover:bg-[#00d6dc] text-[#0B1220] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <span>Open Full Admin Command Center</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </button>
+
+                  {adminProfile && (
+                    <div className="flex items-center gap-3">
+                      <div className="text-right text-xs">
+                        <div className="text-white font-semibold">{adminProfile.email}</div>
+                        <div className="text-[10px] font-mono text-emerald-400 uppercase">
+                          Role: {adminProfile.role}
+                        </div>
                       </div>
+                      <button
+                        type="button"
+                        onClick={handleAdminLogout}
+                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <LogOut className="w-3.5 h-3.5" />
+                        <span>Sign Out</span>
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={handleAdminLogout}
-                      className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <LogOut className="w-3.5 h-3.5" />
-                      <span>Sign Out</span>
-                    </button>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
 
               {!adminProfile ? (

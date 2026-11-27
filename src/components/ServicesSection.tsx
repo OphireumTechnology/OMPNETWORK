@@ -706,7 +706,10 @@ export const ServicesSection: React.FC<ServicesSectionProps> = ({
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <button
               type="button"
-              onClick={() => setSelectedIds([])}
+              onClick={() => {
+                setSelectedIds([]);
+                setSelectedOptionsMap({});
+              }}
               className="px-2 py-1.5 text-xs text-slate-400 hover:text-white cursor-pointer"
             >
               Clear

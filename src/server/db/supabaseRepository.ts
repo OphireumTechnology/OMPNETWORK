@@ -559,30 +559,103 @@ export class SupabaseDatabaseRepository implements DatabaseRepository {
     };
   }
 
+  async updateSolutionRequestStatus(
+    referenceCode: string,
+    status: SolutionRequestRecord['status']
+  ): Promise<SolutionRequestRecord> {
+    const db = this.getClient();
+    const { data, error } = await db
+      .from('solution_requests')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('reference_code', referenceCode)
+      .select('*')
+      .single();
+
+    if (error || !data) {
+      throw new NotFoundError(`Solution request ${referenceCode} not found.`);
+    }
+    return mapSolutionRequestRow(data);
+  }
+
+  async updateOutboxByProviderReference(
+    providerReference: string,
+    status: EmailOutboxRecord['status'],
+    lastError?: string
+  ): Promise<boolean> {
+    if (!this.client || !providerReference) return false;
+    const patch: Record<string, unknown> = {
+      status,
+      updated_at: new Date().toISOString(),
+    };
+    if (lastError !== undefined) patch.last_error = lastError;
+    const { data, error } = await this.client
+      .from('notification_records')
+      .update(patch)
+      .eq('provider_reference', providerReference)
+      .select('id');
+    return !error && Boolean(data && data.length > 0);
+  }
+
   async findActiveAdminByEmail(email: string, authUserId?: string): Promise<AdminUserRecord | null> {
     const normalized = email.trim().toLowerCase();
-    // Allowlist bootstrap admin email from server-only env when matching admin_users table or configured env bootstrap
-    if (this.client) {
-      let query = this.client
-        .from('admin_users')
-        .select('*')
-        .eq('is_active', true);
+    const validRoles = new Set([
+      'super_admin',
+      'admin',
+      'operations_manager',
+      'finance_officer',
+      'sales_officer',
+      'project_manager',
+      'developer',
+      'support_officer',
+      'auditor',
+    ]);
+    const normalizeRole = (raw: unknown): AdminUserRecord['role'] => {
+      const value = String(raw || '').trim();
+      return validRoles.has(value) ? (value as AdminUserRecord['role']) : 'admin';
+    };
 
-      if (authUserId) {
-        query = query.or(`auth_user_id.eq.${authUserId},email.ilike.${normalized}`);
-      } else {
-        query = query.ilike('email', normalized);
+    // Parameterized lookup without PostgREST `.or()` string interpolation
+    if (this.client) {
+      const isUuid =
+        typeof authUserId === 'string' &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(authUserId);
+
+      if (isUuid) {
+        const { data, error } = await this.client
+          .from('admin_users')
+          .select('*')
+          .eq('is_active', true)
+          .eq('auth_user_id', authUserId)
+          .maybeSingle();
+
+        if (!error && data) {
+          return {
+            id: String(data.id),
+            email: String(data.email),
+            fullName: String(data.full_name),
+            role: normalizeRole(data.role),
+            isActive: Boolean(data.is_active),
+          };
+        }
       }
 
-      const { data, error } = await query.maybeSingle();
-      if (!error && data) {
-        return {
-          id: String(data.id),
-          email: String(data.email),
-          fullName: String(data.full_name),
-          role: data.role === 'super_admin' ? 'super_admin' : 'admin',
-          isActive: Boolean(data.is_active),
-        };
+      if (normalized) {
+        const { data, error } = await this.client
+          .from('admin_users')
+          .select('*')
+          .eq('is_active', true)
+          .ilike('email', normalized)
+          .maybeSingle();
+
+        if (!error && data) {
+          return {
+            id: String(data.id),
+            email: String(data.email),
+            fullName: String(data.full_name),
+            role: normalizeRole(data.role),
+            isActive: Boolean(data.is_active),
+          };
+        }
       }
     }
 
@@ -599,7 +672,7 @@ export class SupabaseDatabaseRepository implements DatabaseRepository {
       return {
         id: 'env-bootstrap-admin',
         email: normalized,
-        fullName: 'OPHIRIUM Administrator',
+        fullName: 'OPHIREUM Administrator',
         role: 'super_admin',
         isActive: true,
       };

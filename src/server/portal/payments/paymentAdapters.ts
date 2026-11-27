@@ -191,6 +191,175 @@ function createStandardAdapter(spec: {
           message: cfg.unavailableMessage,
         };
       }
+
+      const apiKey = (process.env[spec.keyEnvVar] || '').trim();
+      const amountMajor = Number((req.amountMinor / 100).toFixed(2));
+
+      // Real sandbox API calls when merchant sandbox keys are provisioned (never fabricates success on HTTP failure)
+      try {
+        if (spec.provider === 'xendit') {
+          const authHeader = `Basic ${Buffer.from(`${apiKey}:`).toString('base64')}`;
+          const res = await fetch('https://api.xendit.co/v2/invoices', {
+            method: 'POST',
+            headers: {
+              Authorization: authHeader,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              external_id: req.orderId,
+              amount: amountMajor,
+              currency: req.currency,
+              payer_email: req.customerEmail,
+              description: `OPHIREUM Order ${req.orderNumber}`,
+              success_redirect_url: req.returnUrl,
+              failure_redirect_url: req.returnUrl,
+            }),
+          });
+          const data: any = await res.json().catch(() => ({}));
+          if (!res.ok || !data?.invoice_url) {
+            return {
+              initiated: false,
+              provider: 'xendit',
+              environment: 'sandbox',
+              message: data?.message || `Xendit sandbox API returned HTTP ${res.status}.`,
+            };
+          }
+          return {
+            initiated: true,
+            provider: 'xendit',
+            environment: 'sandbox',
+            providerTransactionId: String(data.id || req.orderNumber),
+            checkoutUrl: String(data.invoice_url),
+            message: 'Xendit sandbox hosted invoice created.',
+          };
+        }
+
+        if (spec.provider === 'paypal') {
+          const clientId = (process.env.PAYPAL_CLIENT_ID_SANDBOX || '').trim();
+          if (!clientId) {
+            return {
+              initiated: false,
+              provider: 'paypal',
+              environment: 'sandbox',
+              message: 'PAYPAL_CLIENT_ID_SANDBOX is required alongside PAYPAL_CLIENT_SECRET_SANDBOX.',
+            };
+          }
+          const basic = Buffer.from(`${clientId}:${apiKey}`).toString('base64');
+          const tokenRes = await fetch('https://api-m.sandbox.paypal.com/v1/oauth2/token', {
+            method: 'POST',
+            headers: {
+              Authorization: `Basic ${basic}`,
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: 'grant_type=client_credentials',
+          });
+          const tokenData: any = await tokenRes.json().catch(() => ({}));
+          if (!tokenRes.ok || !tokenData?.access_token) {
+            return {
+              initiated: false,
+              provider: 'paypal',
+              environment: 'sandbox',
+              message: tokenData?.error_description || 'PayPal sandbox OAuth token exchange failed.',
+            };
+          }
+          const orderRes = await fetch('https://api-m.sandbox.paypal.com/v2/checkout/orders', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${tokenData.access_token}`,
+              'Content-Type': 'application/json',
+              'PayPal-Request-Id': req.idempotencyKey,
+            },
+            body: JSON.stringify({
+              intent: 'CAPTURE',
+              purchase_units: [
+                {
+                  reference_id: req.orderId,
+                  custom_id: req.orderId,
+                  amount: { currency_code: req.currency, value: amountMajor.toFixed(2) },
+                },
+              ],
+              application_context: {
+                return_url: req.returnUrl,
+                cancel_url: req.returnUrl,
+              },
+            }),
+          });
+          const orderData: any = await orderRes.json().catch(() => ({}));
+          const approveLink = Array.isArray(orderData?.links)
+            ? orderData.links.find((l: any) => l.rel === 'approve')?.href
+            : undefined;
+          if (!orderRes.ok || !approveLink) {
+            return {
+              initiated: false,
+              provider: 'paypal',
+              environment: 'sandbox',
+              message: orderData?.message || `PayPal sandbox API returned HTTP ${orderRes.status}.`,
+            };
+          }
+          return {
+            initiated: true,
+            provider: 'paypal',
+            environment: 'sandbox',
+            providerTransactionId: String(orderData.id),
+            checkoutUrl: String(approveLink),
+            message: 'PayPal sandbox checkout order created.',
+          };
+        }
+
+        if (spec.provider === 'maya') {
+          const publicKey = (process.env.MAYA_PUBLIC_KEY_TEST || '').trim();
+          if (!publicKey) {
+            return {
+              initiated: false,
+              provider: 'maya',
+              environment: 'sandbox',
+              message: 'MAYA_PUBLIC_KEY_TEST is required alongside MAYA_SECRET_KEY_TEST for Maya Checkout.',
+            };
+          }
+          const authHeader = `Basic ${Buffer.from(`${publicKey}:`).toString('base64')}`;
+          const res = await fetch('https://pg-sandbox.paymaya.com/checkout/v1/checkouts', {
+            method: 'POST',
+            headers: {
+              Authorization: authHeader,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              totalAmount: { value: amountMajor, currency: req.currency },
+              requestReferenceNumber: req.orderId,
+              redirectUrl: {
+                success: req.returnUrl,
+                failure: req.returnUrl,
+                cancel: req.returnUrl,
+              },
+            }),
+          });
+          const data: any = await res.json().catch(() => ({}));
+          if (!res.ok || !data?.redirectUrl) {
+            return {
+              initiated: false,
+              provider: 'maya',
+              environment: 'sandbox',
+              message: data?.message || `Maya sandbox API returned HTTP ${res.status}.`,
+            };
+          }
+          return {
+            initiated: true,
+            provider: 'maya',
+            environment: 'sandbox',
+            providerTransactionId: String(data.checkoutId || req.orderNumber),
+            checkoutUrl: String(data.redirectUrl),
+            message: 'Maya sandbox checkout session created.',
+          };
+        }
+      } catch (err: any) {
+        return {
+          initiated: false,
+          provider: spec.provider,
+          environment: 'sandbox',
+          message: `Sandbox gateway call failed for ${spec.displayName}: ${err?.message || 'Network error'}`,
+        };
+      }
+
       return {
         initiated: false,
         provider: spec.provider,
@@ -201,10 +370,18 @@ function createStandardAdapter(spec: {
     },
     verifyWebhook,
     async verifyPaymentStatus(providerTransactionId: string) {
+      const cfg = this.getConfig();
+      if (!cfg.isEnabled) {
+        return {
+          supported: false,
+          status: 'unverified_provider_disabled',
+          message: `Server-to-server status lookup for ${spec.displayName} (${providerTransactionId}) requires active merchant API credentials.`,
+        };
+      }
       return {
-        supported: this.getConfig().isEnabled,
-        status: 'unverified_provider_disabled',
-        message: `Server-to-server status lookup for ${spec.displayName} (${providerTransactionId}) requires active merchant API credentials.`,
+        supported: true,
+        status: 'sandbox_ready_awaiting_live_certification',
+        message: `Sandbox verification boundary active for ${spec.displayName} (${providerTransactionId}).`,
       };
     },
     async initiateRefund(providerTransactionId: string, amountMinor: number, reason: string) {

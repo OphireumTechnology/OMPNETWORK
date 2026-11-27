@@ -77,16 +77,17 @@ async function startServer() {
   }
 
   // Periodic background email outbox retry worker (only when both DB & email provider are configured)
+  let retryTimer: ReturnType<typeof setInterval> | null = null;
   if (db.isConfigured && emailService.isConfigured()) {
-    const timer = setInterval(() => {
+    retryTimer = setInterval(() => {
       void emailService.processRetryQueue(15).catch((err) => {
         logStructured('warn', 'outbox_retry_worker_error', { error: err?.message });
       });
     }, 60_000);
-    timer.unref();
+    retryTimer.unref();
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const httpServer = app.listen(PORT, '0.0.0.0', () => {
     logStructured('info', 'server_started', {
       port: PORT,
       environment: process.env.NODE_ENV || 'development',
@@ -94,6 +95,25 @@ async function startServer() {
       emailConfigured: emailService.isConfigured(),
     });
   });
+
+  const shutdown = (signal: string) => {
+    logStructured('info', 'server_shutdown_initiated', { signal });
+    if (retryTimer) {
+      clearInterval(retryTimer);
+      retryTimer = null;
+    }
+    httpServer.close(() => {
+      logStructured('info', 'server_shutdown_complete', { signal });
+      process.exit(0);
+    });
+    setTimeout(() => {
+      logStructured('warn', 'server_shutdown_forced_timeout', { signal });
+      process.exit(1);
+    }, 10_000).unref();
+  };
+
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
 }
 
 // Guard auto-start when imported by unit tests

@@ -36,6 +36,14 @@ import {
   PortalSettingsPage,
   PortalSupportPage,
 } from './pages/SupportAccountPages';
+import {
+  PortalConsultantPage,
+  PortalConsultationsPage,
+  PortalDownloadsPage,
+  PortalOffersPage,
+  PortalOrganizationPage,
+  PortalPrivacyPage,
+} from './pages/ExtendedPortalPages';
 
 const PUBLIC_PORTAL_ROUTES = new Set([
   '/portal/login',
@@ -115,6 +123,12 @@ const PortalRouteSwitch: React.FC = () => {
   if (normalized === '/portal/support') return <PortalSupportPage />;
   if (normalized === '/portal/notifications') return <PortalNotificationsPage />;
   if (normalized === '/portal/profile') return <PortalProfilePage />;
+  if (normalized === '/portal/organization') return <PortalOrganizationPage />;
+  if (normalized === '/portal/offers') return <PortalOffersPage />;
+  if (normalized === '/portal/downloads') return <PortalDownloadsPage />;
+  if (normalized === '/portal/consultations') return <PortalConsultationsPage />;
+  if (normalized === '/portal/consultant') return <PortalConsultantPage />;
+  if (normalized === '/portal/privacy') return <PortalPrivacyPage />;
   if (normalized === '/portal/security') return <PortalSecurityPage />;
   if (normalized === '/portal/settings') return <PortalSettingsPage />;
 

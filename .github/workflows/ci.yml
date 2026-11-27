@@ -22,7 +22,10 @@ jobs:
       - name: Install dependencies cleanly from lockfile
         run: npm ci --no-audit --no-fund
 
-      - name: TypeScript typecheck & lint
+      - name: TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Lint & syntax validation
         run: npm run lint
 
       - name: Run unit, integration & security regression suite
@@ -33,3 +36,14 @@ jobs:
 
       - name: Verify server bundle compilation
         run: npm run build:server
+
+      - name: Static client secret & unsafe SQL policy hygiene check
+        run: |
+          if grep -rnE "SUPABASE_SERVICE_ROLE_KEY|ADMIN_SESSION_SECRET|GEMINI_API_KEY|RESEND_API_KEY" src/components src/portal src/admin src/legal; then
+            echo "Forbidden server secret identifier detected in client source!"
+            exit 1
+          fi
+          if grep -rnE "USING \(true\)" supabase/; then
+            echo "Forbidden permissive RLS policy USING (true) detected in supabase/!"
+            exit 1
+          fi
