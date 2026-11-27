@@ -21,6 +21,7 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
   test('opens AI Solutions Consultant widget, sends chat inquiry, and activates simulated-mic voice session', async ({
     page,
     browserName,
+    hasTouch,
   }) => {
     // Firefox and WebKit do not support Chromium fake-device flags. Supply a real Web Audio MediaStream at the capture boundary in these test browsers only.
     if (browserName !== 'chromium') {
@@ -68,7 +69,11 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
       clickable: true,
       position: 'fixed',
     });
-    await launcher.click();
+    // Exercise the actual input modality on touch-enabled devices.
+    // tap retains Playwright actionability and hit-target checks; no forced events.
+    if (hasTouch) await launcher.tap();
+    else await launcher.click();
+    await expect(page.getByRole('textbox', { name: 'Chat message' })).toBeVisible();
 
     if (browserName !== 'chromium') {
       // Confirm the capture boundary is installed before exercising voice controls.
