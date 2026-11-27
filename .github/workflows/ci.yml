@@ -38,7 +38,7 @@ jobs:
         run: npm run build:server
 
       - name: Dependency security audit (production dependencies)
-        run: npm audit --omit=dev --audit-level=high || true
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Static client secret & unsafe SQL policy hygiene check
         run: |
@@ -50,7 +50,9 @@ jobs:
             echo "Forbidden permissive RLS policy USING (true) detected in supabase/!"
             exit 1
           fi
-          if grep -rnE "live_payments_enabled.*true" supabase/ src/server/; then
+          # The exact admin rejection guard and explanatory comment are not enabled defaults.
+          matches="$(grep -rnE 'live_payments_enabled.*true' supabase/ src/server/ || test "$?" -eq 1)"
+          if printf '%s\n' "$matches" | grep -vE "^src/server/routes/adminRoutes\.ts:[0-9]+:[[:space:]]*if \(key === 'live_payments_enabled' && req\.body\?\.value === true\) \{$|^src/server/portal/payments/paymentAdapters\.ts:[0-9]+:[[:space:]]*\* Live charges stay strictly locked off until live_payments_enabled = true and live onboarding completes\.$|^$"; then
             echo "Forbidden live_payments_enabled=true default detected!"
             exit 1
           fi
