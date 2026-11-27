@@ -14,7 +14,7 @@ export const Hero: React.FC<HeroProps> = ({ onNavigate, onOpenPortal }) => {
   return (
     <section id="hero" className="relative pt-10 pb-20 lg:pt-16 lg:pb-28 overflow-hidden bg-[#0B1220]">
       {/* Dynamic Animated Blockchain Network Background Canvas */}
-      <div className="absolute inset-0 pointer-events-auto opacity-70">
+      <div className="absolute inset-0 pointer-events-none opacity-70" style={{ pointerEvents: "none" }}>
         <BlockchainNetworkCanvas nodeCount={50} interactive={true} />
       </div>
 

@@ -26,6 +26,7 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
     if (browserName !== 'chromium') {
       await page.addInitScript(() => {
         const media = navigator.mediaDevices;
+        if (!media) throw new Error('MediaDevices unavailable in test context');
         const capture = async () => {
           const context = new AudioContext();
           const destination = context.createMediaStreamDestination();
@@ -39,8 +40,9 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
           track.stop = () => { stop(); oscillator.stop(); void context.close(); };
           return destination.stream;
         };
-        Object.defineProperty(Object.getPrototypeOf(media), 'getUserMedia', { configurable: true, writable: true, value: capture });
-        Object.defineProperty(media, 'getUserMedia', { configurable: true, writable: true, value: capture });
+        // WebKit may return a fresh wrapper for mediaDevices on each access.
+        const fixture = { getUserMedia: capture };
+        Object.defineProperty(navigator, 'mediaDevices', { configurable: true, get: () => fixture });
       });
     }
     await page.goto('/');
@@ -51,7 +53,7 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
 
     if (browserName !== 'chromium') {
       // Confirm the capture boundary is installed before exercising voice controls.
-      expect(await page.evaluate(() => Object.prototype.hasOwnProperty.call(navigator.mediaDevices, 'getUserMedia'))).toBe(true);
+      expect(await page.evaluate(() => Object.prototype.hasOwnProperty.call(navigator, 'mediaDevices'))).toBe(true);
     }
 
     // Send a consultative chat message
