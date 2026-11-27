@@ -28,7 +28,7 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
     await launcher.click();
 
     // Send a consultative chat message
-    const chatInput = page.locator('input[placeholder*="Type"], input[placeholder*="Voice is active"]');
+    const chatInput = page.getByRole("textbox", { name: "Chat message" });
     await expect(chatInput).toBeVisible();
     await chatInput.fill('We need an enterprise corporate website and AI chatbot with starting pricing.');
     await chatInput.press('Enter');
