@@ -45,7 +45,7 @@ export const Hero: React.FC<HeroProps> = ({ onNavigate, onOpenPortal }) => {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-14 items-center">
           
           {/* Left Column: Heading, Subtitle & 4 Primary Actions */}
-          <div className="lg:col-span-7 flex flex-col justify-center pointer-events-auto">
+          <div className="lg:col-span-7 min-w-0 flex flex-col justify-center pointer-events-auto">
             
             <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-[3.25rem] font-extrabold tracking-tight text-white leading-[1.14] text-balance">
               {COMPANY_CONFIG.headline}
@@ -108,7 +108,7 @@ export const Hero: React.FC<HeroProps> = ({ onNavigate, onOpenPortal }) => {
           </div>
 
           {/* Right Column: Redesigned Corporate Technology Identity Card (180–220px Emblem) */}
-          <div className="lg:col-span-5 flex justify-center pointer-events-auto">
+          <div className="lg:col-span-5 min-w-0 flex justify-center pointer-events-auto">
             <div className="relative group max-w-sm sm:max-w-md w-full">
               
               {/* Subtle ambient lighting halo */}
@@ -141,16 +141,16 @@ export const Hero: React.FC<HeroProps> = ({ onNavigate, onOpenPortal }) => {
                 </div>
 
                 {/* Symmetrical Information Strip */}
-                <div className="mt-6 w-full pt-4 border-t border-slate-800/80 grid grid-cols-3 gap-2 text-center text-[11px]">
-                  <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
-                    <span className="block text-slate-400 text-[10px] uppercase font-mono">Headquarters</span>
+                <div className="mt-6 w-full pt-4 border-t border-slate-800/80 grid grid-cols-1 min-[380px]:grid-cols-3 gap-2 text-center text-[11px]">
+                  <div className="min-w-0 p-2 rounded-lg bg-slate-900/90 border border-slate-800">
+                    <span className="block text-slate-400 text-[9px] sm:text-[10px] uppercase font-mono break-words">Headquarters</span>
                     <span className="font-semibold text-slate-200 mt-0.5 block truncate">Clark Zone</span>
                   </div>
-                  <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
+                  <div className="min-w-0 p-2 rounded-lg bg-slate-900/90 border border-slate-800">
                     <span className="block text-slate-400 text-[10px] uppercase font-mono">Network Tier</span>
                     <span className="font-semibold text-[#00C2C7] mt-0.5 block">Enterprise</span>
                   </div>
-                  <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
+                  <div className="min-w-0 p-2 rounded-lg bg-slate-900/90 border border-slate-800">
                     <span className="block text-slate-400 text-[10px] uppercase font-mono">Standards</span>
                     <span className="font-semibold text-[#D4AF37] mt-0.5 block">ACES & AI</span>
                   </div>
@@ -164,7 +164,7 @@ export const Hero: React.FC<HeroProps> = ({ onNavigate, onOpenPortal }) => {
 
         {/* Floating Technology Disciplines Strip (12 Core Icons) */}
         <div className="mt-16 pt-8 border-t border-slate-800/80 pointer-events-auto">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <span className="text-xs font-mono text-slate-400 uppercase tracking-wider">
               Interconnected Technology Disciplines (12 Core Domains)
             </span>
