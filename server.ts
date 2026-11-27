@@ -26,6 +26,7 @@ const PORT = resolveListenPort(process.env.PORT);
 
 function resolveDistDirectory(): string | null {
   const candidates = [
+    path.resolve(__dirname, '..'),
     path.resolve(__dirname, 'dist'),
     path.resolve(process.cwd(), 'dist'),
   ];
@@ -38,9 +39,19 @@ function resolveDistDirectory(): string | null {
 }
 
 async function startServer() {
-  const { app, db, emailService } = createApp();
+  const { app, db, emailService, attachLiveVoice, runtimeLifecycle } = createApp();
 
-  if (process.env.NODE_ENV !== 'production') {
+  // Always fail closed with 404 JSON for unmatched /api/* routes before SPA/Vite fallback
+  app.all('/api/*', (_req: Request, res: Response) => {
+    res.status(404).json({
+      success: false,
+      code: 'NOT_FOUND',
+      error: 'API endpoint not found.',
+    });
+  });
+
+  const isCompiledBundle = __filename.endsWith('.mjs');
+  if (process.env.NODE_ENV !== 'production' && !isCompiledBundle) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true, port: PORT },
@@ -53,7 +64,7 @@ async function startServer() {
       app.use(express.static(distDir));
       app.get('*', (req: Request, res: Response) => {
         if (req.path.startsWith('/api')) {
-          res.status(404).json({ success: false, error: 'API endpoint not found' });
+          res.status(404).json({ success: false, code: 'NOT_FOUND', error: 'API endpoint not found.' });
           return;
         }
         res.sendFile(path.join(distDir, 'index.html'));
@@ -65,12 +76,15 @@ async function startServer() {
           success: true,
           service: 'OPHIREUM NETWORK API Gateway',
           healthEndpoint: '/api/health',
+          readyEndpoint: '/api/ready',
+          versionEndpoint: '/api/version',
         });
       });
       app.use((req: Request, res: Response) => {
         res.status(404).json({
           success: false,
-          error: req.path.startsWith('/api') ? 'API endpoint not found' : 'Not found on API host',
+          code: 'NOT_FOUND',
+          error: req.path.startsWith('/api') ? 'API endpoint not found.' : 'Not found on API host.',
         });
       });
     }
@@ -91,20 +105,30 @@ async function startServer() {
     logStructured('info', 'server_started', {
       port: PORT,
       environment: process.env.NODE_ENV || 'development',
+      runtimeMode: __filename.endsWith('.mjs') ? 'compiled_production_artifact' : 'tsx_source',
       databaseConfigured: db.isConfigured,
       emailConfigured: emailService.isConfigured(),
+      liveVoiceWebSocketPath: '/api/voice/live',
     });
   });
 
+  const liveVoice = attachLiveVoice(httpServer);
+
   const shutdown = (signal: string) => {
-    logStructured('info', 'server_shutdown_initiated', { signal });
+    runtimeLifecycle.markDraining();
+    logStructured('info', 'server_shutdown_initiated', {
+      signal,
+      inFlightRequests: runtimeLifecycle.inFlightRequests,
+    });
     if (retryTimer) {
       clearInterval(retryTimer);
       retryTimer = null;
     }
-    httpServer.close(() => {
-      logStructured('info', 'server_shutdown_complete', { signal });
-      process.exit(0);
+    void liveVoice.close().finally(() => {
+      httpServer.close(() => {
+        logStructured('info', 'server_shutdown_complete', { signal });
+        process.exit(0);
+      });
     });
     setTimeout(() => {
       logStructured('warn', 'server_shutdown_forced_timeout', { signal });

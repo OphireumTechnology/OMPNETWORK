@@ -255,29 +255,32 @@ export function buildTotpOtpAuthUri(accountEmail: string, secret: string, issuer
   return buildTotpInstance(secret, accountEmail, issuer).toString();
 }
 
-function deriveAesKey(rawKeyMaterial: string): Buffer {
-  return crypto.createHash('sha256').update(`ophireum-mfa-v1:${rawKeyMaterial}`, 'utf8').digest();
+function deriveAesKey(rawKeyMaterial: string, saltPrefix = 'ophireum-mfa-v1'): Buffer {
+  return crypto.createHash('sha256').update(`${saltPrefix}:${rawKeyMaterial}`, 'utf8').digest();
+}
+
+export function computeMfaKeyId(rawKeyMaterial: string): string {
+  return crypto.createHash('sha256').update(`kid:${rawKeyMaterial}`, 'utf8').digest('hex').slice(0, 8);
 }
 
 export function encryptMfaSecret(plainSecret: string, keyMaterial: string): string {
-  const key = deriveAesKey(keyMaterial);
+  const kid = computeMfaKeyId(keyMaterial);
+  const key = deriveAesKey(keyMaterial, 'ophireum-mfa-v2');
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   const encrypted = Buffer.concat([cipher.update(plainSecret, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
-  return `enc:v1:${iv.toString('base64url')}:${tag.toString('base64url')}:${encrypted.toString('base64url')}`;
+  return `enc:v2:${kid}:${iv.toString('base64url')}:${tag.toString('base64url')}:${encrypted.toString('base64url')}`;
 }
 
-export function decryptMfaSecret(storedSecret: string, keyMaterial: string): string {
-  if (!storedSecret.startsWith('enc:v1:')) {
-    return storedSecret;
-  }
-  const parts = storedSecret.split(':');
-  if (parts.length !== 5) {
-    throw new Error('Malformed encrypted MFA secret.');
-  }
-  const [, , ivB64, tagB64, dataB64] = parts;
-  const key = deriveAesKey(keyMaterial);
+function decryptWithKey(
+  ivB64: string,
+  tagB64: string,
+  dataB64: string,
+  keyMaterial: string,
+  saltPrefix: string
+): string {
+  const key = deriveAesKey(keyMaterial, saltPrefix);
   const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivB64, 'base64url'));
   decipher.setAuthTag(Buffer.from(tagB64, 'base64url'));
   const decrypted = Buffer.concat([
@@ -285,6 +288,48 @@ export function decryptMfaSecret(storedSecret: string, keyMaterial: string): str
     decipher.final(),
   ]);
   return decrypted.toString('utf8');
+}
+
+export function decryptMfaSecret(
+  storedSecret: string,
+  keyMaterial: string,
+  previousKeyMaterials: string[] = []
+): string {
+  const candidates = [keyMaterial, ...previousKeyMaterials.filter(Boolean)];
+
+  if (storedSecret.startsWith('enc:v2:')) {
+    const parts = storedSecret.split(':');
+    if (parts.length !== 6) {
+      throw new Error('Malformed encrypted v2 MFA secret.');
+    }
+    const [, , , ivB64, tagB64, dataB64] = parts;
+    for (const candidate of candidates) {
+      try {
+        return decryptWithKey(ivB64, tagB64, dataB64, candidate, 'ophireum-mfa-v2');
+      } catch {
+        // Try next key in rotation ring
+      }
+    }
+    throw new Error('Unable to decrypt v2 MFA secret with active or previous keys.');
+  }
+
+  if (storedSecret.startsWith('enc:v1:')) {
+    const parts = storedSecret.split(':');
+    if (parts.length !== 5) {
+      throw new Error('Malformed encrypted MFA secret.');
+    }
+    const [, , ivB64, tagB64, dataB64] = parts;
+    for (const candidate of candidates) {
+      try {
+        return decryptWithKey(ivB64, tagB64, dataB64, candidate, 'ophireum-mfa-v1');
+      } catch {
+        // Try next key in rotation ring
+      }
+    }
+    throw new Error('Unable to decrypt v1 MFA secret with active or previous keys.');
+  }
+
+  return storedSecret;
 }
 
 export function generateRecoveryCodes(count = 10): string[] {
@@ -398,7 +443,8 @@ function parseCookieHeader(rawCookie?: string): Record<string, string> {
 
 export class AdminAuthService {
   private readonly sessionSecret: string;
-  private readonly mfaEncryptionKey: string;
+  private mfaEncryptionKey: string;
+  private readonly mfaPreviousEncryptionKeys: string[];
   private readonly allowedOrigins: string[];
   // Bounded local cache + optional persistent DB store for cross-replica token revocation
   private readonly revokedJtis = new Map<string, number>();
@@ -413,6 +459,8 @@ export class AdminAuthService {
       allowedOrigins?: string[];
       revocationStore?: PersistentRevocationStore;
       supabaseClient?: SupabaseClient | null;
+      mfaEncryptionKey?: string;
+      mfaPreviousEncryptionKeys?: string[];
     }
   ) {
     this.sessionSecret =
@@ -421,7 +469,16 @@ export class AdminAuthService {
       crypto.randomBytes(32).toString('hex');
 
     this.mfaEncryptionKey =
-      (process.env.MFA_ENCRYPTION_KEY || '').trim() || this.sessionSecret;
+      (options?.mfaEncryptionKey || process.env.MFA_ENCRYPTION_KEY || '').trim() || this.sessionSecret;
+
+    const envPrev = (process.env.MFA_ENCRYPTION_KEY_PREVIOUS || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    this.mfaPreviousEncryptionKeys = [
+      ...(options?.mfaPreviousEncryptionKeys || []),
+      ...envPrev,
+    ].filter((k) => k && k !== this.mfaEncryptionKey);
 
     this.allowedOrigins = options?.allowedOrigins || [
       'https://ophireummultimedia.com',
@@ -484,6 +541,32 @@ export class AdminAuthService {
     }
   }
 
+  public rotateMfaEncryptionKey(newKeyMaterial: string): { rotatedCount: number; newKeyId: string } {
+    const trimmed = newKeyMaterial.trim();
+    if (trimmed.length < 32) {
+      throw new Error('New MFA encryption key must be at least 32 characters.');
+    }
+    const oldKey = this.mfaEncryptionKey;
+    const oldRing = [oldKey, ...this.mfaPreviousEncryptionKeys];
+    let rotatedCount = 0;
+
+    for (const [, entry] of this.adminMfaEntries.entries()) {
+      const plain = decryptMfaSecret(entry.encryptedSecret, oldKey, oldRing);
+      entry.encryptedSecret = encryptMfaSecret(plain, trimmed);
+      rotatedCount += 1;
+    }
+
+    if (oldKey && !this.mfaPreviousEncryptionKeys.includes(oldKey)) {
+      this.mfaPreviousEncryptionKeys.unshift(oldKey);
+    }
+    this.mfaEncryptionKey = trimmed;
+
+    return {
+      rotatedCount,
+      newKeyId: computeMfaKeyId(trimmed),
+    };
+  }
+
   public isBootstrapLoginConfigured(): boolean {
     const email = (process.env.ADMIN_BOOTSTRAP_EMAIL || '').trim();
     const pass = (process.env.ADMIN_BOOTSTRAP_PASSWORD || '').trim();
@@ -527,7 +610,7 @@ export class AdminAuthService {
     const normalized = email.trim().toLowerCase();
     const entry = this.adminMfaEntries.get(normalized);
     if (!entry) return false;
-    const plainSecret = decryptMfaSecret(entry.encryptedSecret, this.mfaEncryptionKey);
+    const plainSecret = decryptMfaSecret(entry.encryptedSecret, this.mfaEncryptionKey, this.mfaPreviousEncryptionKeys);
     const check = verifyTotpCodeWithStep(plainSecret, totpCode, timestampMs);
     if (!check.valid || check.matchedStep === undefined) return false;
     entry.enabled = true;
@@ -572,7 +655,7 @@ export class AdminAuthService {
     }
 
     // 2. Check RFC 6238 TOTP code with strict replay prevention
-    const plainSecret = decryptMfaSecret(entry.encryptedSecret, this.mfaEncryptionKey);
+    const plainSecret = decryptMfaSecret(entry.encryptedSecret, this.mfaEncryptionKey, this.mfaPreviousEncryptionKeys);
     const check = verifyTotpCodeWithStep(plainSecret, cleanInput, timestampMs);
     if (!check.valid || check.matchedStep === undefined) {
       entry.failedAttempts += 1;
@@ -584,6 +667,12 @@ export class AdminAuthService {
 
     if (entry.lastUsedStep !== undefined && check.matchedStep <= entry.lastUsedStep) {
       return { ok: false, reason: 'replay' };
+    }
+
+    // Lazy re-encrypt onto the active v2 key if decrypted using an older key/version
+    const activePrefix = `enc:v2:${computeMfaKeyId(this.mfaEncryptionKey)}:`;
+    if (!entry.encryptedSecret.startsWith(activePrefix)) {
+      entry.encryptedSecret = encryptMfaSecret(plainSecret, this.mfaEncryptionKey);
     }
 
     entry.lastUsedStep = check.matchedStep;

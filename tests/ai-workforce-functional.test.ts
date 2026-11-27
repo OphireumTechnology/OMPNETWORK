@@ -283,10 +283,12 @@ describe('25-Agent Enterprise AI Workforce (A00–A24), Approval Integrity, Know
     const chatData = await chatRes.json();
     assert.equal(chatData.sessionId, sid);
     assert.ok(chatData.replyText.length > 20);
+    assert.ok(chatData.sessionToken, 'Anonymous chat session must issue ownership sessionToken');
+    const sessionToken: string = chatData.sessionToken;
 
     const voiceSessionRes = await fetch(`${baseUrl}/api/voice/session`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
       body: JSON.stringify({ sessionId: sid, language: 'en-US' }),
     });
     assert.equal(voiceSessionRes.status, 200);
@@ -296,7 +298,7 @@ describe('25-Agent Enterprise AI Workforce (A00–A24), Approval Integrity, Know
 
     const voiceProcRes = await fetch(`${baseUrl}/api/voice/process`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
       body: JSON.stringify({
         sessionId: sid,
         userMessage: 'Can we schedule a consultation meeting next week?',
@@ -308,7 +310,9 @@ describe('25-Agent Enterprise AI Workforce (A00–A24), Approval Integrity, Know
     assert.equal(voiceProc.detectedIntent.isBookingIntent, true);
     assert.ok(!/OPM-APT-/i.test(voiceProc.replyText));
 
-    const transcriptRes = await fetch(`${baseUrl}/api/consultant/session/${encodeURIComponent(sid)}`);
+    const transcriptRes = await fetch(`${baseUrl}/api/consultant/session/${encodeURIComponent(sid)}`, {
+      headers: { 'X-Session-Token': sessionToken },
+    });
     assert.equal(transcriptRes.status, 200);
     const transcriptData = await transcriptRes.json();
     assert.ok(transcriptData.turns.length >= 4);

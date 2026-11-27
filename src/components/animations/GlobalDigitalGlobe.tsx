@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Globe, MapPin, Radio } from 'lucide-react';
+import React, { useEffect, useRef } from 'react';
+import { Radio } from 'lucide-react';
 
 interface Hub {
   name: string;
@@ -20,7 +20,6 @@ const HUBS: Hub[] = [
 export const GlobalDigitalGlobe: React.FC<{ className?: string }> = ({ className = 'w-full h-80' }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [activeHub, setActiveHub] = useState<string>('Clark Freeport Zone, Pampanga (HQ)');
 
   useEffect(() => {
     const canvas = canvasRef.current;

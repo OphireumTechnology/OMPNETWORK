@@ -109,6 +109,45 @@ export function createAiRouter(deps: {
     });
   });
 
+  router.get('/jobs', authService.requirePermission('ai.read'), (_req: AuthenticatedAdminRequest, res: Response) => {
+    res.status(200).json({
+      success: true,
+      jobs: workforceService.listQueuedJobs(),
+      deadLetters: workforceService.listDeadLetters(),
+    });
+  });
+
+  router.post('/jobs', authService.requirePermission('ai.execute'), async (req: AuthenticatedAdminRequest, res: Response) => {
+    const admin = req.adminUser!;
+    const code = sanitizePlainText(req.body?.agentCode, 10).toUpperCase();
+    const agent = workforceService.getAgent(code);
+    if (!agent) {
+      res.status(404).json({ success: false, error: `Unknown AI agent code: ${code}` });
+      return;
+    }
+    if (!agent.allowedRoles.includes(admin.role)) {
+      res.status(403).json({ success: false, error: `Role "${admin.role}" cannot enqueue ${agent.code}.` });
+      return;
+    }
+    const prompt = sanitizePlainText(req.body?.prompt, 4000);
+    if (!prompt) {
+      res.status(400).json({ success: false, error: 'prompt is required.' });
+      return;
+    }
+    const job = workforceService.enqueueJob({
+      agentCode: agent.code,
+      actor: admin.email,
+      actorRole: admin.role,
+      prompt,
+      context: req.body?.context && typeof req.body.context === 'object' ? req.body.context : undefined,
+      tenantScope: sanitizePlainText(req.body?.tenantScope, 80) || 'ophireum_internal',
+    });
+    await audit(req, `ai_job_enqueued:${agent.code}`, 'ai_workforce_job_queue', job.id, {
+      actionHash: job.actionHash,
+    });
+    res.status(202).json({ success: true, job });
+  });
+
   router.post(
     '/agents/:code/execute',
     authService.requirePermission('ai.execute'),
@@ -365,6 +404,22 @@ export function createAiRouter(deps: {
     }
   );
 
+  router.post(
+    '/knowledge/documents/:id/quarantine',
+    authService.requirePermission('ai.knowledge.write'),
+    async (req: AuthenticatedAdminRequest, res: Response) => {
+      const admin = req.adminUser!;
+      const reason = sanitizePlainText(req.body?.reason, 400) || 'Quarantined by administrator';
+      const doc = await knowledgeService.quarantineDocument(sanitizePlainText(req.params.id, 80), reason, admin.email);
+      if (!doc) {
+        res.status(404).json({ success: false, error: 'Knowledge document not found.' });
+        return;
+      }
+      await audit(req, 'kb_document_quarantined', 'knowledge_document', doc.id, { reason });
+      res.status(200).json({ success: true, document: doc });
+    }
+  );
+
   router.delete(
     '/knowledge/documents/:id',
     authService.requirePermission('ai.knowledge.write'),
@@ -388,13 +443,20 @@ export function createAiRouter(deps: {
       res.status(400).json({ success: false, error: 'Query parameter q is required.' });
       return;
     }
-    const hits = await knowledgeService.search(q, {
+    const diagnostics = await knowledgeService.searchWithDiagnostics(q, {
       limit: 6,
       tenantScope,
       actorRole: admin.role,
       includeInternal: true,
+      allowDegradedKeywordFallback: true,
     });
-    res.status(200).json({ success: true, hits });
+    res.status(200).json({
+      success: true,
+      retrievalMode: diagnostics.retrievalMode,
+      embeddingProvider: diagnostics.embeddingProvider,
+      fallbackNotice: diagnostics.fallbackNotice,
+      hits: diagnostics.hits,
+    });
   });
 
   router.post('/studio/blueprint', async (req: Request, res: Response) => {

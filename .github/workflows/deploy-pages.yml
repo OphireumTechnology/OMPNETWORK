@@ -30,14 +30,20 @@ jobs:
       - name: Install dependencies cleanly
         run: npm ci --no-audit --no-fund
 
-      - name: Typecheck & lint
+      - name: TypeScript strict typecheck
+        run: npm run typecheck
+
+      - name: ESLint AST validation (zero errors and zero warnings)
         run: npm run lint
 
-      - name: Run regression & security test suite
+      - name: Run full automated unit, security, AI, and PostgreSQL 16 migration suite
         run: npm test
 
-      - name: Verify server build
-        run: npm run build:server
+      - name: Build frontend & permanent server bundle and run production smoke check
+        run: npm run build:all && npm run smoke:prod && npm run sbom
+
+      - name: Production dependency vulnerability audit (fail on high/critical)
+        run: npm audit --omit=dev --audit-level=high
 
   build:
     needs: verify
@@ -52,15 +58,12 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Install dependencies cleanly
-        run: npm ci --no-audit --no-fund
-
       - name: Build website
         env:
           VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || 'https://api.ophireummultimedia.com' }}
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
-        run: npm run build
+        run: npm ci --no-audit --no-fund && npm run build
 
       - name: Configure GitHub Pages SPA fallback
         run: |

@@ -8,7 +8,6 @@ import {
   RefreshCw,
   CreditCard,
   CheckCircle2,
-  AlertCircle,
   X,
   ArrowRight,
   Search,
@@ -17,7 +16,6 @@ import { PortalLayout } from '../components/PortalLayout';
 import { BrandLogo } from '../../components/BrandLogo';
 import { resolveAbsoluteLogoUrl } from '../../data/brandAssets';
 import { portalRequest } from '../portalApi';
-import { usePortalAuth } from '../PortalAuthContext';
 import { usePortalRouter } from '../PortalRouter';
 import {
   formatMoney,

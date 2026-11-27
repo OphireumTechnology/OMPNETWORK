@@ -1,8 +1,8 @@
 # OPHIREUM NETWORK (`OMPNETWORK`) — Enterprise AI Workforce Register
 
-**Implementation**: `src/server/ai/workforceService.ts`, `src/server/ai/knowledgeService.ts`, `src/server/routes/aiRoutes.ts`  
-**Primary Model**: `gemini-4-hydrogen` (server-side `@google/genai` SDK with `User-Agent: aistudio-build` and grounded deterministic fallback when `GEMINI_API_KEY` is unconfigured)  
-**Voice / Embeddings**: `gemini-3.5-transcribe` (STT), `gemini-3.8-flash-lite-tts` (TTS), `gemini-embedding-2` (Knowledge Base embeddings with TF-IDF hybrid fallback)
+**Implementation**: `src/server/ai/workforceService.ts`, `src/server/ai/knowledgeService.ts`, `src/server/ai/conversationService.ts`, `src/server/ai/liveVoiceGateway.ts`, `src/server/ai/receptionistTools.ts`, `src/server/routes/aiRoutes.ts`  
+**Models**: `gemini-4-hydrogen` (reasoning), `gemini-3.8-live` (realtime bidirectional audio), `gemini-3.5-transcribe` (STT), `gemini-3.8-flash-lite-tts` (TTS), `gemini-embedding-2` (768-dim RAG embeddings)  
+**Canonical Execution States (Phase 37)**: `QUEUED` | `RUNNING` | `WAITING_FOR_APPROVAL` | `APPROVED` | `SUCCEEDED` | `FAILED` | `RETRY_SCHEDULED` | `CANCELLED` | `BLOCKED_EXTERNAL_DEPENDENCY` | `DEGRADED_FALLBACK`
 
 ## Commissioned 25-Agent Registry (`A00`–`A24`)
 
@@ -34,8 +34,8 @@
 | `A23` | AI Executive Risk & Audit Reviewer | Internal Audit | **High** | **Yes (`202 pending_approval`)** |
 | `A24` | AI Knowledge Curator & RAG Librarian | Knowledge Management | Low | No |
 
-## Governance Controls
-- Role-based allowlists prevent unauthorized admin roles from executing privileged agents.
-- High-risk agents (`A09`, `A10`, `A13`, `A19`, `A23`) — plus any prompt containing high-risk financial/security/production keywords — automatically halt in `pending_approval` (HTTP `202`) until an authorized approver executes `POST /api/ai/approvals/:executionId/decide`.
-- All executions and approval decisions write immutable entries to `audit_logs`.
-- Central Knowledge retrieval enforces tenant boundaries (`public`, `internal_admin`, `tenant_private`) and wraps snippets inside `<untrusted_knowledge_context>` tags.
+## Phase 32, 36 & 37 Governance Controls
+- **Job Queue & Dead-Letter Queue**: Durable PostgreSQL `ai_workforce_job_queue` + `ai_workforce_dead_letters` + atomic `claim_ai_workforce_job()` (`FOR UPDATE SKIP LOCKED`), exposed via `GET/POST /api/ai/jobs` and `GET /api/ai/dashboard`.
+- **Approval Integrity**: High-risk agents (`A09`, `A10`, `A13`, `A19`, `A23`) and high-risk prompts halt in `WAITING_FOR_APPROVAL` (`202 pending_approval`) with SHA-256 `actionHash` binding, expiration, cancellation, and execute-once guards.
+- **Knowledge Quarantine & Explicit `RetrievalMode`**: Automatic sensitive-data scanning quarantines documents containing payment cards, private keys, or secrets (`status = 'quarantined'`, excluded from retrieval); manual quarantine via `POST /api/ai/knowledge/documents/:id/quarantine`; explicit `RetrievalMode` diagnostics (`LIVE_SEMANTIC_RETRIEVAL`, `DEGRADED_KEYWORD_RETRIEVAL`, `LOCAL_DEVELOPMENT_FALLBACK`, `PROVIDER_UNAVAILABLE`).
+- **Conversation Privacy**: Pre-persistence secret redaction, consent-gated `customer_consented` memory (`POST /api/consultant/session/:id/consent`), RA 10173 portability export (`GET /api/consultant/session/:id/export`), and DB-enforced zero raw audio storage.

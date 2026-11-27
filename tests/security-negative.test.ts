@@ -113,9 +113,9 @@ describe('Enterprise Negative Security, 9-Role RBAC, MFA Hardening, CSRF, Webhoo
     assert.ok(enrolled.otpAuthUri.startsWith('otpauth://totp/'));
     assert.equal(enrolled.recoveryCodes.length, 10);
 
-    // Stored secret is AES-256-GCM encrypted (never plaintext)
+    // Stored secret is AES-256-GCM encrypted with versioned key ID (enc:v2:<kid>:..., never plaintext)
     const encrypted = authService.getEncryptedAdminMfaSecret(mfaEmail);
-    assert.ok(encrypted && encrypted.startsWith('enc:v1:'));
+    assert.ok(encrypted && encrypted.startsWith('enc:v2:'));
     assert.ok(!encrypted.includes(enrolled.secret));
 
     const code1 = generateTotpCode(enrolled.secret);
@@ -395,6 +395,121 @@ describe('Enterprise Negative Security, 9-Role RBAC, MFA Hardening, CSRF, Webhoo
     assert.equal((await replica2.checkDistributed('203.0.113.55')).allowed, true);
     assert.equal((await replica1.checkDistributed('203.0.113.55')).allowed, true);
     assert.equal((await replica2.checkDistributed('203.0.113.55')).allowed, false);
+  });
+
+  it('supports zero-downtime MFA encryption key rotation (MFA_ENCRYPTION_KEY_PREVIOUS + POST /api/admin/auth/mfa/rotate-key)', async () => {
+    // 1. Encrypt under initial key and enroll an admin
+    const rotEmail = 'rot-mfa@ophireum.test';
+    const enrolled = authService.enrollAdminMfa(rotEmail);
+    const encBefore = authService.getEncryptedAdminMfaSecret(rotEmail);
+    assert.ok(encBefore && encBefore.startsWith('enc:v2:'));
+    const oldKid = encBefore.split(':')[2];
+    const code1 = generateTotpCode(enrolled.secret);
+    assert.equal(authService.confirmAdminMfaEnrollment(rotEmail, code1), true);
+
+    // 2. Rotate MFA_ENCRYPTION_KEY while retaining previous key in MFA_ENCRYPTION_KEY_PREVIOUS
+    const prevKey = process.env.MFA_ENCRYPTION_KEY || process.env.ADMIN_SESSION_SECRET || '';
+    const savedPrev = process.env.MFA_ENCRYPTION_KEY_PREVIOUS;
+    const savedCur = process.env.MFA_ENCRYPTION_KEY;
+    try {
+      process.env.MFA_ENCRYPTION_KEY_PREVIOUS = prevKey;
+      process.env.MFA_ENCRYPTION_KEY = 'rotated-enterprise-mfa-master-key-2026-v2-strong';
+
+      // Trigger authenticated super_admin key rotation endpoint
+      const ceoAdmin = db.admins.find((a) => a.email === 'ceo@ophireum.test')!;
+      const superToken = authService.issueSessionToken(ceoAdmin, 3600, true);
+      const rotateRes = await fetch(`${baseUrl}/api/admin/auth/mfa/rotate-key`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${superToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          newEncryptionKey: 'rotated-enterprise-mfa-master-key-2026-v2-strong',
+        }),
+      });
+      assert.equal(rotateRes.status, 200);
+      const rotJson = await rotateRes.json();
+      assert.ok(rotJson.rotatedCount >= 1, 'Expected at least 1 MFA secret re-encrypted');
+      assert.ok(rotJson.newKeyId);
+
+      const encAfter = authService.getEncryptedAdminMfaSecret(rotEmail);
+      assert.ok(encAfter && encAfter.startsWith('enc:v2:'));
+      const newKid = encAfter.split(':')[2];
+      assert.notEqual(newKid, oldKid, 'Key ID must advance after rotation');
+
+      // Recovery code still works and secret decrypts cleanly under new key ONLY (even after clearing previous key)
+      delete process.env.MFA_ENCRYPTION_KEY_PREVIOUS;
+      const rcVerify = authService.verifyAdminMfaCode(rotEmail, enrolled.recoveryCodes[0]);
+      assert.equal(rcVerify.ok, true);
+    } finally {
+      if (savedCur !== undefined) process.env.MFA_ENCRYPTION_KEY = savedCur;
+      else delete process.env.MFA_ENCRYPTION_KEY;
+      if (savedPrev !== undefined) process.env.MFA_ENCRYPTION_KEY_PREVIOUS = savedPrev;
+      else delete process.env.MFA_ENCRYPTION_KEY_PREVIOUS;
+    }
+  });
+
+  it('prevents session fixation by revoking prior session token on admin re-login', async () => {
+    const login1 = await fetch(`${baseUrl}/api/admin/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'ceo@ophireum.test',
+        password: 'SuperSecureAdminPassword!2026',
+      }),
+    });
+    assert.equal(login1.status, 200);
+    const data1 = await login1.json();
+    assert.ok(data1.token);
+
+    // Re-login presenting old session token -> old token MUST be rotated/revoked immediately
+    const login2 = await fetch(`${baseUrl}/api/admin/auth/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${data1.token}`,
+      },
+      body: JSON.stringify({
+        email: 'ceo@ophireum.test',
+        password: 'SuperSecureAdminPassword!2026',
+      }),
+    });
+    assert.equal(login2.status, 200);
+    const data2 = await login2.json();
+    assert.ok(data2.token);
+    assert.notEqual(data2.token, data1.token);
+
+    const oldCheck = await fetch(`${baseUrl}/api/admin/auth/session`, {
+      headers: { Authorization: `Bearer ${data1.token}` },
+    });
+    assert.equal(oldCheck.status, 401, 'Old pre-login token must be revoked to prevent session fixation');
+
+    const newCheck = await fetch(`${baseUrl}/api/admin/auth/session`, {
+      headers: { Authorization: `Bearer ${data2.token}` },
+    });
+    assert.equal(newCheck.status, 200);
+  });
+
+  it('reports honest staging & provider readiness without leaking secrets and enforces live_payments_enabled = false', async () => {
+    const ceoAdmin = db.admins.find((a) => a.email === 'ceo@ophireum.test')!;
+    const superToken = authService.issueSessionToken(ceoAdmin, 3600, true);
+
+    const res = await fetch(`${baseUrl}/api/admin/system/readiness`, {
+      headers: { Authorization: `Bearer ${superToken}` },
+    });
+    assert.equal(res.status, 200);
+    const rawText = await res.text();
+    assert.ok(!rawText.includes(process.env.ADMIN_SESSION_SECRET!));
+    assert.ok(!rawText.includes(process.env.RESEND_WEBHOOK_SECRET!));
+
+    const payload = JSON.parse(rawText);
+    assert.equal(payload.readiness.livePaymentsEnabled, false);
+    assert.ok(Array.isArray(payload.readiness.providers) && payload.readiness.providers.length >= 8);
+    const paymongoGotyme = payload.readiness.providers.find((p: any) => p.id === 'paymongo_gotyme');
+    assert.equal(paymongoGotyme?.status, 'deferred_merchant_onboarding');
+    const liveLock = payload.readiness.providers.find((p: any) => p.id === 'live_payments_lock');
+    assert.equal(liveLock?.status, 'locked_off');
   });
 
   it('fails closed in NODE_ENV=production if Supabase credentials are missing', () => {

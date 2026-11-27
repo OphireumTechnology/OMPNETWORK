@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { 
-  Building, Phone, MapPin, Eye, Check, Target, 
-  Compass, UserCheck, ExternalLink, ShieldCheck, FileCheck,
-  Maximize2, X, Download, ShieldAlert, BadgeCheck
+import {
+  Building, Phone, Eye, Check, Target,
+  Compass, UserCheck, ExternalLink, FileCheck,
+  Maximize2, X, ShieldAlert, BadgeCheck
 } from 'lucide-react';
 import { GlobalDigitalGlobe } from './animations/GlobalDigitalGlobe';
 import { COMPANY_CONFIG } from '../data/companyConfig';
@@ -11,7 +11,7 @@ interface AboutSectionProps {
   onOpenPortal: () => void;
 }
 
-export const AboutSection: React.FC<AboutSectionProps> = ({ onOpenPortal }) => {
+export const AboutSection: React.FC<AboutSectionProps> = ({ onOpenPortal: _onOpenPortal }) => {
   const [showBrandBoardModal, setShowBrandBoardModal] = useState(false);
   const [showCertificateModal, setShowCertificateModal] = useState(false);
 

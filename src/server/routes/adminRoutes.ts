@@ -8,11 +8,22 @@ import {
 import { DatabaseRepository, SolutionRequestRecord } from '../db/types';
 import { OrderStatus, PortalRepository, ProjectStage, SupportTicketStatus } from '../portal/types';
 import { PaymentGatewayRegistry } from '../portal/payments/paymentAdapters';
+import {
+  createMakerCheckerApproval,
+  decideMakerCheckerApproval,
+  listMakerCheckerApprovals,
+  listPaymentDisputes,
+  listPaymentReconciliationExceptions,
+  recordPaymentDispute,
+  requiresMakerCheckerForRefund,
+  resolvePaymentReconciliationException,
+} from '../portal/payments/financialGovernance';
 import { TransactionalEmailService } from '../services/emailService';
 import { GoogleCalendarService } from '../services/calendarService';
 import { EnterpriseAiWorkforceService } from '../ai/workforceService';
 import { CentralKnowledgeService } from '../ai/knowledgeService';
 import { sanitizePlainText } from '../validation';
+import { evaluateSystemReadiness } from '../configValidator';
 
 /**
  * Neutralizes spreadsheet formula injection (=, +, -, @, tab, CR) before CSV quoting.
@@ -136,6 +147,36 @@ export function createAdminCommandRouter(deps: {
       }
       await audit(req, 'admin_mfa_enabled', 'admin_auth', req.adminUser?.id);
       res.json({ success: true, mfaEnabled: true });
+    }
+  );
+
+  router.post(
+    '/auth/mfa/rotate-key',
+    deps.authService.requirePermission('config.write'),
+    async (req: AuthenticatedAdminRequest, res: Response) => {
+      const newKey = typeof req.body?.newEncryptionKey === 'string' ? req.body.newEncryptionKey.trim() : '';
+      if (newKey.length < 32) {
+        res.status(400).json({
+          success: false,
+          error: 'newEncryptionKey must be at least 32 characters.',
+        });
+        return;
+      }
+      const result = deps.authService.rotateMfaEncryptionKey(newKey);
+      await audit(req, 'admin_mfa_key_rotated', 'admin_auth', req.adminUser?.id, {
+        rotatedCount: result.rotatedCount,
+        newKeyId: result.newKeyId,
+      });
+      res.json({ success: true, ...result });
+    }
+  );
+
+  router.get(
+    '/system/readiness',
+    deps.authService.requirePermission('security.read'),
+    (_req: AuthenticatedAdminRequest, res: Response) => {
+      const readiness = evaluateSystemReadiness();
+      res.json({ success: true, readiness });
     }
   );
 
@@ -369,6 +410,22 @@ export function createAdminCommandRouter(deps: {
         res.status(400).json({ success: false, error: 'Decision must be approved, rejected, or processed.' });
         return;
       }
+      const existingRefunds = deps.portalRepo.adminListRefunds ? await deps.portalRepo.adminListRefunds() : [];
+      const targetRefund = existingRefunds.find((r) => r.id === refundId);
+      if (
+        targetRefund &&
+        (decision === 'approved' || decision === 'processed') &&
+        requiresMakerCheckerForRefund(targetRefund.amountMinor, targetRefund.currency) &&
+        targetRefund.requestedBy.toLowerCase() === req.adminUser!.email.toLowerCase()
+      ) {
+        res.status(403).json({
+          success: false,
+          code: 'MAKER_CHECKER_REQUIRED',
+          error:
+            'Segregation-of-duties control: high-value refunds require approval from a different Finance Officer or Super Admin than the requester.',
+        });
+        return;
+      }
       const refund = deps.portalRepo.adminDecideRefund
         ? await deps.portalRepo.adminDecideRefund(refundId, decision, req.adminUser!.email)
         : null;
@@ -378,6 +435,171 @@ export function createAdminCommandRouter(deps: {
       }
       await audit(req, `admin_refund_${decision}`, 'payment_refunds', refundId, { decision });
       res.json({ success: true, refund });
+    }
+  );
+
+  // ---- Phase 34: Payment Reconciliation Queue, Maker-Checker & Disputes ----
+  router.get(
+    '/payments/reconciliation',
+    deps.authService.requirePermission('payments.read'),
+    (req: AuthenticatedAdminRequest, res: Response) => {
+      const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+      const items = listPaymentReconciliationExceptions(status);
+      res.json({ success: true, total: items.length, records: items });
+    }
+  );
+
+  router.patch(
+    '/payments/reconciliation/:id',
+    deps.authService.requirePermission('payments.refund'),
+    async (req: AuthenticatedAdminRequest, res: Response) => {
+      const id = sanitizePlainText(req.params.id, 80);
+      const status = sanitizePlainText(req.body?.status, 30) as 'investigating' | 'resolved' | 'dismissed';
+      const note = sanitizePlainText(req.body?.resolutionNote, 500);
+      if (!['investigating', 'resolved', 'dismissed'].includes(status) || !note) {
+        res.status(400).json({
+          success: false,
+          error: 'Valid status (investigating | resolved | dismissed) and resolutionNote are required.',
+        });
+        return;
+      }
+      const updated = resolvePaymentReconciliationException(id, req.adminUser!.email, status, note);
+      if (!updated) {
+        res.status(404).json({ success: false, error: 'Reconciliation exception not found.' });
+        return;
+      }
+      await audit(req, 'admin_reconciliation_updated', 'payment_reconciliation_queue', id, { status, note });
+      res.json({ success: true, record: updated });
+    }
+  );
+
+  router.get(
+    '/payments/maker-checker',
+    deps.authService.requirePermission('payments.read'),
+    (_req: AuthenticatedAdminRequest, res: Response) => {
+      const records = listMakerCheckerApprovals();
+      res.json({ success: true, total: records.length, records });
+    }
+  );
+
+  router.post(
+    '/payments/maker-checker',
+    deps.authService.requirePermission('payments.refund'),
+    async (req: AuthenticatedAdminRequest, res: Response) => {
+      const actionType = sanitizePlainText(req.body?.actionType, 50) as
+        | 'refund_above_threshold'
+        | 'manual_credit_adjustment'
+        | 'reconciliation_override'
+        | 'dispute_resolution';
+      const entityId = sanitizePlainText(req.body?.entityId, 80);
+      const amountMinor = Number(req.body?.amountMinor);
+      const currency = req.body?.currency === 'PHP' ? 'PHP' : req.body?.currency === 'USD' ? 'USD' : null;
+      const justification = sanitizePlainText(req.body?.justification, 500);
+      if (
+        !['refund_above_threshold', 'manual_credit_adjustment', 'reconciliation_override', 'dispute_resolution'].includes(actionType) ||
+        !entityId ||
+        !Number.isInteger(amountMinor) ||
+        amountMinor <= 0 ||
+        !currency ||
+        !justification
+      ) {
+        res.status(400).json({
+          success: false,
+          error: 'actionType, entityId, positive integer amountMinor, currency (USD/PHP), and justification are required.',
+        });
+        return;
+      }
+      const record = createMakerCheckerApproval({
+        actionType,
+        entityId,
+        amountMinor,
+        currency,
+        requestedByEmail: req.adminUser!.email,
+        requestedByRole: req.adminUser!.role,
+        justification,
+      });
+      await audit(req, 'admin_maker_checker_requested', 'financial_maker_checker_approvals', record.id, {
+        actionType,
+        entityId,
+        amountMinor,
+        currency,
+      });
+      res.status(201).json({ success: true, approval: record });
+    }
+  );
+
+  router.post(
+    '/payments/maker-checker/:approvalId/decide',
+    deps.authService.requirePermission('payments.refund'),
+    async (req: AuthenticatedAdminRequest, res: Response) => {
+      const approvalId = sanitizePlainText(req.params.approvalId, 80);
+      const decision = sanitizePlainText(req.body?.decision, 20) as 'approved' | 'rejected';
+      const decisionNote = sanitizePlainText(req.body?.decisionNote, 500);
+      if (!['approved', 'rejected'].includes(decision)) {
+        res.status(400).json({ success: false, error: 'decision must be approved or rejected.' });
+        return;
+      }
+      const result = decideMakerCheckerApproval({
+        approvalId,
+        decision,
+        approverEmail: req.adminUser!.email,
+        approverRole: req.adminUser!.role,
+        decisionNote,
+      });
+      if (!result.ok || !result.record) {
+        res.status(result.statusCode || 400).json({ success: false, error: result.error });
+        return;
+      }
+      await audit(req, `admin_maker_checker_${decision}`, 'financial_maker_checker_approvals', approvalId, {
+        decision,
+        decisionNote,
+      });
+      res.json({ success: true, approval: result.record });
+    }
+  );
+
+  router.get(
+    '/payments/disputes',
+    deps.authService.requirePermission('payments.read'),
+    (_req: AuthenticatedAdminRequest, res: Response) => {
+      const records = listPaymentDisputes();
+      res.json({ success: true, total: records.length, records });
+    }
+  );
+
+  router.post(
+    '/payments/disputes',
+    deps.authService.requirePermission('payments.refund'),
+    async (req: AuthenticatedAdminRequest, res: Response) => {
+      const provider = sanitizePlainText(req.body?.provider, 40) as any;
+      const providerDisputeId = sanitizePlainText(req.body?.providerDisputeId, 120);
+      const orderId = sanitizePlainText(req.body?.orderId, 80) || undefined;
+      const amountMinor = Number(req.body?.amountMinor);
+      const currency = req.body?.currency === 'PHP' ? 'PHP' : req.body?.currency === 'USD' ? 'USD' : null;
+      const reason = sanitizePlainText(req.body?.reason, 500);
+      if (!provider || !providerDisputeId || !Number.isInteger(amountMinor) || amountMinor <= 0 || !currency || !reason) {
+        res.status(400).json({
+          success: false,
+          error: 'provider, providerDisputeId, positive integer amountMinor, currency, and reason are required.',
+        });
+        return;
+      }
+      const record = recordPaymentDispute({
+        provider,
+        providerDisputeId,
+        orderId,
+        amountMinor,
+        currency,
+        reason,
+        assignedTo: req.adminUser!.email,
+      });
+      await audit(req, 'admin_payment_dispute_recorded', 'payment_disputes', record.id, {
+        provider,
+        providerDisputeId,
+        amountMinor,
+        currency,
+      });
+      res.status(201).json({ success: true, dispute: record });
     }
   );
 

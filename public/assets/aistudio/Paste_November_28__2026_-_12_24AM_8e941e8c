@@ -1,0 +1,1406 @@
+# MASTER DEVELOPMENT EXECUTION COMMAND
+## OPHIREUM NETWORK — PHASES 31–46
+### Enterprise Infrastructure, Security, Integration and Production Readiness
+
+**PROJECT:** OPHIREUM NETWORK
+
+**COMPANY:** OPHIREUM MULTIMEDIA PRODUCTION
+
+**REPOSITORY:** https://github.com/OphireumTechnology/OMPNETWORK
+
+**REFERENCE REPAIR BRANCH:** fix/ci-dependency-lock-repair
+
+**REFERENCE PULL REQUEST:** https://github.com/OphireumTechnology/OMPNETWORK/pull/17
+
+**FRONTEND:** https://ophireummultimedia.com/
+
+**BACKEND:** https://api.ophireummultimedia.com/
+
+**INFRASTRUCTURE:**
+- Frontend: GitHub Pages
+- Backend: Railway
+- Database: Supabase PostgreSQL
+- Authentication: Existing authentication architecture and Supabase Auth where applicable
+- Storage: Supabase private storage
+- AI: Google Gemini
+- Email: Resend
+- Scheduling: Google Calendar
+- Payments: Approved payment gateway integrations
+
+---
+
+# 1. PRIMARY EXECUTION DIRECTIVE
+
+Act as a coordinated enterprise software engineering team consisting of:
+
+- Chief Software Architect
+- Senior Full-Stack Engineer
+- AI Infrastructure Engineer
+- Database Architect
+- Cybersecurity Engineer
+- Financial Systems Engineer
+- DevOps and Site Reliability Engineer
+- Quality Assurance Engineer
+- Browser Automation Engineer
+- Integration Engineer
+- Data Privacy and Governance Engineer
+
+Inspect the entire existing source code before making changes.
+
+Implement all remaining development requirements, repair confirmed defects, eliminate architectural inconsistencies, and complete all feasible source-code development.
+
+Do not merely produce recommendations, architectural diagrams, documentation, interface placeholders, simulated features, or development reports.
+
+Implement functional frontend components, backend services, database migrations, API endpoints, security controls, automated tests, and integration mechanisms.
+
+Continue through all phases without stopping after completing only the first phase.
+
+Where external credentials or owner authorization are unavailable, complete the source implementation and automated contract tests, explicitly record the blocker, and continue developing all other unblocked functionality.
+
+# 2. MANDATORY PRESERVATION RULES
+
+Preserve and enhance the existing application.
+
+Do not remove, downgrade, overwrite, or unnecessarily regenerate working functionality.
+
+Maintain:
+
+- All 78 existing services and 10 service divisions.
+- Existing corporate website and branding.
+- All 25 AI workforce agents A00–A24.
+- Client Portal.
+- Administrative Command Center.
+- Executive Business Intelligence.
+- Central AI Knowledge System.
+- AI Studio Blueprint functionality.
+- AI Front Desk chat and voice services.
+- Customer authentication and MFA.
+- Digital commerce and subscriptions.
+- Consultation and appointment management.
+- Project and deliverable management.
+- Support ticketing.
+- Payment references and invoice management.
+- Legal and privacy center.
+- Existing database migrations 000–004.
+- All 49 previously passing automated tests.
+- Previously repaired TypeScript and dependency configurations.
+
+Preserve corporate branding:
+
+- Graphite: #111827
+- Technology Cyan: #00C2C7
+- Silver Gray: #F3F4F6
+- Existing corporate logo and identity.
+- Modern, clean, advanced-technology visual design.
+
+Reconcile the latest main branch with the verified repair branch before implementing additional changes.
+
+Do not reintroduce TypeScript 7.0.2 or incompatible dependency versions.
+
+Maintain TypeScript 5.9-compatible dependencies unless a newer version is independently verified as compatible.
+
+Never fabricate package-lock.json.
+
+Never bypass dependency resolution using --force or --legacy-peer-deps.
+
+---
+
+# PHASE 31 — PRODUCTION BACKEND RELIABILITY
+
+## 31.1 Permanent production server build
+
+Repair the current backend build process, which compiles a temporary server bundle and deletes it.
+
+Implement:
+
+- Permanent production server build artifacts.
+- Dedicated backend output directory.
+- Deterministic server compilation.
+- Correct ESM module resolution.
+- Production startup using Node.js against the compiled server.
+- Runtime independence from development-only dependencies.
+- Production-only dependency installation verification.
+- Consistent Node.js runtime configuration.
+- Reproducible Railway deployment configuration.
+
+Verify that the production application starts successfully after development dependencies are removed.
+
+## 31.2 Runtime resilience
+
+Implement:
+
+- Graceful startup and shutdown.
+- Database connection recovery.
+- Bounded provider request timeouts.
+- Circuit breakers for external providers.
+- Exponential retry backoff with jitter.
+- Request cancellation.
+- Connection pooling where supported.
+- Background worker lifecycle management.
+- Memory and resource limits.
+- Backpressure and concurrency controls.
+- Structured error classification.
+- Correlation IDs.
+- Sensitive-data log redaction.
+
+## 31.3 Health and readiness
+
+Expand and validate:
+
+- GET /api/health
+- GET /api/ready
+- GET /api/version
+
+Distinguish:
+
+- Healthy.
+- Degraded.
+- Unconfigured.
+- Temporarily unavailable.
+- Not ready.
+- Provider failure.
+
+Readiness must accurately reflect required database and infrastructure availability.
+
+Do not expose secrets, private configuration values, customer data, or internal credentials through health endpoints.
+
+---
+
+# PHASE 32 — DURABLE AI CONVERSATION INFRASTRUCTURE
+
+## 32.1 Eliminate production in-memory conversation dependency
+
+Replace the production dependency on sharedSessions and other volatile conversation structures with durable PostgreSQL-backed storage.
+
+Inspect existing schema before introducing new tables.
+
+Create migration 005 or the next available migration number without modifying previously applied migration history.
+
+Implement or extend:
+
+- ai_conversations
+- ai_conversation_participants
+- ai_conversation_messages
+- ai_conversation_sessions
+- ai_conversation_summaries
+- ai_conversation_memory
+- ai_conversation_events
+- ai_conversation_consents
+- ai_conversation_attachments
+- ai_conversation_retention_jobs
+
+Each applicable record must include:
+
+- UUID primary key.
+- Tenant or organization identifier.
+- Authorized principal identifier.
+- Conversation identifier.
+- Channel.
+- Message role.
+- Content.
+- Status.
+- Creation timestamp.
+- Update timestamp.
+- Retention metadata.
+- Correlation identifier.
+
+Implement strict tenant isolation and appropriate indexes.
+
+## 32.2 Unified conversation memory
+
+Enable conversation continuity across:
+
+- Website chat.
+- Voice receptionist.
+- Client Portal.
+- Authorized AI workforce agents.
+- Human support handoffs.
+- Authorized administrative review.
+
+Implement:
+
+- Durable session restoration.
+- Conversation resumption.
+- Context summarization.
+- Context-window management.
+- Token budgeting.
+- Message ordering.
+- Duplicate message prevention.
+- Conversation search.
+- Authorized history retrieval.
+- User-controlled deletion.
+- Retention policy enforcement.
+- Consent-aware memory storage.
+
+Conversation history must survive:
+
+- Railway restarts.
+- Server crashes.
+- Redeployment.
+- Multiple backend replicas.
+- Browser refresh.
+- Authorized channel switching.
+
+Never use a client-supplied conversation identifier as sufficient proof of authorization.
+
+Anonymous sessions must use securely generated, scoped session credentials and must not expose another visitor's conversation.
+
+## 32.3 AI memory privacy
+
+Implement:
+
+- Data minimization.
+- Sensitive-information redaction.
+- Configurable retention periods.
+- Encryption where appropriate.
+- Tenant-scoped retrieval.
+- Access audit trails.
+- Data subject export and deletion.
+- Consent withdrawal handling.
+
+Do not automatically store passwords, payment card information, API credentials, authentication tokens, or unnecessary sensitive information in AI memory.
+
+---
+
+# PHASE 33 — DISTRIBUTED AUTHENTICATION AND SECURITY
+
+Inspect all authentication, authorization, MFA, session, and rate-limiting implementations.
+
+Identify every production dependency on in-memory security state.
+
+## 33.1 Durable authentication state
+
+Implement or verify persistent storage for:
+
+- Administrator sessions.
+- Client sessions.
+- Revoked token identifiers.
+- MFA enrollment state.
+- MFA challenges.
+- Recovery codes.
+- Failed authentication attempts.
+- Account lockouts.
+- Security events.
+- Session expiration.
+
+Production security state must remain consistent across multiple Railway replicas.
+
+Logging out from one replica must invalidate the applicable session on every replica.
+
+## 33.2 Authentication security
+
+Verify and complete:
+
+- HttpOnly cookies.
+- Secure cookie flags.
+- Appropriate SameSite configuration.
+- Cross-origin credential handling.
+- CSRF protection.
+- Strict CORS allowlists.
+- Session rotation.
+- Session expiration.
+- Session revocation.
+- Password recovery.
+- Email verification.
+- Account suspension.
+- MFA enforcement.
+- Recovery-code consumption.
+- TOTP replay prevention.
+- Brute-force protection.
+- Principal and tenant binding.
+
+Ensure administrator MFA cannot be bypassed through alternate routes, password recovery, API calls, or session refresh.
+
+## 33.3 Distributed rate limiting
+
+Implement durable or distributed rate limiting for:
+
+- Authentication.
+- Password recovery.
+- AI chat.
+- Voice transcription.
+- AI workforce execution.
+- Public inquiries.
+- Appointment creation.
+- Checkout.
+- Payment webhooks where appropriate.
+- Administrative operations.
+
+Use atomic operations and trusted proxy configuration.
+
+Do not trust arbitrary forwarded IP headers.
+
+## 33.4 Authorization verification
+
+Audit every API endpoint for:
+
+- Authentication.
+- Role-based access control.
+- Object-level authorization.
+- Tenant isolation.
+- Resource ownership.
+- Input validation.
+- Privilege escalation.
+- Mass assignment.
+- IDOR.
+- Unauthorized data disclosure.
+
+Create negative security tests for every critical access-control boundary.
+
+---
+
+# PHASE 34 — FINANCIAL SECURITY AND TRANSACTION INTEGRITY
+
+## 34.1 Payment webhook hardening
+
+Remove unsafe production fallback to reconstructed JSON for signed webhook verification.
+
+Preserve the exact raw request bytes required by each payment provider.
+
+Reject requests when required signature evidence or original request bytes are missing.
+
+Implement provider-specific verification for:
+
+- Xendit.
+- PayPal.
+- Maya.
+- Approved card payment integrations.
+- Other enabled providers with verified official specifications.
+
+Implement:
+
+- Signature verification.
+- Timestamp validation where supported.
+- Replay protection.
+- Event deduplication.
+- Merchant account validation.
+- Currency verification.
+- Amount verification.
+- Transaction ownership validation.
+- Provider transaction reference matching.
+- Idempotent event processing.
+- Transactional state transitions.
+- Out-of-order event handling.
+
+Do not use a generic HMAC implementation where a provider requires a different verification protocol.
+
+## 34.2 Financial transaction architecture
+
+Ensure all financial operations are controlled by the server.
+
+Implement:
+
+- Server-authoritative pricing.
+- Integer minor-unit monetary calculations.
+- Currency-specific precision.
+- Immutable order totals.
+- Transactional order creation.
+- Atomic payment reference allocation.
+- Idempotent checkout.
+- Duplicate-charge prevention.
+- Payment state machines.
+- Refund state machines.
+- Subscription lifecycle management.
+- Invoice consistency.
+- Payment reconciliation.
+- Failed-payment recovery.
+- Chargeback and dispute tracking.
+- Financial audit trails.
+
+Preserve the existing Asia/Manila payment reference format:
+
+MMDDYYYYHHMMAM/PMNNN
+
+Test concurrency, sequence exhaustion, date rollover, transaction rollback, and duplicate prevention.
+
+## 34.3 Financial administration
+
+Implement or complete:
+
+- Maker-checker financial approval.
+- Refund authorization limits.
+- Finance-specific permissions.
+- Reconciliation dashboard.
+- Unmatched payment queue.
+- Suspicious transaction alerts.
+- Settlement records.
+- Financial CSV exports.
+- Immutable transaction audit records.
+
+AI agents may recommend financial actions but must not independently authorize live charges, refunds, fund transfers, or sensitive financial configuration changes.
+
+## 34.4 Payment safety lock
+
+Maintain live_payments_enabled = false.
+
+All commercial payment gateways must remain disabled for live charges until explicit owner authorization and merchant onboarding acceptance.
+
+PayMongo and GoTyme must remain deferred until verified integration specifications and authorization are available.
+
+Never collect or store raw card numbers or CVV data.
+
+Use approved provider-hosted payment interfaces.
+
+---
+
+# PHASE 35 — ENTERPRISE REALTIME AI FRONT DESK
+
+Upgrade the existing AI Front Desk into a functional, natural, human-like digital receptionist while preserving its current chat and voice features.
+
+## 35.1 Native realtime voice architecture
+
+Implement supported Gemini Live audio integration using:
+
+- Secure backend WebSocket relay or supported short-lived session credentials.
+- Browser microphone permission management.
+- AudioWorklet where appropriate.
+- PCM audio encoding and decoding.
+- Realtime audio streaming.
+- Streaming playback.
+- Voice activity detection.
+- Interruption and barge-in handling.
+- Turn detection.
+- Session reconnection.
+- Audio buffering and backpressure.
+- Connection recovery.
+- Text transcript synchronization.
+
+Verify current official Gemini SDK and Live API capabilities before selecting models, protocols, sample rates, or audio formats.
+
+Never expose the permanent Gemini API key to the browser.
+
+## 35.2 Receptionist intelligence
+
+Implement:
+
+- Professional greeting.
+- Natural conversational responses.
+- Customer intent detection.
+- Service discovery.
+- Qualification questions.
+- Client requirements collection.
+- Consultation scheduling.
+- Appointment availability verification.
+- Business-hours awareness.
+- Customer profile association with consent.
+- Conversation continuity.
+- Human escalation.
+- Follow-up summaries.
+- Multilingual capability where supported.
+- Accessible text alternatives.
+
+The receptionist must clearly identify itself as an AI assistant.
+
+Do not claim an appointment is confirmed unless the authoritative booking operation succeeds.
+
+Do not claim email delivery unless delivery evidence supports the statement.
+
+Do not invent prices, services, policies, availability, or transaction results.
+
+## 35.3 Voice fallback and accessibility
+
+Retain supported fallback mechanisms:
+
+- Text chat.
+- Browser speech recognition.
+- Recorded audio transcription.
+- Text-to-speech.
+- Manual consultation request.
+
+Clearly distinguish native realtime audio from fallback voice modes.
+
+Do not display a successful realtime connection status when the provider is unavailable.
+
+---
+
+# PHASE 36 — PRODUCTION CENTRAL AI KNOWLEDGE SYSTEM
+
+## 36.1 Production vector retrieval
+
+Complete the PostgreSQL pgvector architecture.
+
+Implement or verify:
+
+- Knowledge document storage.
+- Document versions.
+- Chunking pipeline.
+- Embedding generation.
+- Embedding model metadata.
+- Vector dimension metadata.
+- Vector indexing.
+- Tenant-filtered similarity search.
+- Hybrid keyword and semantic retrieval.
+- Knowledge source citations.
+- Document access controls.
+- Knowledge refresh.
+- Embedding regeneration.
+- Background ingestion jobs.
+
+Use verified Gemini embedding models supported by the configured account.
+
+Never mix incompatible vector dimensions or embedding models within the same search operation.
+
+## 36.2 Fallback integrity
+
+Do not silently treat deterministic local embeddings as equivalent to production semantic embeddings.
+
+Implement explicit retrieval modes:
+
+- LIVE_SEMANTIC_RETRIEVAL
+- DEGRADED_KEYWORD_RETRIEVAL
+- LOCAL_DEVELOPMENT_FALLBACK
+- PROVIDER_UNAVAILABLE
+
+Ensure fallback vectors cannot contaminate production semantic indexes.
+
+## 36.3 Knowledge security
+
+Implement:
+
+- Tenant isolation before retrieval.
+- Document-level authorization.
+- Prompt-injection resistance.
+- Untrusted document framing.
+- Restricted tool execution.
+- Sensitive-information detection.
+- Source provenance.
+- Document quarantine.
+- File-type validation.
+- Malware-scanning integration where configured.
+
+Treat retrieved knowledge as untrusted data, not executable instructions.
+
+---
+
+# PHASE 37 — COMPLETE AI WORKFORCE A00–A24
+
+Inspect the existing AI workforce register and every individual agent.
+
+Preserve all existing agent identifiers, responsibilities, permissions, and approved operational boundaries.
+
+For each of the 25 agents, verify and implement:
+
+- Defined operational responsibility.
+- Typed input schema.
+- Typed output schema.
+- Actual executable handler.
+- Authorized tools.
+- Required data sources.
+- Tenant context.
+- Validation rules.
+- Execution timeout.
+- Retry policy.
+- Approval requirements.
+- Execution persistence.
+- Error handling.
+- Audit trail.
+- Usage tracking.
+- Cost tracking.
+- Individual functional tests.
+
+Do not merely register agents or generate generic responses.
+
+## 37.1 Agent orchestration
+
+Implement:
+
+- Persistent task queue.
+- Job leasing.
+- Worker heartbeats.
+- Execution locks.
+- Retry scheduling.
+- Dead-letter queue.
+- Dependency-aware execution.
+- Agent handoffs.
+- Cancellation.
+- Duplicate execution prevention.
+- Human approval workflow.
+- Approval expiration.
+- Input hash binding.
+- Role revalidation before execution.
+
+## 37.2 Execution status integrity
+
+Use explicit execution states:
+
+- QUEUED
+- RUNNING
+- WAITING_FOR_APPROVAL
+- APPROVED
+- SUCCEEDED
+- FAILED
+- RETRY_SCHEDULED
+- CANCELLED
+- BLOCKED_EXTERNAL_DEPENDENCY
+- DEGRADED_FALLBACK
+
+A generated text response must not automatically constitute successful completion of a business operation.
+
+Successful execution requires evidence that the intended authorized operation completed.
+
+## 37.3 AI workforce monitoring
+
+Extend the Admin Command Center with:
+
+- Agent operational status.
+- Execution history.
+- Pending approvals.
+- Failed tasks.
+- Retry queue.
+- Provider availability.
+- Token consumption.
+- Estimated AI cost.
+- Average execution latency.
+- Success and failure rates.
+- Tenant-scoped usage reporting.
+
+Use real persisted records, not fabricated metrics.
+
+---
+
+# PHASE 38 — SOURCE CODE QUALITY AND ESLINT
+
+Implement genuine ESLint configuration.
+
+Separate:
+
+- TypeScript type checking.
+- ESLint analysis.
+- Unit testing.
+- Integration testing.
+- Security testing.
+- Browser testing.
+- Production builds.
+
+Repair:
+
+- Unsafe any usage.
+- Unhandled promises.
+- Unused imports.
+- Unreachable code.
+- Duplicate logic.
+- Incorrect asynchronous handling.
+- Inconsistent error responses.
+- Improper resource cleanup.
+- Unsafe environment-variable access.
+- Incorrect module imports.
+- Deprecated API usage.
+- React hook dependency errors.
+
+Replace the generic package identity react-example@0.0.0 with an appropriate OPHIREUM NETWORK application identity and controlled versioning.
+
+Move development-only tooling into appropriate dependency classifications.
+
+Do not suppress linting errors globally to obtain passing results.
+
+---
+
+# PHASE 39 — ACTUAL BROWSER END-TO-END TESTING
+
+Install and configure Playwright or an equivalent supported browser-testing framework.
+
+Create automated browser tests that execute actual user interactions.
+
+## 39.1 Public website tests
+
+Verify:
+
+- Homepage.
+- Navigation.
+- Service catalog.
+- Contact forms.
+- Consultation booking.
+- AI chat widget.
+- Voice receptionist.
+- Mobile navigation.
+- Direct SPA route access.
+- Browser refresh.
+- Error and loading states.
+
+## 39.2 Client Portal tests
+
+Verify:
+
+- Registration.
+- Email verification using controlled test infrastructure.
+- Login.
+- Password recovery.
+- MFA.
+- Profile management.
+- Organization management.
+- Cart.
+- Checkout.
+- Order history.
+- Project tracking.
+- Authorized downloads.
+- Support tickets.
+- Privacy requests.
+- Logout.
+
+## 39.3 Admin Command Center tests
+
+Verify:
+
+- Administrator authentication.
+- Mandatory MFA where required.
+- Role-specific navigation.
+- User management.
+- AI workforce dashboard.
+- Knowledge management.
+- Order management.
+- Financial controls.
+- Audit logs.
+- BI analytics.
+- Approval workflows.
+- Unauthorized access rejection.
+
+## 39.4 Browser coverage
+
+Test supported versions of:
+
+- Chromium.
+- Firefox.
+- WebKit.
+
+Include desktop, tablet, and mobile viewport configurations.
+
+Test microphone and audio workflows using controlled media fixtures where supported.
+
+Record actual device acceptance separately.
+
+Capture:
+
+- Screenshots.
+- Browser traces.
+- Failed-test videos where configured.
+- Console errors.
+- Network failures.
+- Test reports.
+
+Never classify browser tests as passed unless they were executed successfully.
+
+---
+
+# PHASE 40 — FRONTEND PERFORMANCE AND ACCESSIBILITY
+
+Optimize the existing frontend without changing corporate identity.
+
+Implement:
+
+- Route-based code splitting.
+- Lazy-loaded modules.
+- Image compression.
+- Responsive image sizing.
+- Efficient animation loading.
+- Reduced-motion support.
+- Bundle optimization.
+- Deferred noncritical resources.
+- Accessible forms.
+- Keyboard navigation.
+- Screen-reader compatibility.
+- Focus management.
+- Accessible modal dialogs.
+- Appropriate color contrast.
+
+Inspect and repair:
+
+- Broken routes.
+- Layout overflow.
+- Mobile responsiveness.
+- Blank pages.
+- Broken images.
+- Incorrect links.
+- Failed API requests.
+- Loading-state inconsistencies.
+- Duplicate submissions.
+- Unhandled frontend errors.
+
+Measure Core Web Vitals and accessibility using actual browser tools.
+
+Target WCAG 2.2 AA compliance, but do not claim certification without appropriate verification.
+
+---
+
+# PHASE 41 — UNIFIED CI/CD AND RELEASE SECURITY
+
+Reconcile GitHub Actions workflows into a consistent release-gating architecture.
+
+Every production release candidate must pass:
+
+1. Clean npm dependency installation.
+2. TypeScript validation.
+3. Actual ESLint analysis.
+4. Unit tests.
+5. Integration tests.
+6. Negative security tests.
+7. Database migration tests.
+8. Frontend production build.
+9. Backend production build.
+10. Production startup smoke test.
+11. Dependency vulnerability audit.
+12. Secret scanning.
+13. Browser E2E tests.
+14. Artifact integrity verification.
+
+Implement:
+
+- Consistent Node.js versions.
+- Reproducible package-lock.json.
+- Least-privilege workflow permissions.
+- Protected deployment environments.
+- Immutable build artifacts.
+- Build provenance.
+- Deployment version tracking.
+- Release manifests.
+- Software Bill of Materials.
+- Automated rollback preparation.
+
+Ensure GitHub Pages deployment cannot bypass mandatory security verification.
+
+Ensure Railway production deployment uses the exact approved and tested source revision.
+
+Review the temporary dependency repair workflow and remove or disable unnecessary repository-write permissions once the lockfile repair is fully reconciled.
+
+Do not automatically merge or deploy production.
+
+---
+
+# PHASE 42 — SUPABASE AND RAILWAY STAGING INTEGRATION
+
+Prepare a fully isolated staging environment.
+
+Never run destructive database operations against production.
+
+## 42.1 Supabase integration
+
+Verify:
+
+- Exact authorized project reference.
+- PostgreSQL version.
+- Migration history.
+- Required extensions.
+- pgvector availability.
+- Database functions.
+- RLS policies.
+- Database grants.
+- Private storage buckets.
+- Tenant isolation.
+- Atomic financial transactions.
+- Background job leasing.
+- Distributed rate limiting.
+- Persistent authentication state.
+- Persistent AI conversation state.
+
+Execute the complete migration chain only against an authorized isolated staging database.
+
+Test both:
+
+- Clean database installation.
+- Upgrade from the existing supported schema.
+
+## 42.2 Railway integration
+
+Prepare:
+
+- Staging service configuration.
+- Environment-variable register.
+- Production build and start commands.
+- Health checks.
+- Readiness checks.
+- Resource configuration.
+- Multi-replica acceptance.
+- Restart recovery.
+- Deployment rollback.
+
+Verify that two backend replicas can share:
+
+- AI conversations.
+- Authentication state.
+- Revocation state.
+- MFA state.
+- Rate limits.
+- Background jobs.
+- Financial transactions.
+
+## 42.3 Environment isolation
+
+Keep development, testing, staging, and production separated.
+
+Never expose server secrets through VITE_* environment variables.
+
+Never commit .env files, provider credentials, database passwords, or service-role keys.
+
+---
+
+# PHASE 43 — LIVE GEMINI, RESEND AND GOOGLE CALENDAR INTEGRATION
+
+## 43.1 Gemini
+
+Validate:
+
+- Authorized model availability.
+- Text inference.
+- Realtime voice connectivity.
+- Audio transcription.
+- Speech synthesis.
+- Embedding generation.
+- Structured outputs.
+- Tool calling.
+- Request timeouts.
+- Quota exhaustion.
+- Provider failures.
+- Usage reporting.
+
+Do not classify mocked inference as live provider acceptance.
+
+## 43.2 Resend
+
+Complete and verify:
+
+- Verified sender domain.
+- SPF and DKIM configuration.
+- DMARC alignment where applicable.
+- Transactional email templates.
+- Email outbox.
+- Atomic job claiming.
+- Retry scheduling.
+- Delivery tracking.
+- Webhook signature verification.
+- Bounce handling.
+- Complaint handling.
+- Suppression handling.
+- Duplicate notification prevention.
+
+Validate controlled delivery for:
+
+- Customer registration.
+- Email verification.
+- Password recovery.
+- Consultation confirmation.
+- Appointment updates.
+- Order confirmation.
+- Invoice notifications.
+- Support ticket updates.
+
+Distinguish provider acceptance, delivery, bounce, and failure.
+
+## 43.3 Google Calendar
+
+Complete and verify:
+
+- Authorized service account configuration.
+- Calendar permissions.
+- Availability retrieval.
+- Time-zone handling.
+- Appointment creation.
+- Rescheduling.
+- Cancellation.
+- Duplicate event prevention.
+- Synchronization recovery.
+- Conflict handling.
+- External event reconciliation.
+
+Use database-first appointment operations with durable synchronization jobs.
+
+Do not leave orphaned calendar events when database transactions fail.
+
+---
+
+# PHASE 44 — PAYMENT SANDBOX COMMISSIONING
+
+Complete controlled sandbox acceptance for each supported and authorized payment provider.
+
+Test:
+
+- Checkout creation.
+- Successful sandbox payment.
+- Failed payment.
+- Cancelled payment.
+- Expired payment.
+- Duplicate webhook.
+- Invalid signature.
+- Replayed webhook.
+- Incorrect amount.
+- Incorrect currency.
+- Refund.
+- Partial refund where supported.
+- Subscription renewal where supported.
+- Settlement reconciliation.
+- Provider timeout.
+- Network interruption.
+
+Verify that no test can initiate a real commercial charge.
+
+Maintain all live payment restrictions.
+
+---
+
+# PHASE 45 — SECURITY, DISASTER RECOVERY AND OPERATIONAL ACCEPTANCE
+
+## 45.1 Security verification
+
+Perform authorized security testing against local or isolated staging environments.
+
+Review applicable OWASP ASVS and OWASP API Security requirements.
+
+Test:
+
+- Broken access control.
+- Injection vulnerabilities.
+- Cross-site scripting.
+- CSRF.
+- SSRF.
+- Authentication bypass.
+- Session fixation.
+- Privilege escalation.
+- Tenant data leakage.
+- Unsafe file uploads.
+- Path traversal.
+- Webhook forgery.
+- Replay attacks.
+- Payment tampering.
+- Prompt injection.
+- Unauthorized AI tool execution.
+- Sensitive-information disclosure.
+- Denial-of-service resilience.
+
+Create regression tests for confirmed vulnerabilities.
+
+## 45.2 Backup and disaster recovery
+
+Implement and verify:
+
+- Database backup procedures.
+- Private storage backup strategy.
+- Configuration recovery.
+- Migration recovery.
+- Backup encryption.
+- Retention policies.
+- Restoration procedures.
+- Recovery documentation.
+- Recovery Time Objective.
+- Recovery Point Objective.
+
+Perform an actual restoration drill against an isolated authorized environment.
+
+Do not claim backup restoration is verified based solely on documentation.
+
+## 45.3 Operational monitoring
+
+Implement:
+
+- Application uptime monitoring.
+- API latency monitoring.
+- Database connectivity monitoring.
+- Provider availability monitoring.
+- Background job monitoring.
+- Email delivery monitoring.
+- Payment reconciliation alerts.
+- AI usage and cost monitoring.
+- Security event alerts.
+- Error-rate monitoring.
+
+Define escalation procedures and incident-response runbooks.
+
+---
+
+# PHASE 46 — LEGAL, GOVERNANCE AND CONTROLLED PRODUCTION COMMISSIONING
+
+Preserve the existing 10 legal and privacy policy drafts.
+
+Ensure technical support for:
+
+- Philippine Data Privacy Act of 2012, RA 10173.
+- Internet Transactions Act, RA 11967, where applicable.
+- Consumer Act, RA 7394, where applicable.
+- Consent management.
+- Privacy requests.
+- Data retention.
+- Customer data export.
+- Account deletion.
+- Complaints.
+- Refund policies.
+- AI transparency.
+- Versioned policy acceptance.
+
+Do not classify legal drafts as approved or claim regulatory compliance without qualified legal review.
+
+Prepare a controlled production release checklist covering:
+
+- Approved source revision.
+- Successful CI.
+- Database migration acceptance.
+- Staging acceptance.
+- Security acceptance.
+- Browser acceptance.
+- Provider acceptance.
+- Backup restoration.
+- Legal approval.
+- Monitoring.
+- Rollback readiness.
+- Explicit owner authorization.
+
+Production deployment and live commercial payment activation remain prohibited without explicit owner authorization.
+
+---
+
+# 3. MANDATORY REPOSITORY-WIDE DEFECT AUDIT
+
+Audit every applicable source directory, configuration file, database migration, workflow, and test file.
+
+Identify and repair:
+
+- Compilation errors.
+- Runtime exceptions.
+- Dependency conflicts.
+- Security vulnerabilities.
+- Broken frontend routes.
+- Broken API endpoints.
+- Database inconsistencies.
+- Missing migrations.
+- Incorrect authorization.
+- Tenant isolation defects.
+- Race conditions.
+- Memory leaks.
+- Resource leaks.
+- Unsafe fallbacks.
+- Incomplete implementations.
+- Incorrect success messages.
+- Duplicate business logic.
+- Unhandled provider failures.
+- Missing error states.
+- Broken integrations.
+- Performance bottlenecks.
+- Accessibility defects.
+- Mobile layout defects.
+- Deployment configuration errors.
+- Missing automated tests.
+
+Maintain a defect register.
+
+Each defect must include:
+
+- Defect identifier.
+- Severity.
+- Affected files.
+- Root cause.
+- Implemented correction.
+- Regression test.
+- Verification evidence.
+- Remaining limitations.
+
+Do not mark a defect resolved merely because a proposed correction was written.
+
+---
+
+# 4. MANDATORY DEVELOPMENT VALIDATION
+
+Execute all applicable validation commands using the available development environment.
+
+The owner cannot use Bash or other command-line tools manually.
+
+Perform the operations directly where supported.
+
+Validate:
+
+- Clean dependency installation.
+- TypeScript type checking.
+- ESLint.
+- Unit tests.
+- Integration tests.
+- Security tests.
+- Migration tests.
+- Browser E2E tests.
+- Frontend build.
+- Backend build.
+- Production startup.
+- Dependency vulnerability audit.
+- Secret scanning.
+- Load testing.
+- Multi-replica testing.
+- External provider acceptance where credentials are authorized.
+
+Preserve the 49 previously passing tests and add regression coverage for all newly implemented features.
+
+Do not delete existing tests, weaken assertions, bypass security gates, or fabricate execution results.
+
+If Google AI Studio cannot execute a required validation, prepare the appropriate GitHub Actions workflow and report the exact unverified requirement.
+
+---
+
+# 5. MANDATORY GOVERNANCE DOCUMENTATION
+
+Update the existing docs/development/ registers.
+
+Maintain:
+
+- MASTER_DEVELOPMENT_REGISTER.md
+- FEATURE_COMPLETION_MATRIX.md
+- REQUIREMENT_TO_EVIDENCE_MATRIX.md
+- SECURITY_REMEDIATION_REGISTER.md
+- DATABASE_MIGRATION_REGISTER.md
+- AI_WORKFORCE_REGISTER.md
+- EXTERNAL_DEPENDENCY_CONFIGURATION_REGISTER.md
+- INTEGRATION_ACCEPTANCE_REGISTER.md
+- BACKUP_RESTORATION_DR_RUNBOOK.md
+- PRODUCTION_READINESS_REPORT.md
+
+Add or update:
+
+- DEFECT_REMEDIATION_REGISTER.md
+- API_ENDPOINT_INVENTORY.md
+- BROWSER_E2E_ACCEPTANCE_REPORT.md
+- AI_INFRASTRUCTURE_ARCHITECTURE.md
+- FINANCIAL_SECURITY_ACCEPTANCE_REPORT.md
+- MULTI_REPLICA_ACCEPTANCE_REPORT.md
+- RELEASE_COMMISSIONING_CHECKLIST.md
+- INCIDENT_RESPONSE_RUNBOOK.md
+
+Documentation must reflect actual implementation and evidence.
+
+---
+
+# 6. HONEST COMPLETION CLASSIFICATIONS
+
+Classify every requirement as one of:
+
+- COMPLETE_VERIFIED
+- COMPLETE_NEEDS_INTEGRATION_TEST
+- PARTIALLY_IMPLEMENTED
+- NOT_IMPLEMENTED
+- FAILED_VALIDATION
+- BLOCKED_EXTERNAL_DEPENDENCY
+- OWNER_APPROVAL_REQUIRED
+- DEFERRED_BY_DESIGN
+
+Never classify an interface placeholder, mocked response, deterministic fallback, or unexecuted test as a completed live business function.
+
+Calculate separate completion percentages for:
+
+1. Source implementation.
+2. Automated test acceptance.
+3. Database integration.
+4. Durable AI infrastructure.
+5. AI workforce functionality.
+6. Realtime voice functionality.
+7. Financial security.
+8. Browser E2E acceptance.
+9. External provider acceptance.
+10. Security acceptance.
+11. Staging acceptance.
+12. Production commissioning.
+
+Every percentage must have an explicit denominator, calculation method, and supporting evidence.
+
+Do not report 100% production readiness when external integration, browser acceptance, security testing, or owner approval remains outstanding.
+
+---
+
+# 7. MANDATORY FINAL DEVELOPMENT REPORT
+
+After completing all feasible development, produce a comprehensive report containing:
+
+## A. Executive Summary
+
+Describe what was actually implemented and verified.
+
+## B. Phase-by-Phase Development Results
+
+Report phases 31–46 individually.
+
+## C. Defect Remediation
+
+List all discovered defects, corrections, and unresolved risks.
+
+## D. Source Code Changes
+
+List created, modified, and removed files, with reasons.
+
+## E. Database Changes
+
+List new migrations, tables, functions, indexes, policies, and compatibility considerations.
+
+## F. AI Infrastructure
+
+Report conversation persistence, distributed memory, knowledge retrieval, realtime voice, and individual agent acceptance.
+
+## G. Financial Security
+
+Report payment verification, transaction integrity, reconciliation, refunds, and safety locks.
+
+## H. Automated Validation
+
+Provide exact test counts, pass/fail counts, build results, lint results, and security audit results.
+
+## I. Browser Acceptance
+
+Provide executed browser scenarios, screenshots, traces, and unresolved browser defects.
+
+## J. External Integration Acceptance
+
+Report Supabase, Railway, Gemini, Resend, Google Calendar, and payment providers individually.
+
+## K. Completion Calculation
+
+Provide separate evidence-based completion percentages.
+
+## L. Outstanding Blockers
+
+Identify missing credentials, unavailable infrastructure, provider limitations, and owner decisions.
+
+## M. Release Recommendation
+
+Classify the application as:
+
+- DEVELOPMENT_INCOMPLETE
+- SOURCE_CODE_READY
+- STAGING_READY
+- STAGING_ACCEPTED
+- PRODUCTION_CANDIDATE
+- PRODUCTION_COMMISSIONED
+
+Use only the classification supported by actual evidence.
+
+---
+
+# 8. FINAL EXECUTION ORDER
+
+Execute development in the following dependency order:
+
+1. Reconcile the existing source and verified repair branch.
+2. Repair production backend startup.
+3. Implement durable AI conversation infrastructure.
+4. Harden distributed authentication and security.
+5. Complete financial transaction security.
+6. Implement native realtime AI voice.
+7. Complete production knowledge retrieval.
+8. Validate and complete all 25 AI agents.
+9. Repair source-code quality and ESLint.
+10. Implement actual browser E2E testing.
+11. Optimize frontend performance and accessibility.
+12. Unify CI/CD security gates.
+13. Prepare isolated staging integration.
+14. Validate authorized external providers.
+15. Complete payment sandbox acceptance.
+16. Execute security and disaster recovery verification.
+17. Prepare controlled production commissioning.
+
+Continue implementing every unblocked requirement.
+
+Do not stop after producing an audit.
+
+Do not stop after creating database tables.
+
+Do not stop after creating interface components.
+
+Do not stop after creating AI agent registrations.
+
+Do not stop after passing TypeScript compilation.
+
+Deliver working, integrated, tested application functionality.
+
+Prepare changes on an isolated development or review branch.
+
+Do not merge into main, execute production migrations, change production credentials, deploy production, or activate live payments without explicit owner authorization.
+
+BEGIN FULL DEVELOPMENT EXECUTION NOW.

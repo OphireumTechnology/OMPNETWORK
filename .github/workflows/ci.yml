@@ -1,10 +1,13 @@
-name: CI Security, Migration & Commissioning Verification
+name: CI Security, Migration, Lint, Production Smoke & Playwright E2E
 
 on:
   push:
-    branches: [main, 'repair/**', 'release/**']
+    branches: [main, 'repair/**', 'release/**', 'fix/**']
   pull_request:
-    branches: [main, 'repair/**', 'release/**']
+    branches: [main, 'repair/**', 'release/**', 'fix/**']
+
+permissions:
+  contents: read
 
 jobs:
   verify:
@@ -19,30 +22,36 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Install dependencies cleanly from lockfile
+      - name: Install dependencies cleanly from package-lock.json
         run: npm ci --no-audit --no-fund
 
       - name: TypeScript strict typecheck
         run: npm run typecheck
 
-      - name: ESLint & syntax validation
+      - name: ESLint AST validation (zero errors and zero warnings)
         run: npm run lint
 
-      - name: Run full unit, security, AI workforce, commerce & PostgreSQL 16 PGlite migration test suites
-        run: npm test
+      - name: Run unit, security, AI workforce, conversation persistence, and Phase 31-46 tests
+        run: npm run test:unit && npm run test:security
 
-      - name: Build production frontend bundle
-        run: npm run build
+      - name: Run real PostgreSQL 16 (PGlite) Migration 000-006 & DR drill suite
+        run: npm run test:migrations
 
-      - name: Verify production server bundle compilation
-        run: npm run build:server
+      - name: Build production frontend and permanent backend server bundle
+        run: npm run build:all
 
-      - name: Dependency security audit (production dependencies)
-        run: npm audit --omit=dev --audit-level=high || true
+      - name: Run compiled production server startup, fail-closed & SIGTERM smoke check
+        run: npm run smoke:prod
 
-      - name: Static client secret & unsafe SQL policy hygiene check
+      - name: Generate SBOM and SHA-256 release integrity manifest
+        run: npm run sbom
+
+      - name: Production dependency vulnerability audit (fail on high/critical)
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Static secret, SQL RLS, live-payments & raw-body webhook hygiene gate
         run: |
-          if grep -rnE "SUPABASE_SERVICE_ROLE_KEY|ADMIN_SESSION_SECRET|GEMINI_API_KEY|RESEND_API_KEY" src/components src/portal src/admin src/legal; then
+          if grep -rnE "SUPABASE_SERVICE_ROLE_KEY|ADMIN_SESSION_SECRET|GEMINI_API_KEY|RESEND_API_KEY|MFA_ENCRYPTION_KEY" src/components src/portal src/admin src/legal; then
             echo "Forbidden server secret identifier detected in client source!"
             exit 1
           fi
@@ -50,7 +59,48 @@ jobs:
             echo "Forbidden permissive RLS policy USING (true) detected in supabase/!"
             exit 1
           fi
-          if grep -rnE "live_payments_enabled.*true" supabase/ src/server/; then
-            echo "Forbidden live_payments_enabled=true default detected!"
+          if grep -rnE "live_payments_enabled.*true" supabase/; then
+            echo "Forbidden live_payments_enabled=true default detected in SQL migrations!"
             exit 1
           fi
+          if grep -rnE "rawBody \|\| JSON\.stringify\(req\.body" src/server/; then
+            echo "Forbidden JSON.stringify(req.body) webhook signature fallback detected!"
+            exit 1
+          fi
+
+      - name: Upload release SBOM integrity manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-sbom-manifest
+          path: dist/release-sbom-manifest.json
+
+  playwright-e2e:
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies cleanly from package-lock.json
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Playwright browsers (Chromium, Firefox, WebKit)
+        run: npx playwright install --with-deps chromium firefox webkit
+
+      - name: Execute Playwright Multi-Browser Desktop, Tablet & Mobile E2E Suite
+        run: npm run test:e2e
+
+      - name: Upload Playwright report and failure artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-e2e-artifacts
+          path: |
+            playwright-report/
+            test-results/

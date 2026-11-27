@@ -2,7 +2,7 @@ import React from 'react';
 import { ProjectBrief } from '../../services/supabaseService';
 import { 
   X, FileText, CheckCircle2, Shield, Calendar, 
-  Building, User, Cpu, Download, Copy, Printer 
+  Building, User, Cpu, Copy, Printer 
 } from 'lucide-react';
 
 interface ProjectBriefModalProps {

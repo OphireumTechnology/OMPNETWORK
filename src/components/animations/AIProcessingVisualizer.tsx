@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Cpu, Sparkles, Activity } from 'lucide-react';
+import { Activity } from 'lucide-react';
 
 export const AIProcessingVisualizer: React.FC<{ className?: string }> = ({ className = 'w-full h-64' }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);

@@ -397,7 +397,7 @@ test('4-8. Solution request lifecycle: valid submission, restart persistence, id
   const srv1 = await startTestServer({ db, emailTransport: transport });
 
   const idempKey = crypto.randomUUID();
-  let createdReference = '';
+  let createdReference: string;
 
   try {
     // 7. Invalid serviceId returns 400

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { portfolioData } from '../data/portfolioData';
 import { PortfolioItem } from '../types';
-import { Layers, ArrowUpRight, Check, X, Shield, Cpu, Film, ExternalLink } from 'lucide-react';
+import { Layers, ArrowUpRight, Check, X } from 'lucide-react';
 
 export const PortfolioSection: React.FC = () => {
   const [selectedProject, setSelectedProject] = useState<PortfolioItem | null>(null);

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowUpRight, Shield, MapPin, Sparkles, Phone, CheckCircle, ExternalLink } from 'lucide-react';
+import { ArrowUpRight, Shield, MapPin } from 'lucide-react';
 import { BlockchainNetworkCanvas } from './animations/BlockchainNetworkCanvas';
 import { FloatingTechnologyIcons } from './animations/FloatingTechnologyIcons';
 import { COMPANY_CONFIG } from '../data/companyConfig';

@@ -1,7 +1,7 @@
 import React from 'react';
-import { 
-  Globe, Film, Code2, Shield, FolderGit2, 
-  Cpu, LayoutDashboard, ArrowUpRight, CheckCircle2, Lock 
+import {
+  Globe, Film, Code2, Shield, FolderGit2,
+  Cpu, LayoutDashboard, ArrowUpRight, CheckCircle2
 } from 'lucide-react';
 
 interface EnterpriseSuiteSectionProps {

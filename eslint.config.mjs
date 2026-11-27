@@ -15,7 +15,7 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ['src/**/*.{ts,tsx}', 'server.ts', 'tests/**/*.ts'],
+    files: ['src/**/*.{ts,tsx}', 'server.ts', 'tests/**/*.ts', 'e2e/**/*.ts', 'playwright.config.ts'],
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-unused-vars': [

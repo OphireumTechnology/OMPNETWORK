@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { redactSensitiveText } from './resilience';
 
 export type LogLevel = 'info' | 'warn' | 'error';
 
@@ -21,10 +22,7 @@ export function redactSensitiveData(value: unknown, depth = 0): unknown {
   if (depth > 5 || value === null || value === undefined) return value;
   if (typeof value === 'string') {
     if (value.startsWith('Bearer ')) return 'Bearer [REDACTED]';
-    if (/AIza[0-9A-Za-z\-_]{20,}/.test(value) || /re_[0-9A-Za-z_]{16,}/.test(value)) {
-      return '[REDACTED_KEY]';
-    }
-    return value;
+    return redactSensitiveText(value).redactedText;
   }
   if (Array.isArray(value)) {
     return value.slice(0, 50).map((item) => redactSensitiveData(item, depth + 1));

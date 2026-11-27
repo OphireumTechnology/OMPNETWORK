@@ -1,5 +1,5 @@
 import React from 'react';
-import { Building, Shield, MapPin, ArrowUpRight, Phone, Mail, ExternalLink, User } from 'lucide-react';
+import { Building, ArrowUpRight, Phone, ExternalLink, User } from 'lucide-react';
 import { COMPANY_CONFIG } from '../data/companyConfig';
 import { BrandLogo } from './BrandLogo';
 import { navigateToAppPath } from '../portal/PortalRouter';

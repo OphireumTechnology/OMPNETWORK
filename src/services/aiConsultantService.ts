@@ -147,11 +147,13 @@ export const aiConsultantService = {
     state: ConsultationState,
     conversationHistory: ChatMessage[],
     language: 'en-US' | 'fil-PH' = 'en-US',
-    sessionId?: string
+    sessionId?: string,
+    sessionToken?: string
   ): Promise<{
     aiMessage: ChatMessage;
     updatedState: ConsultationState;
     sessionId?: string;
+    sessionToken?: string;
     serverGeminiAvailable?: boolean;
   }> {
     const trimmed = userMessage.trim();
@@ -201,11 +203,16 @@ export const aiConsultantService = {
 
     // Call live server-side AI Solutions Consultant endpoint grounded in the 10-category catalog
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (sessionToken) {
+        headers['X-Session-Token'] = sessionToken;
+      }
       const response = await fetch(apiUrl('/api/consultant/chat'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           sessionId,
+          clientMessageId: msgId,
           userMessage: trimmed.slice(0, 2000),
           state: updatedState,
           conversationHistory: conversationHistory.slice(-8).map((m) => ({
@@ -244,6 +251,7 @@ export const aiConsultantService = {
           },
           updatedState,
           sessionId: typeof data.sessionId === 'string' ? data.sessionId : sessionId,
+          sessionToken: typeof data.sessionToken === 'string' ? data.sessionToken : sessionToken,
           serverGeminiAvailable:
             typeof data.serverGeminiAvailable === 'boolean' ? data.serverGeminiAvailable : undefined,
         };

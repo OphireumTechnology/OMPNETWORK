@@ -1,10 +1,18 @@
 /**
- * OPHIREUM AI Solutions Consultant - Real-Time Voice Engine
- * Handles bidirectional voice conversation, Web Audio API VAD analysis,
- * SpeechRecognition + MediaRecorder /api/voice/transcribe fallback,
- * backend Gemini WAV TTS (/api/voice/speak) with SpeechSynthesis fallback,
- * barge-in interruption, shared chat/voice sessionId continuity,
- * and verified handoff to AppointmentBookingModal (never fabricates bookings).
+ * OPHIREUM AI Solutions Consultant — Native Realtime Voice & Fallback Engine (Phase 22)
+ *
+ * Primary Mode:
+ * - Backend-mediated WebSocket gateway (/api/voice/live) bridging to Gemini 3.8 Live API
+ * - AudioWorkletNode 16kHz 16-bit PCM capture (with ScriptProcessorNode fallback)
+ * - Dedicated 24kHz AudioContext gapless PCM playback queue (`nextStartTime`)
+ * - Natural barge-in interruption (instant playback flush + server interrupt signal)
+ * - Audio input device enumeration & switching (`enumerateDevices()`)
+ * - Automatic session continuity via shared `sessionId` + `sessionToken` + reconnect
+ *
+ * Preserved Fallback Modes (when Gemini Live is unavailable or browser restricts WebSockets/Worklets):
+ * - Web Speech API (SpeechRecognition) + MediaRecorder (/api/voice/transcribe)
+ * - Backend Gemini WAV TTS (/api/voice/speak) + Browser SpeechSynthesis
+ * - Full text consultation continuity
  */
 
 import { ConsultationAppointment } from './supabaseService';
@@ -19,28 +27,78 @@ export type VoiceState =
   | 'speaking'
   | 'error';
 export type VoiceLanguage = 'en-US' | 'fil-PH';
+export type VoiceTransportKind = 'gemini_live_ws' | 'fallback_http';
+
+export interface AudioInputDeviceOption {
+  deviceId: string;
+  label: string;
+}
 
 export interface VoiceEventCallbacks {
   onStatusChange?: (status: VoiceState) => void;
+  onTransportChange?: (transport: VoiceTransportKind) => void;
   onTranscript?: (text: string, isFinal: boolean) => void;
   onAiResponse?: (text: string, intent?: any) => void;
   onVolumeChange?: (volume: number) => void;
   onAppointmentBooked?: (appointment: ConsultationAppointment) => void;
   onBookingRequested?: () => void;
   onDegradedNotice?: (notice: string | null) => void;
-  onSessionId?: (sessionId: string) => void;
+  onSessionId?: (sessionId: string, sessionToken?: string) => void;
   onError?: (errorMessage: string) => void;
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function base64ToInt16Array(base64: string): Int16Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Int16Array(bytes.buffer);
+}
+
+function buildLiveWsUrl(): string {
+  const httpPath = apiUrl('/api/voice/live');
+  if (httpPath.startsWith('https://')) return `wss://${httpPath.slice(8)}`;
+  if (httpPath.startsWith('http://')) return `ws://${httpPath.slice(7)}`;
+  if (typeof window !== 'undefined') {
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${window.location.host}${httpPath.startsWith('/') ? '' : '/'}${httpPath}`;
+  }
+  return 'ws://127.0.0.1:3000/api/voice/live';
 }
 
 class AIVoiceService {
   private status: VoiceState = 'disconnected';
+  private transport: VoiceTransportKind = 'fallback_http';
   private language: VoiceLanguage = 'en-US';
   private callbacks: VoiceEventCallbacks = {};
 
-  private audioContext: AudioContext | null = null;
+  private captureAudioContext: AudioContext | null = null;
+  private playbackAudioContext: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
+  private workletNode: AudioWorkletNode | null = null;
+  private scriptProcessor: ScriptProcessorNode | null = null;
   private mediaStream: MediaStream | null = null;
   private animationFrameId: number | null = null;
+
+  private activePlaybackSources = new Set<AudioBufferSourceNode>();
+  private nextPlaybackTime = 0;
+
+  private liveWs: WebSocket | null = null;
+  private liveWsActive = false;
+  private wsReconnectAttempts = 0;
+  private wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private intentionalStop = false;
 
   private recognition: any = null;
   private isRecognitionRunning = false;
@@ -59,8 +117,10 @@ class AIVoiceService {
   private isSpeakerMuted = false;
   private isMicMuted = false;
   private serverGeminiAvailable = true;
+  private selectedDeviceId = '';
 
-  private sessionId: string = '';
+  private sessionId = '';
+  private sessionToken = '';
   private conversationHistory: Array<{ sender: 'user' | 'ai'; text: string }> = [];
 
   constructor() {
@@ -75,9 +135,16 @@ class AIVoiceService {
     return this.sessionId;
   }
 
-  public setSessionId(sessionId: string) {
+  public getSessionToken(): string {
+    return this.sessionToken;
+  }
+
+  public setSessionId(sessionId: string, sessionToken?: string) {
     if (sessionId && sessionId.trim()) {
       this.sessionId = sessionId.trim().slice(0, 80);
+    }
+    if (sessionToken && sessionToken.trim()) {
+      this.sessionToken = sessionToken.trim();
     }
   }
 
@@ -85,8 +152,43 @@ class AIVoiceService {
     return this.status;
   }
 
+  public getTransport(): VoiceTransportKind {
+    return this.transport;
+  }
+
   public getLanguage(): VoiceLanguage {
     return this.language;
+  }
+
+  public getSelectedDeviceId(): string {
+    return this.selectedDeviceId;
+  }
+
+  public async listAudioInputDevices(): Promise<AudioInputDeviceOption[]> {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) {
+      return [];
+    }
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      return devices
+        .filter((d) => d.kind === 'audioinput')
+        .map((d, idx) => ({
+          deviceId: d.deviceId,
+          label: d.label || `Microphone ${idx + 1}`,
+        }));
+    } catch {
+      return [];
+    }
+  }
+
+  public async setAudioInputDevice(deviceId: string): Promise<void> {
+    this.selectedDeviceId = deviceId;
+    if (this.status !== 'disconnected' && this.status !== 'error') {
+      const currentSid = this.sessionId;
+      const currentTok = this.sessionToken;
+      this.stopSession();
+      await this.startSession(currentSid, currentTok);
+    }
   }
 
   public supportsNativeSpeechRecognition(): boolean {
@@ -112,6 +214,9 @@ class AIVoiceService {
         track.enabled = !muted;
       });
     }
+    if (this.liveWs && this.liveWs.readyState === WebSocket.OPEN) {
+      this.liveWs.send(JSON.stringify({ type: 'mute', muted }));
+    }
     if (muted && this.status === 'listening') {
       this.setStatus('idle');
     }
@@ -135,66 +240,82 @@ class AIVoiceService {
     return this.isSpeakerMuted;
   }
 
-  public async startSession(sharedSessionId?: string): Promise<boolean> {
+  public async startSession(sharedSessionId?: string, sharedSessionToken?: string): Promise<boolean> {
     if (sharedSessionId) {
-      this.setSessionId(sharedSessionId);
+      this.setSessionId(sharedSessionId, sharedSessionToken);
     }
     if (this.status !== 'disconnected' && this.status !== 'error') {
       return true;
     }
 
+    this.intentionalStop = false;
     this.setStatus('connecting');
     this.recognitionReconnectAttempts = 0;
+    this.wsReconnectAttempts = 0;
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      const audioConstraints: MediaTrackConstraints = {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+        ...(this.selectedDeviceId ? { deviceId: { exact: this.selectedDeviceId } } : {}),
+      };
 
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
       this.mediaStream = stream;
 
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioContextClass) {
-        this.audioContext = new AudioContextClass();
-        if (this.audioContext.state === 'suspended') {
-          await this.audioContext.resume();
+        this.captureAudioContext = new AudioContextClass();
+        if (this.captureAudioContext.state === 'suspended') {
+          await this.captureAudioContext.resume();
         }
-        const source = this.audioContext.createMediaStreamSource(stream);
-        this.analyser = this.audioContext.createAnalyser();
+        const source = this.captureAudioContext.createMediaStreamSource(stream);
+        this.analyser = this.captureAudioContext.createAnalyser();
         this.analyser.fftSize = 64;
         source.connect(this.analyser);
         this.startVolumeMonitoring();
+        await this.setupPcmCapturePipeline(source);
+
+        // Dedicated 24kHz AudioContext for gapless Gemini Live PCM output playback
+        try {
+          this.playbackAudioContext = new AudioContextClass({ sampleRate: 24000 });
+        } catch {
+          this.playbackAudioContext = new AudioContextClass();
+        }
       }
 
-      const SpeechRecognitionClass =
-        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      if (SpeechRecognitionClass) {
-        this.setupRecognition(SpeechRecognitionClass);
+      // Negotiate voice session & continuity metadata over HTTP first
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (this.sessionToken) {
+        headers['X-Session-Token'] = this.sessionToken;
       }
 
       try {
         const res = await fetch(apiUrl('/api/voice/session'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({ language: this.language, sessionId: this.sessionId }),
         });
         if (res.ok) {
           const data = await res.json();
           if (data.sessionId) {
             this.sessionId = data.sessionId;
-            this.callbacks.onSessionId?.(this.sessionId);
           }
+          if (data.sessionToken) {
+            this.sessionToken = data.sessionToken;
+          }
+          this.callbacks.onSessionId?.(this.sessionId, this.sessionToken || undefined);
           this.serverGeminiAvailable = Boolean(data.serverGeminiAvailable);
-          this.callbacks.onDegradedNotice?.(
-            data.serverGeminiAvailable
-              ? null
-              : data.degradedNotice ||
-                  'Live Gemini audio synthesis is in catalog-grounded fallback mode; browser speech and text chat remain active.'
-          );
+          if (!data.serverGeminiAvailable) {
+            this.callbacks.onDegradedNotice?.(
+              data.degradedNotice ||
+                'Live Gemini audio synthesis is in catalog-grounded fallback mode; browser speech and text chat remain active.'
+            );
+          } else {
+            this.callbacks.onDegradedNotice?.(null);
+          }
         }
       } catch {
         this.serverGeminiAvailable = false;
@@ -203,8 +324,30 @@ class AIVoiceService {
         );
       }
 
-      this.setStatus('idle');
+      // Attempt native bidirectional WebSocket (/api/voice/live) when browser supports WebSocket & Gemini is configured
+      const connectedLive =
+        typeof WebSocket !== 'undefined' && this.serverGeminiAvailable
+          ? await this.connectLiveWebSocket()
+          : false;
 
+      if (connectedLive) {
+        this.transport = 'gemini_live_ws';
+        this.callbacks.onTransportChange?.('gemini_live_ws');
+        this.setStatus('idle');
+        return true;
+      }
+
+      // Fallback Mode: Web Speech API + MediaRecorder + Gemini WAV TTS / Browser SpeechSynthesis
+      this.transport = 'fallback_http';
+      this.callbacks.onTransportChange?.('fallback_http');
+
+      const SpeechRecognitionClass =
+        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecognitionClass) {
+        this.setupRecognition(SpeechRecognitionClass);
+      }
+
+      this.setStatus('idle');
       const greeting = this.language.startsWith('fil')
         ? 'Magandang araw po. Ako ang inyong OPHIREUM AI Solutions Consultant. Paano ko po matutulungan ang inyong multimedia o software development project ngayon?'
         : 'Welcome to OPHIREUM MULTIMEDIA PRODUCTION. I am your AI Solutions Consultant. How can I assist with your creative media, AI, or enterprise software project today?';
@@ -223,10 +366,250 @@ class AIVoiceService {
     }
   }
 
-  /**
-   * MediaRecorder -> /api/voice/transcribe push-to-talk fallback for browsers
-   * without native Web Speech API (e.g., Firefox or certain mobile browsers).
-   */
+  private async setupPcmCapturePipeline(source: MediaStreamAudioSourceNode): Promise<void> {
+    if (!this.captureAudioContext) return;
+    const ctx = this.captureAudioContext;
+
+    // Prefer AudioWorkletNode for low-latency off-main-thread 16kHz PCM framing
+    if (ctx.audioWorklet && typeof AudioWorkletNode !== 'undefined') {
+      try {
+        await ctx.audioWorklet.addModule('/audio/pcm-capture-worklet.js');
+        const worklet = new AudioWorkletNode(ctx, 'ophireum-pcm-capture', {
+          processorOptions: { targetSampleRate: 16000 },
+        });
+        worklet.port.onmessage = (ev: MessageEvent) => {
+          const msg = ev.data;
+          if (!msg || msg.type !== 'pcm16') return;
+          if (this.isMicMuted) return;
+          if (typeof msg.rms === 'number' && msg.rms > 0.045 && this.status === 'speaking' && this.liveWsActive) {
+            this.interrupt();
+          }
+          if (this.liveWsActive && this.liveWs && this.liveWs.readyState === WebSocket.OPEN) {
+            this.liveWs.send(
+              JSON.stringify({
+                type: 'audio_chunk',
+                data: arrayBufferToBase64(msg.buffer as ArrayBuffer),
+                mimeType: 'audio/pcm;rate=16000',
+              })
+            );
+          }
+        };
+        source.connect(worklet);
+        this.workletNode = worklet;
+        return;
+      } catch {
+        // Fall through cleanly to ScriptProcessorNode fallback
+      }
+    }
+
+    // Legacy ScriptProcessorNode fallback for older browsers without AudioWorklet
+    if (typeof ctx.createScriptProcessor === 'function') {
+      const processor = ctx.createScriptProcessor(4096, 1, 1);
+      const ratio = ctx.sampleRate / 16000;
+      processor.onaudioprocess = (ev) => {
+        if (this.isMicMuted || !this.liveWsActive || !this.liveWs || this.liveWs.readyState !== WebSocket.OPEN) {
+          return;
+        }
+        const input = ev.inputBuffer.getChannelData(0);
+        const outLen = Math.max(1, Math.floor(input.length / ratio));
+        const pcm = new Int16Array(outLen);
+        for (let i = 0; i < outLen; i += 1) {
+          const s = Math.max(-1, Math.min(1, input[Math.min(input.length - 1, Math.floor(i * ratio))]));
+          pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+        }
+        this.liveWs.send(
+          JSON.stringify({
+            type: 'audio_chunk',
+            data: arrayBufferToBase64(pcm.buffer),
+            mimeType: 'audio/pcm;rate=16000',
+          })
+        );
+      };
+      source.connect(processor);
+      processor.connect(ctx.destination);
+      this.scriptProcessor = processor;
+    }
+  }
+
+  private connectLiveWebSocket(): Promise<boolean> {
+    return new Promise((resolve) => {
+      let settled = false;
+      const timeout = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          resolve(false);
+        }
+      }, 4500);
+
+      try {
+        const ws = new WebSocket(buildLiveWsUrl());
+        this.liveWs = ws;
+
+        ws.onopen = () => {
+          ws.send(
+            JSON.stringify({
+              type: 'start',
+              sessionId: this.sessionId,
+              sessionToken: this.sessionToken || undefined,
+              language: this.language,
+            })
+          );
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(String(event.data));
+            if (msg.type === 'session_ready') {
+              if (msg.sessionId) this.sessionId = msg.sessionId;
+              if (msg.sessionToken) this.sessionToken = msg.sessionToken;
+              this.callbacks.onSessionId?.(this.sessionId, this.sessionToken || undefined);
+              this.liveWsActive = Boolean(msg.geminiLiveActive);
+              if (msg.degradedNotice) {
+                this.callbacks.onDegradedNotice?.(msg.degradedNotice);
+              }
+              if (!settled) {
+                settled = true;
+                clearTimeout(timeout);
+                resolve(this.liveWsActive);
+              }
+              return;
+            }
+
+            if (msg.type === 'audio_output' && msg.data && !this.isSpeakerMuted) {
+              this.setStatus('speaking');
+              this.schedulePcm24kPlayback(String(msg.data));
+              return;
+            }
+
+            if (msg.type === 'interrupted') {
+              this.flushPcmPlaybackQueue();
+              if (this.status === 'speaking') this.setStatus('listening');
+              return;
+            }
+
+            if (msg.type === 'transcript') {
+              if (msg.sender === 'user') {
+                this.callbacks.onTranscript?.(String(msg.text || ''), Boolean(msg.isFinal));
+                if (!msg.isFinal) this.setStatus('listening');
+              } else if (msg.sender === 'assistant' && msg.isFinal) {
+                this.callbacks.onAiResponse?.(String(msg.text || ''));
+              }
+              return;
+            }
+
+            if (msg.type === 'tool_result') {
+              if (msg.toolName === 'book_consultation' && msg.requiresConfirmation) {
+                this.callbacks.onBookingRequested?.();
+              }
+              return;
+            }
+
+            if (msg.type === 'turn_complete') {
+              if (this.status !== 'disconnected') {
+                this.setStatus('idle');
+              }
+              return;
+            }
+
+            if (msg.type === 'upstream_closed' && !this.intentionalStop) {
+              this.scheduleLiveReconnect();
+            }
+          } catch {
+            // ignore malformed frame
+          }
+        };
+
+        ws.onerror = () => {
+          this.liveWsActive = false;
+          if (!settled) {
+            settled = true;
+            clearTimeout(timeout);
+            resolve(false);
+          }
+        };
+
+        ws.onclose = () => {
+          this.liveWsActive = false;
+          if (!settled) {
+            settled = true;
+            clearTimeout(timeout);
+            resolve(false);
+          } else if (!this.intentionalStop && this.status !== 'disconnected') {
+            this.scheduleLiveReconnect();
+          }
+        };
+      } catch {
+        clearTimeout(timeout);
+        resolve(false);
+      }
+    });
+  }
+
+  private scheduleLiveReconnect() {
+    if (this.wsReconnectAttempts >= 3 || this.intentionalStop) {
+      this.transport = 'fallback_http';
+      this.callbacks.onTransportChange?.('fallback_http');
+      this.callbacks.onDegradedNotice?.(
+        'Realtime audio socket disconnected. Switched cleanly to fallback voice & text mode.'
+      );
+      return;
+    }
+    this.wsReconnectAttempts += 1;
+    const delayMs = 800 * this.wsReconnectAttempts;
+    this.wsReconnectTimer = setTimeout(() => {
+      void this.connectLiveWebSocket();
+    }, delayMs);
+  }
+
+  private schedulePcm24kPlayback(base64Pcm: string) {
+    if (!this.playbackAudioContext) return;
+    const ctx = this.playbackAudioContext;
+    if (ctx.state === 'suspended') {
+      void ctx.resume();
+    }
+
+    const int16 = base64ToInt16Array(base64Pcm);
+    if (int16.length === 0) return;
+
+    const audioBuffer = ctx.createBuffer(1, int16.length, 24000);
+    const channelData = audioBuffer.getChannelData(0);
+    for (let i = 0; i < int16.length; i += 1) {
+      channelData[i] = int16[i] / 32768;
+    }
+
+    const source = ctx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(ctx.destination);
+
+    const startTime = Math.max(ctx.currentTime, this.nextPlaybackTime);
+    this.nextPlaybackTime = startTime + audioBuffer.duration;
+    this.activePlaybackSources.add(source);
+
+    source.onended = () => {
+      this.activePlaybackSources.delete(source);
+      if (this.activePlaybackSources.size === 0 && this.status === 'speaking') {
+        this.setStatus('idle');
+      }
+    };
+    source.start(startTime);
+  }
+
+  private flushPcmPlaybackQueue() {
+    for (const source of this.activePlaybackSources) {
+      try {
+        source.stop();
+      } catch {
+        // ignore
+      }
+    }
+    this.activePlaybackSources.clear();
+    if (this.playbackAudioContext) {
+      this.nextPlaybackTime = this.playbackAudioContext.currentTime;
+    } else {
+      this.nextPlaybackTime = 0;
+    }
+  }
+
   public startPushToTalkCapture(): boolean {
     if (!this.mediaStream || typeof MediaRecorder === 'undefined' || this.isRecordingClip) {
       return false;
@@ -261,7 +644,9 @@ class AIVoiceService {
     if (this.mediaRecorder && this.isRecordingClip) {
       try {
         this.mediaRecorder.stop();
-      } catch {}
+      } catch {
+        // ignore
+      }
     }
   }
 
@@ -274,12 +659,7 @@ class AIVoiceService {
     try {
       const blob = new Blob(this.recordedChunks, { type: mimeType });
       const arrayBuf = await blob.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuf);
-      let binary = '';
-      for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      const audioBase64 = btoa(binary);
+      const audioBase64 = arrayBufferToBase64(arrayBuf);
       const res = await fetch(apiUrl('/api/voice/transcribe'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -301,19 +681,60 @@ class AIVoiceService {
   }
 
   public stopSession() {
+    this.intentionalStop = true;
     this.cancelSpeech();
+
+    if (this.wsReconnectTimer) {
+      clearTimeout(this.wsReconnectTimer);
+      this.wsReconnectTimer = null;
+    }
+
+    if (this.liveWs) {
+      try {
+        if (this.liveWs.readyState === WebSocket.OPEN) {
+          this.liveWs.send(JSON.stringify({ type: 'stop' }));
+        }
+        this.liveWs.close();
+      } catch {
+        // ignore
+      }
+      this.liveWs = null;
+      this.liveWsActive = false;
+    }
+
+    if (this.workletNode) {
+      try {
+        this.workletNode.disconnect();
+      } catch {
+        // ignore
+      }
+      this.workletNode = null;
+    }
+
+    if (this.scriptProcessor) {
+      try {
+        this.scriptProcessor.disconnect();
+      } catch {
+        // ignore
+      }
+      this.scriptProcessor = null;
+    }
 
     if (this.mediaRecorder && this.isRecordingClip) {
       try {
         this.mediaRecorder.stop();
-      } catch {}
+      } catch {
+        // ignore
+      }
       this.isRecordingClip = false;
     }
 
     if (this.recognition) {
       try {
         this.recognition.abort();
-      } catch {}
+      } catch {
+        // ignore
+      }
       this.isRecognitionRunning = false;
     }
 
@@ -332,11 +753,22 @@ class AIVoiceService {
       this.mediaStream = null;
     }
 
-    if (this.audioContext && this.audioContext.state !== 'closed') {
+    if (this.captureAudioContext && this.captureAudioContext.state !== 'closed') {
       try {
-        this.audioContext.close();
-      } catch {}
-      this.audioContext = null;
+        void this.captureAudioContext.close();
+      } catch {
+        // ignore
+      }
+      this.captureAudioContext = null;
+    }
+
+    if (this.playbackAudioContext && this.playbackAudioContext.state !== 'closed') {
+      try {
+        void this.playbackAudioContext.close();
+      } catch {
+        // ignore
+      }
+      this.playbackAudioContext = null;
     }
 
     this.setStatus('disconnected');
@@ -345,15 +777,32 @@ class AIVoiceService {
 
   public interrupt() {
     this.cancelSpeech();
+    if (this.liveWs && this.liveWs.readyState === WebSocket.OPEN) {
+      this.liveWs.send(JSON.stringify({ type: 'interrupt' }));
+    }
     if (this.status === 'speaking') {
       this.setStatus('idle');
-      this.startRecognitionSafe();
+      if (!this.liveWsActive) {
+        this.startRecognitionSafe();
+      }
     }
   }
 
   public async handleUserSpeech(transcript: string) {
     const cleanTranscript = transcript.trim().slice(0, 2000);
     if (!cleanTranscript) return;
+
+    if (this.liveWsActive && this.liveWs && this.liveWs.readyState === WebSocket.OPEN) {
+      this.liveWs.send(
+        JSON.stringify({
+          type: 'text_input',
+          text: cleanTranscript,
+          clientMessageId: `ws-txt-${Date.now()}`,
+        })
+      );
+      this.setStatus('thinking');
+      return;
+    }
 
     this.conversationHistory = [
       ...this.conversationHistory.slice(-7),
@@ -362,7 +811,6 @@ class AIVoiceService {
     this.callbacks.onTranscript?.(cleanTranscript, true);
     this.setStatus('thinking');
 
-    // Never fabricate an unverified appointment via voice; route user cleanly to verified Booking Modal
     if (/schedule|appointment|book|meeting|slot|calendar/i.test(cleanTranscript)) {
       const isFilipino = this.language.startsWith('fil');
       const reply = isFilipino
@@ -377,9 +825,12 @@ class AIVoiceService {
     }
 
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (this.sessionToken) headers['X-Session-Token'] = this.sessionToken;
+
       const response = await fetch(apiUrl('/api/voice/process'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           sessionId: this.sessionId,
           userMessage: cleanTranscript,
@@ -390,6 +841,10 @@ class AIVoiceService {
 
       if (response.ok) {
         const data = await response.json();
+        if (data.sessionToken) {
+          this.sessionToken = data.sessionToken;
+          this.callbacks.onSessionId?.(this.sessionId, this.sessionToken);
+        }
         if (typeof data.serverGeminiAvailable === 'boolean') {
           this.serverGeminiAvailable = data.serverGeminiAvailable;
         }
@@ -430,7 +885,9 @@ class AIVoiceService {
     if (this.recognition && this.isRecognitionRunning) {
       try {
         this.recognition.stop();
-      } catch {}
+      } catch {
+        // ignore
+      }
       this.isRecognitionRunning = false;
     }
 
@@ -454,7 +911,6 @@ class AIVoiceService {
       }
     };
 
-    // 1. Prefer backend-mediated Gemini WAV TTS (/api/voice/speak) when Gemini is available
     if (this.serverGeminiAvailable && typeof window !== 'undefined' && typeof Audio !== 'undefined') {
       try {
         this.speakAbortController = new AbortController();
@@ -464,28 +920,39 @@ class AIVoiceService {
           body: JSON.stringify({ text: cleanText.slice(0, 600), language: this.language }),
           signal: this.speakAbortController.signal,
         });
-        if (res.ok && res.headers.get('content-type')?.includes('audio/')) {
-          const audioBlob = await res.blob();
-          const objectUrl = URL.createObjectURL(audioBlob);
-          this.currentAudioUrl = objectUrl;
-          const audio = new Audio(objectUrl);
-          this.currentAudio = audio;
-          audio.onended = () => {
-            this.cleanupCurrentAudio();
-            finishSpeaking();
-          };
-          audio.onerror = () => {
-            this.cleanupCurrentAudio();
-            this.speakWithBrowserSynthesis(cleanText, finishSpeaking);
-          };
-          await audio.play();
-          return;
+        if (res.ok) {
+          const ct = res.headers.get('content-type') || '';
+          let audioBlob: Blob | null = null;
+          if (ct.includes('audio/')) {
+            audioBlob = await res.blob();
+          } else {
+            const payload = await res.json();
+            if (payload?.audioBase64) {
+              const binary = atob(payload.audioBase64);
+              const bytes = new Uint8Array(binary.length);
+              for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+              audioBlob = new Blob([bytes], { type: payload.mimeType || 'audio/wav' });
+            }
+          }
+          if (audioBlob) {
+            const objectUrl = URL.createObjectURL(audioBlob);
+            this.currentAudioUrl = objectUrl;
+            const audio = new Audio(objectUrl);
+            this.currentAudio = audio;
+            audio.onended = () => {
+              this.cleanupCurrentAudio();
+              finishSpeaking();
+            };
+            audio.onerror = () => {
+              this.cleanupCurrentAudio();
+              this.speakWithBrowserSynthesis(cleanText, finishSpeaking);
+            };
+            await audio.play();
+            return;
+          }
         }
       } catch (err: any) {
-        if (err?.name === 'AbortError') {
-          return;
-        }
-        // Gracefully fall back to browser SpeechSynthesis
+        if (err?.name === 'AbortError') return;
       }
     }
 
@@ -533,7 +1000,9 @@ class AIVoiceService {
       try {
         this.currentAudio.pause();
         this.currentAudio.src = '';
-      } catch {}
+      } catch {
+        // ignore
+      }
       this.currentAudio = null;
     }
     if (this.currentAudioUrl) {
@@ -543,10 +1012,13 @@ class AIVoiceService {
   }
 
   public cancelSpeech() {
+    this.flushPcmPlaybackQueue();
     if (this.speakAbortController) {
       try {
         this.speakAbortController.abort();
-      } catch {}
+      } catch {
+        // ignore
+      }
       this.speakAbortController = null;
     }
     this.cleanupCurrentAudio();
@@ -612,6 +1084,7 @@ class AIVoiceService {
           this.status !== 'disconnected' &&
           this.status !== 'speaking' &&
           !this.isMicMuted &&
+          !this.liveWsActive &&
           this.recognitionReconnectAttempts < 8
         ) {
           this.recognitionReconnectAttempts += 1;
@@ -633,6 +1106,7 @@ class AIVoiceService {
       !this.recognition ||
       this.isRecognitionRunning ||
       this.isMicMuted ||
+      this.liveWsActive ||
       this.status === 'disconnected'
     ) {
       return;
@@ -644,7 +1118,9 @@ class AIVoiceService {
       if (this.status !== 'speaking' && this.status !== 'thinking') {
         this.setStatus('idle');
       }
-    } catch {}
+    } catch {
+      // ignore invalid state error
+    }
   }
 
   private startVolumeMonitoring() {
@@ -662,7 +1138,7 @@ class AIVoiceService {
       } else if (this.analyser && !this.isMicMuted) {
         this.analyser.getByteFrequencyData(dataArray);
         let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) {
+        for (let i = 0; i < dataArray.length; i += 1) {
           sum += dataArray[i];
         }
         const avg = sum / dataArray.length;

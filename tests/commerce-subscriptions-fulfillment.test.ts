@@ -1,6 +1,5 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import crypto from 'node:crypto';
 import type { Server } from 'node:http';
 import { createApp } from '../src/server/app';
 import { LocalPortalRepository } from '../src/server/portal/localPortalRepository';

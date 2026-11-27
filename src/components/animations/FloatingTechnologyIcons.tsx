@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { 
-  Cpu, Network, Cloud, Code2, Database, ShieldCheck, 
+import {
+  Cpu, Network, Cloud, Code2, Database, ShieldCheck,
   Film, Clapperboard, Palette, Globe, Bot, LayoutDashboard,
-  Sparkles, ArrowUpRight
+  ArrowUpRight
 } from 'lucide-react';
 
 interface TechIcon {

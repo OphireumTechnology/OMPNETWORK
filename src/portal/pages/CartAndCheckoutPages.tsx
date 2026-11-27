@@ -453,7 +453,7 @@ export const PortalCheckoutPage: React.FC = () => {
 
   // Step 3: Project Requirements
   const [projectTitle, setProjectTitle] = useState('');
-  const [instructions, setInstructions] = useState('');
+  const [instructions] = useState('');
   const [deliveryExpectation, setDeliveryExpectation] = useState('');
   const [creativeBrief, setCreativeBrief] = useState('');
   const [specialInstructions, setSpecialInstructions] = useState('');

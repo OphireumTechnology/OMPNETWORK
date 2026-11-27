@@ -1,44 +1,39 @@
-# OPHIREUM NETWORK — BACKUP, RESTORATION, ROLLBACK & DR RUNBOOK (SECTION 22)
+# OPHIREUM NETWORK — BACKUP, RESTORATION, ROLLBACK & DR RUNBOOK
 
-> **Scope**: PostgreSQL (Supabase), Private Storage Buckets, Railway Backend API, GitHub Pages Frontend, Secret Rotation, and Incident Escalation.
+> **Scope**: PostgreSQL (Supabase Migrations `000`–`006`), Private Storage Buckets, Railway Compiled Backend (`dist/server/index.mjs`), GitHub Pages Frontend, Secret Rotation, and Incident Escalation.
 
 ## 1. Recovery Objectives (Target Baseline)
 - **RPO (Recovery Point Objective)**: `<= 15 minutes` (Supabase Point-in-Time Recovery / WAL archiving enabled on Pro tier; daily automated logical snapshots on baseline tier).
-- **RTO (Recovery Time Objective)**: `<= 60 minutes` for database restore + Railway service rollback.
+- **RTO (Recovery Time Objective)**: `<= 60 minutes` for database restore + Railway immutable deployment rollback.
 
-## 2. Automated Database Backup & Restoration Procedure
+## 2. Verified Local PostgreSQL 16 (PGlite) DR Drill Evidence (Phase 44)
+- **Automated Test**: `tests/postgres-migrations.test.ts` — *executes a real PostgreSQL 16 (PGlite) logical backup, SHA-256 checksum verification, and clean DR restore into a fresh instance*.
+- **Verified Steps**:
+  1. Seeded representative multi-table records in Primary PostgreSQL 16 Instance A (`auth.users`, `profiles`, `orders`, `financial_maker_checker_approvals`, `legal_policy_acceptances`).
+  2. Exported deterministic logical backup snapshot and computed 64-hex SHA-256 integrity checksum.
+  3. Bootstrapped clean Recovery PostgreSQL 16 Instance B with full migration chain `000`–`006`.
+  4. Verified backup SHA-256 checksum prior to restore, replayed all records, and asserted 100% post-restore row-count and field parity.
+- **Remaining Staging DR Gate**: Execute an equivalent `pg_dump` -> `pg_restore` drill against an isolated live Supabase staging project prior to production cutover.
+
+## 3. Production Database Backup & Restoration Procedure
 1. **Pre-Migration Snapshot (Mandatory)**:
-   - Before running any migration (`000`–`004` or future `005+`), capture a manual Supabase backup snapshot AND export logical backup:
+   - Before applying any migration (`000`–`006` or future `007+`), capture a Supabase backup snapshot AND export logical dump:
      `pg_dump --format=custom --no-owner --no-privileges "$DATABASE_URL" > ophireum-pre-migration-$(date -u +%Y%m%dT%H%M%SZ).dump`
-2. **Staging Restoration Drill (Required Before Production Cutover)**:
-   - Restore the latest `.dump` into a disposable staging database using `pg_restore --clean --if-exists --no-owner`.
-   - Verify row counts across `profiles`, `orders`, `payments`, `payment_reference_sequences`, `audit_logs`, `ai_agent_executions`, and `knowledge_documents`.
-   - Confirm append-only triggers (`prevent_audit_log_mutation`) and `storage.objects` RLS policies remain active after restore.
-   - Verify `payment_reference_sequences.last_sequence` matches `MAX(sequence)` in `payments` so no payment reference collisions occur after restore.
+   - Record `sha256sum` of the `.dump` artifact.
+2. **Staging Restoration Verification**:
+   - Restore `.dump` into disposable staging DB: `pg_restore --clean --if-exists --no-owner -d "$STAGING_DATABASE_URL" <file.dump>`.
+   - Verify row counts, `prevent_audit_log_mutation()` append-only triggers on `audit_logs`, `ai_session_events`, and `auth_security_events`, `chk_maker_checker_distinct_actors`, 6 private buckets (`public = false`), and `payment_reference_sequences` alignment.
 
-## 3. Private Storage Bucket Backup & Recovery
-- All 6 private buckets (`customer-uploads`, `digital-products`, `project-deliverables`, `invoices-pdf`, `receipts-pdf`, `business-documents`) must remain `public = false`.
-- Schedule encrypted weekly mirror sync of storage objects to secondary cold object storage (e.g., encrypted S3/GCS bucket) preserving exact `{userId}/...` key prefixes.
-
-## 4. Application Deployment Rollback Procedure
-- **Railway Backend Rollback**:
-  1. In Railway Dashboard -> Deployments -> select the previous healthy immutable deployment artifact and click **Redeploy / Rollback**.
-  2. Verify `GET https://api.ophireummultimedia.com/api/health` returns `200 OK` with `"storageMode": "supabase"`.
+## 4. Application Deployment Rollback & Graceful Draining
+- **Railway Backend Rollback (`railway.json`, `node dist/server/index.mjs`)**:
+  1. Select previous verified immutable deployment artifact in Railway and click **Rollback**.
+  2. During `SIGTERM`, `server.ts` transitions `runtimeLifecycle.markDraining()`, shifting `GET /api/ready` to `503 temporarily_unavailable` while draining in-flight requests cleanly before exit code `0`.
+  3. Confirm post-rollback `GET https://api.ophireummultimedia.com/api/health`, `/api/ready` (`200`), and `/api/version`.
 - **GitHub Pages Frontend Rollback**:
-  1. Revert the release commit on `main` via `git revert <release_sha>` and push to trigger the standard GitHub Pages workflow.
-- **Database Migration Rollback Policy**:
-  - Migrations `000`–`004` are strictly additive and idempotent (`IF NOT EXISTS`, `CREATE OR REPLACE`). Never run destructive `DROP TABLE` rollbacks on production; instead roll forward with a corrective migration or restore from pre-migration snapshot if data corruption occurs.
+  - Revert release commit on `main` via `git revert <release_sha>` and push to trigger `.github/workflows/deploy-pages.yml`.
+- **Database Migration Policy**:
+  - Migrations `000`–`006` are strictly additive and idempotent. Never run destructive `DROP TABLE` rollbacks on production; roll forward or restore from pre-migration snapshot.
 
-## 5. Emergency Secret Rotation & Compromise Containment
-1. **Session / Auth Secret Compromise (`ADMIN_SESSION_SECRET`, `MFA_ENCRYPTION_KEY`)**:
-   - Rotate `ADMIN_SESSION_SECRET` in Railway immediately (invalidates all signed admin/portal bearer & cookie tokens across all replicas).
-   - Re-encrypt or re-enroll admin TOTP credentials if `MFA_ENCRYPTION_KEY` was exposed.
-   - Truncate/expire active sessions and audit `public.audit_logs` and `public.admin_activity_logs`.
-2. **Database Service Role Key Compromise (`SUPABASE_SERVICE_ROLE_KEY`)**:
-   - Rotate service role key in Supabase Project Settings -> API immediately and update Railway environment variable + restart all replicas.
-3. **Provider Key Compromise (`GEMINI_API_KEY`, `RESEND_API_KEY`, Payment Webhook Secrets)**:
-   - Revoke compromised key in provider console, generate replacement, update Railway env vars, and verify via `/api/admin/integrations/health`.
-
-## 6. Payment Incident Lockout
-- `live_payments_enabled` is hard-locked `false` in database migration `003`/`004` and blocked from runtime API mutation (`403` in `PUT /api/admin/config`).
-- If any payment webhook anomaly occurs after future live activation, disable webhook processing via provider console and inspect `payment_webhook_events` for duplicate or mismatched amounts before re-enabling.
+## 5. Emergency Secret Rotation & Payment Incident Lockout
+- Follow `docs/development/INCIDENT_RESPONSE_RUNBOOK.md` for `ADMIN_SESSION_SECRET`, `MFA_ENCRYPTION_KEY` (`enc:v2:<kid>` zero-downtime key rotation), `SUPABASE_SERVICE_ROLE_KEY`, and provider credential revocation.
+- `live_payments_enabled` remains hard-locked `false` in migrations `003`/`004` and blocked (`403`) on `PUT /api/admin/config`.

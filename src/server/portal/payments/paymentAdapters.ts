@@ -116,14 +116,66 @@ function timingSafeHexEqual(a: string, b: string): boolean {
   }
 }
 
+const MAX_WEBHOOK_TIMESTAMP_SKEW_MS = 5 * 60 * 1000;
+
+export function validateWebhookTimestampWindow(
+  headers: Record<string, string | string[] | undefined>,
+  nowMs = Date.now()
+): { ok: boolean; error?: string } {
+  const rawTs = (
+    getHeaderValue(headers, 'x-webhook-timestamp') ||
+    getHeaderValue(headers, 'paypal-transmission-time') ||
+    getHeaderValue(headers, 'x-maya-timestamp')
+  ).trim();
+  if (!rawTs) return { ok: true };
+
+  let parsedMs: number;
+  if (/^\d{10}$/.test(rawTs)) {
+    parsedMs = Number(rawTs) * 1000;
+  } else if (/^\d{13}$/.test(rawTs)) {
+    parsedMs = Number(rawTs);
+  } else {
+    parsedMs = Date.parse(rawTs);
+  }
+
+  if (!Number.isFinite(parsedMs)) {
+    return { ok: false, error: 'Malformed webhook timestamp header.' };
+  }
+  if (Math.abs(nowMs - parsedMs) > MAX_WEBHOOK_TIMESTAMP_SKEW_MS) {
+    return {
+      ok: false,
+      error: 'Webhook timestamp outside allowed 5-minute replay tolerance window.',
+    };
+  }
+  return { ok: true };
+}
+
 function verifyHmacSha256Webhook(
   provider: PaymentProviderId,
   signatureHeaderName: string,
   secretEnvVar: string,
   headers: Record<string, string | string[] | undefined>,
   rawBody: string,
-  parsedBody: Record<string, unknown>
+  parsedBody: Record<string, unknown>,
+  altSignatureHeaderNames: string[] = []
 ): VerifiedWebhookPayload {
+  if (typeof rawBody !== 'string' || rawBody.length === 0) {
+    return {
+      verified: false,
+      provider,
+      error: 'Original raw request payload is required for cryptographic webhook verification.',
+    };
+  }
+
+  const tsCheck = validateWebhookTimestampWindow(headers);
+  if (!tsCheck.ok) {
+    return {
+      verified: false,
+      provider,
+      error: tsCheck.error || 'Webhook replay timestamp check failed.',
+    };
+  }
+
   const secret = (process.env[secretEnvVar] || process.env[`${secretEnvVar}_TEST`] || '').trim();
   if (!secret) {
     return {
@@ -133,7 +185,13 @@ function verifyHmacSha256Webhook(
     };
   }
 
-  const providedSig = getHeaderValue(headers, signatureHeaderName);
+  let providedSig = getHeaderValue(headers, signatureHeaderName);
+  if (!providedSig) {
+    for (const altHeader of altSignatureHeaderNames) {
+      providedSig = getHeaderValue(headers, altHeader);
+      if (providedSig) break;
+    }
+  }
   if (!providedSig) {
     return {
       verified: false,
@@ -142,7 +200,7 @@ function verifyHmacSha256Webhook(
     };
   }
 
-  const expectedSig = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+  const expectedSig = crypto.createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex');
   if (!timingSafeHexEqual(providedSig, expectedSig)) {
     return {
       verified: false,
@@ -298,6 +356,21 @@ class XenditPaymentAdapter implements PaymentProviderAdapter {
     rawBody: string,
     parsedBody: Record<string, unknown>
   ): VerifiedWebhookPayload {
+    if (typeof rawBody !== 'string' || rawBody.length === 0) {
+      return {
+        verified: false,
+        provider: this.id,
+        error: 'Original raw request payload is required for Xendit webhook verification.',
+      };
+    }
+    const tsCheck = validateWebhookTimestampWindow(headers);
+    if (!tsCheck.ok) {
+      return {
+        verified: false,
+        provider: this.id,
+        error: tsCheck.error || 'Xendit webhook timestamp validation failed.',
+      };
+    }
     const callbackToken = this.getWebhookToken();
     const xCallbackToken = getHeaderValue(headers, 'x-callback-token');
     if (callbackToken && xCallbackToken && timingSafeHexEqual(xCallbackToken, callbackToken)) {
@@ -589,7 +662,8 @@ class PayPalPaymentAdapter implements PaymentProviderAdapter {
       'PAYPAL_WEBHOOK_SECRET',
       headers,
       rawBody,
-      parsedBody
+      parsedBody,
+      ['paypal-transmission-sig']
     );
   }
 
@@ -813,7 +887,8 @@ class MayaPaymentAdapter implements PaymentProviderAdapter {
       'MAYA_WEBHOOK_SECRET',
       headers,
       rawBody,
-      parsedBody
+      parsedBody,
+      ['x-maya-signature']
     );
   }
 

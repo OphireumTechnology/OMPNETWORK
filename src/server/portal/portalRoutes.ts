@@ -3,7 +3,6 @@ import express, { NextFunction, Request, Response, Router } from 'express';
 import {
   OrderStatus,
   PaymentProviderId,
-  PortalCurrency,
   PortalRepository,
   PortalUserRecord,
   SupportTicketCategory,
@@ -12,6 +11,7 @@ import {
   usdToPhpMinor,
 } from './types';
 import { PaymentGatewayRegistry } from './payments/paymentAdapters';
+import { recordPaymentReconciliationException } from './payments/financialGovernance';
 import { logStructured } from '../logger';
 
 export interface PortalAuthenticatedRequest extends Request {
@@ -652,7 +652,15 @@ export function createPortalRouter(options: {
       return;
     }
 
-    const rawBody = typeof (req as any).rawBody === 'string' ? (req as any).rawBody : JSON.stringify(req.body || {});
+    const rawBody = (req as Request & { rawBody?: string }).rawBody;
+    if (typeof rawBody !== 'string' || rawBody.length === 0) {
+      res.status(400).json({
+        success: false,
+        code: 'RAW_BODY_REQUIRED',
+        error: 'Webhook signature verification requires the exact raw HTTP request body. Reconstructed JSON is prohibited.',
+      });
+      return;
+    }
     const verified = adapter.verifyWebhook(req.headers, rawBody, (req.body || {}) as Record<string, unknown>);
     if (!verified.verified || !verified.providerEventId || !verified.orderId || !verified.amountMinor || !verified.currency || !verified.status) {
       res.status(401).json({ success: false, error: verified.error || 'Webhook verification failed.' });
@@ -676,6 +684,24 @@ export function createPortalRouter(options: {
           status: verified.status,
         },
       });
+      if (!outcome.deduplicated && !outcome.order) {
+        const reason = `Verified ${provider} webhook ${verified.providerEventId} referenced unknown order "${verified.orderId}". Queued for finance reconciliation.`;
+        recordPaymentReconciliationException({
+          provider,
+          providerEventId: verified.providerEventId,
+          providerTransactionId: verified.providerTransactionId || verified.providerEventId,
+          orderIdClaimed: verified.orderId,
+          amountMinor: verified.amountMinor,
+          currency: verified.currency,
+          mismatchReason: reason,
+        });
+        res.status(422).json({
+          success: false,
+          code: 'PAYMENT_RECONCILIATION_MISMATCH',
+          error: reason,
+        });
+        return;
+      }
       res.status(200).json({
         success: true,
         deduplicated: outcome.deduplicated,
@@ -685,7 +711,17 @@ export function createPortalRouter(options: {
         projectReference: outcome.projectCreated?.referenceNumber,
       });
     } catch (err: any) {
-      res.status(422).json({ success: false, error: err?.message || 'Webhook reconciliation error' });
+      const reason = err?.message || 'Webhook reconciliation error';
+      recordPaymentReconciliationException({
+        provider,
+        providerEventId: verified.providerEventId,
+        providerTransactionId: verified.providerTransactionId || verified.providerEventId,
+        orderIdClaimed: verified.orderId,
+        amountMinor: verified.amountMinor,
+        currency: verified.currency,
+        mismatchReason: reason,
+      });
+      res.status(422).json({ success: false, code: 'PAYMENT_RECONCILIATION_MISMATCH', error: reason });
     }
   });
 

@@ -76,6 +76,49 @@ export interface AgentStructuredOutput {
   requiresHumanReview: boolean;
 }
 
+export type WorkforceExecutionState =
+  | 'QUEUED'
+  | 'RUNNING'
+  | 'WAITING_FOR_APPROVAL'
+  | 'APPROVED'
+  | 'SUCCEEDED'
+  | 'FAILED'
+  | 'RETRY_SCHEDULED'
+  | 'CANCELLED'
+  | 'BLOCKED_EXTERNAL_DEPENDENCY'
+  | 'DEGRADED_FALLBACK';
+
+export interface WorkforceJobRecord {
+  id: string;
+  executionId: string;
+  agentCode: AgentCode;
+  tenantScope: string;
+  actor: string;
+  actorRole: AdminRole;
+  prompt: string;
+  context?: Record<string, unknown>;
+  actionHash: string;
+  executionState: WorkforceExecutionState;
+  attemptCount: number;
+  maxAttempts: number;
+  workerId?: string;
+  leaseExpiresAt?: string;
+  nextRunAt: string;
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkforceDeadLetterRecord {
+  id: string;
+  jobId: string;
+  agentCode: AgentCode;
+  actionHash: string;
+  failureReason: string;
+  attemptsExhausted: number;
+  createdAt: string;
+}
+
 export interface AgentExecutionRecord {
   id: string;
   agentCode: AgentCode;
@@ -87,6 +130,7 @@ export interface AgentExecutionRecord {
   context?: Record<string, unknown>;
   actionHash: string;
   status: 'pending_approval' | 'approved' | 'rejected' | 'cancelled' | 'expired' | 'completed' | 'failed';
+  executionState: WorkforceExecutionState;
   requiresApproval: boolean;
   approvedBy?: string;
   approvalNote?: string;
@@ -94,6 +138,8 @@ export interface AgentExecutionRecord {
   cancelledAt?: string;
   executedAt?: string;
   retryCount: number;
+  maxAttempts: number;
+  timeoutMs: number;
   estimatedCostUsd: number;
   outputText: string;
   structuredOutput?: AgentStructuredOutput;
@@ -490,6 +536,8 @@ export class EnterpriseAiWorkforceService {
   private readonly executions: AgentExecutionRecord[] = [];
   private readonly usageLogs: AiUsageLogRecord[] = [];
   private readonly escalations: AiEscalationRecord[] = [];
+  private readonly jobQueue: WorkforceJobRecord[] = [];
+  private readonly deadLetters: WorkforceDeadLetterRecord[] = [];
   private readonly knowledge: CentralKnowledgeService;
   private readonly aiClient: GoogleGenAI | null;
   private readonly portalRepo?: PortalRepository;
@@ -537,6 +585,87 @@ export class EnterpriseAiWorkforceService {
     return [...this.escalations].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
+  listQueuedJobs(): WorkforceJobRecord[] {
+    return [...this.jobQueue].sort((a, b) => a.nextRunAt.localeCompare(b.nextRunAt));
+  }
+
+  listDeadLetters(): WorkforceDeadLetterRecord[] {
+    return [...this.deadLetters].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  enqueueJob(input: {
+    agentCode: AgentCode;
+    actor: string;
+    actorRole: AdminRole;
+    prompt: string;
+    context?: Record<string, unknown>;
+    tenantScope?: string;
+    maxAttempts?: number;
+  }): WorkforceJobRecord {
+    const now = new Date().toISOString();
+    const job: WorkforceJobRecord = {
+      id: crypto.randomUUID(),
+      executionId: crypto.randomUUID(),
+      agentCode: input.agentCode,
+      tenantScope: (input.tenantScope || 'ophireum_internal').trim(),
+      actor: input.actor,
+      actorRole: input.actorRole,
+      prompt: input.prompt.trim(),
+      context: input.context,
+      actionHash: computeActionHash(input.agentCode, input.prompt, input.context),
+      executionState: 'QUEUED',
+      attemptCount: 0,
+      maxAttempts: Math.max(1, Math.min(5, input.maxAttempts ?? 3)),
+      nextRunAt: now,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.jobQueue.push(job);
+    return { ...job };
+  }
+
+  claimNextJob(workerId: string, leaseSeconds = 60, nowMs = Date.now()): WorkforceJobRecord | null {
+    const candidate = this.jobQueue.find(
+      (j) =>
+        ((j.executionState === 'QUEUED' || j.executionState === 'RETRY_SCHEDULED') &&
+          Date.parse(j.nextRunAt) <= nowMs) ||
+        (j.executionState === 'RUNNING' && j.leaseExpiresAt && Date.parse(j.leaseExpiresAt) < nowMs)
+    );
+    if (!candidate) return null;
+    candidate.executionState = 'RUNNING';
+    candidate.workerId = workerId;
+    candidate.attemptCount += 1;
+    candidate.leaseExpiresAt = new Date(nowMs + Math.max(10, leaseSeconds) * 1000).toISOString();
+    candidate.updatedAt = new Date(nowMs).toISOString();
+    return { ...candidate };
+  }
+
+  failOrRetryJob(jobId: string, failureReason: string): { job?: WorkforceJobRecord; deadLetter?: WorkforceDeadLetterRecord } {
+    const job = this.jobQueue.find((j) => j.id === jobId);
+    if (!job) return {};
+    const now = new Date();
+    job.lastError = failureReason;
+    job.updatedAt = now.toISOString();
+    if (job.attemptCount < job.maxAttempts) {
+      job.executionState = 'RETRY_SCHEDULED';
+      job.nextRunAt = new Date(now.getTime() + Math.pow(2, job.attemptCount) * 1000).toISOString();
+      job.leaseExpiresAt = undefined;
+      return { job: { ...job } };
+    }
+    job.executionState = 'FAILED';
+    const dlq: WorkforceDeadLetterRecord = {
+      id: crypto.randomUUID(),
+      jobId: job.id,
+      agentCode: job.agentCode,
+      actionHash: job.actionHash,
+      failureReason,
+      attemptsExhausted: job.attemptCount,
+      createdAt: now.toISOString(),
+    };
+    this.deadLetters.push(dlq);
+    return { job: { ...job }, deadLetter: dlq };
+  }
+
   createEscalation(input: { agentCode: AgentCode; reason: string; customerEmail?: string; createdBy: string }): AiEscalationRecord {
     const rec: AiEscalationRecord = {
       id: crypto.randomUUID(),
@@ -555,12 +684,14 @@ export class EnterpriseAiWorkforceService {
     this.sweepExpiredApprovals();
     const total = this.executions.length;
     const byStatus: Record<string, number> = {};
+    const byExecutionState: Record<string, number> = {};
     const byAgent: Record<string, { runs: number; failures: number; pendingApprovals: number; costUsd: number }> = {};
     let totalTokens = 0;
     let totalCostUsd = 0;
 
     for (const ex of this.executions) {
       byStatus[ex.status] = (byStatus[ex.status] || 0) + 1;
+      byExecutionState[ex.executionState] = (byExecutionState[ex.executionState] || 0) + 1;
       if (!byAgent[ex.agentCode]) {
         byAgent[ex.agentCode] = { runs: 0, failures: 0, pendingApprovals: 0, costUsd: 0 };
       }
@@ -577,6 +708,9 @@ export class EnterpriseAiWorkforceService {
       totalAgentsRegistered: AI_WORKFORCE_AGENTS.length,
       totalExecutions: total,
       statusCounts: byStatus,
+      executionStateCounts: byExecutionState,
+      queuedJobs: this.jobQueue.filter((j) => j.executionState === 'QUEUED' || j.executionState === 'RETRY_SCHEDULED').length,
+      deadLetterCount: this.deadLetters.length,
       pendingApprovals: byStatus.pending_approval || 0,
       pendingApprovalsCount: byStatus.pending_approval || 0,
       failedExecutions: byStatus.failed || 0,
@@ -596,6 +730,7 @@ export class EnterpriseAiWorkforceService {
     for (const ex of this.executions) {
       if (ex.status === 'pending_approval' && ex.expiresAt && Date.parse(ex.expiresAt) <= nowMs) {
         ex.status = 'expired';
+        ex.executionState = 'CANCELLED';
         ex.completedAt = new Date(nowMs).toISOString();
         ex.errorMessage = 'Approval window expired before human authorization.';
       }
@@ -1298,9 +1433,12 @@ export class EnterpriseAiWorkforceService {
         context: input.context,
         actionHash,
         status: 'pending_approval',
+        executionState: 'WAITING_FOR_APPROVAL',
         requiresApproval: true,
         expiresAt: new Date(Date.now() + ttlMs).toISOString(),
         retryCount: 0,
+        maxAttempts: 2,
+        timeoutMs: 15_000,
         estimatedCostUsd: 0,
         outputText: `Action queued for human approval before ${agent.code} (${agent.name}) executes. Bound SHA-256 action hash: ${actionHash.slice(0, 16)}…`,
         toolCalls: [],
@@ -1380,11 +1518,15 @@ export class EnterpriseAiWorkforceService {
           context: meta.context,
           actionHash: meta.actionHash,
           status: 'completed',
+          executionState:
+            synthesized.modelUsed === 'deterministic-domain-handler' ? 'DEGRADED_FALLBACK' : 'SUCCEEDED',
           requiresApproval: meta.requiresApproval,
           approvedBy: meta.approvedBy,
           approvalNote: meta.approvalNote,
           executedAt: doneAt,
           retryCount: retries,
+          maxAttempts: 2,
+          timeoutMs: 15_000,
           estimatedCostUsd: synthesized.estimatedCostUsd,
           outputText: synthesized.text,
           structuredOutput: structured,
@@ -1435,10 +1577,13 @@ export class EnterpriseAiWorkforceService {
       context: meta.context,
       actionHash: meta.actionHash,
       status: 'failed',
+      executionState: 'FAILED',
       requiresApproval: meta.requiresApproval,
       approvedBy: meta.approvedBy,
       approvalNote: meta.approvalNote,
       retryCount: retries,
+      maxAttempts: 2,
+      timeoutMs: 15_000,
       estimatedCostUsd: 0,
       outputText: `Execution failed after ${retries} attempt(s): ${lastError}`,
       toolCalls: [],
@@ -1494,6 +1639,7 @@ export class EnterpriseAiWorkforceService {
     const recomputedHash = computeActionHash(record.agentCode, record.prompt, record.context);
     if (recomputedHash !== record.actionHash || (expectedActionHash && expectedActionHash !== record.actionHash)) {
       record.status = 'failed';
+      record.executionState = 'FAILED';
       record.errorMessage = 'Approval integrity violation: proposed action or parameters were modified before execution.';
       record.completedAt = new Date().toISOString();
       await this.safeAudit(approver, approverRole, `ai_approval_tamper_blocked:${record.agentCode}`, record.id, {
@@ -1505,6 +1651,7 @@ export class EnterpriseAiWorkforceService {
 
     if (decision === 'cancel') {
       record.status = 'cancelled';
+      record.executionState = 'CANCELLED';
       record.cancelledAt = new Date().toISOString();
       record.approvedBy = approver;
       record.approvalNote = (note || 'Cancelled before execution').trim();
@@ -1517,6 +1664,7 @@ export class EnterpriseAiWorkforceService {
 
     if (decision === 'reject') {
       record.status = 'rejected';
+      record.executionState = 'CANCELLED';
       record.approvedBy = approver;
       record.approvalNote = (note || 'Rejected by reviewer').trim();
       record.completedAt = new Date().toISOString();
@@ -1527,6 +1675,7 @@ export class EnterpriseAiWorkforceService {
     }
 
     record.status = 'approved';
+    record.executionState = 'APPROVED';
     record.executedAt = new Date().toISOString();
     record.approvedBy = approver;
     record.approvalNote = (note || 'Approved for execution').trim();

@@ -70,9 +70,9 @@ export function escapeHtml(str: string): string {
     .replace(/'/g, '&#39;');
 }
 
-const EMAIL_REGEX = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/;
+const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
-const UUID_OR_KEY_REGEX = /^[a-zA-Z0-9\-_]{8,128}$/;
+const UUID_OR_KEY_REGEX = /^[a-zA-Z0-9_-]{8,128}$/;
 
 export function validateInquiryPayload(raw: unknown): {
   ok: true;

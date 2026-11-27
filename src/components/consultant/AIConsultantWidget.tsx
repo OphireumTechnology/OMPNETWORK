@@ -3,7 +3,7 @@ import {
   Bot, X, Send, Calendar, FileText, Phone, Minimize2, 
   Maximize2, RotateCcw, Shield, Building,
   MapPin, Mic, MicOff, Volume2, VolumeX, PhoneOff, Globe,
-  Square, AlertCircle, Sparkles, CheckCircle2
+  Square, AlertCircle, Sparkles
 } from 'lucide-react';
 import { COMPANY_CONFIG } from '../../data/companyConfig';
 import { BrandLogo } from '../BrandLogo';
@@ -14,7 +14,13 @@ import {
   INITIAL_CONSULTATION_STATE 
 } from '../../services/aiConsultantService';
 import { supabaseService, ProjectBrief, ConsultationAppointment } from '../../services/supabaseService';
-import { aiVoiceService, VoiceState, VoiceLanguage } from '../../services/aiVoiceService';
+import {
+  aiVoiceService,
+  AudioInputDeviceOption,
+  VoiceState,
+  VoiceLanguage,
+  VoiceTransportKind,
+} from '../../services/aiVoiceService';
 import { SERVICE_CATALOG, formatCatalogPrice } from '../../data/serviceCatalog';
 import { ProjectBriefModal } from './ProjectBriefModal';
 import { AppointmentBookingModal } from './AppointmentBookingModal';
@@ -46,7 +52,11 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [degradedNotice, setDegradedNotice] = useState<string | null>(null);
   const [isPushToTalkActive, setIsPushToTalkActive] = useState(false);
+  const [voiceTransport, setVoiceTransport] = useState<VoiceTransportKind>('fallback_http');
+  const [audioDevices, setAudioDevices] = useState<AudioInputDeviceOption[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
   const sharedSessionIdRef = useRef<string>(aiVoiceService.getSessionId());
+  const sharedSessionTokenRef = useRef<string>(aiVoiceService.getSessionToken());
 
   const isVoiceActive = voiceStatus !== 'disconnected' && voiceStatus !== 'error';
 
@@ -160,8 +170,12 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
       onDegradedNotice: (notice) => {
         setDegradedNotice(notice);
       },
-      onSessionId: (sid) => {
+      onTransportChange: (transport) => {
+        setVoiceTransport(transport);
+      },
+      onSessionId: (sid, tok) => {
         sharedSessionIdRef.current = sid;
+        if (tok) sharedSessionTokenRef.current = tok;
       },
       onError: (err) => {
         setVoiceError(err);
@@ -186,7 +200,7 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
     try {
       localStorage.setItem('opm_consultant_messages', JSON.stringify(messages));
       localStorage.setItem('opm_consultant_state', JSON.stringify(state));
-    } catch (e) {
+    } catch {
       // ignore
     }
   }, [messages, state]);
@@ -218,9 +232,16 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
       setIsPushToTalkActive(false);
     } else {
       setVoiceError(null);
-      const success = await aiVoiceService.startSession(sharedSessionIdRef.current);
+      const success = await aiVoiceService.startSession(
+        sharedSessionIdRef.current,
+        sharedSessionTokenRef.current || undefined
+      );
       if (!success) {
         setVoiceStatus('disconnected');
+      } else {
+        const devices = await aiVoiceService.listAudioInputDevices();
+        setAudioDevices(devices);
+        setSelectedDeviceId(aiVoiceService.getSelectedDeviceId());
       }
     }
   };
@@ -322,18 +343,27 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
       }
 
       // Live consultative pipeline grounded in the full 10-category service catalog
-      const { aiMessage, updatedState, sessionId: returnedSessionId, serverGeminiAvailable } =
-        await aiConsultantService.processUserMessage(
-          text,
-          state,
-          messages,
-          voiceLanguage,
-          sharedSessionIdRef.current
-        );
+      const {
+        aiMessage,
+        updatedState,
+        sessionId: returnedSessionId,
+        sessionToken: returnedSessionToken,
+        serverGeminiAvailable,
+      } = await aiConsultantService.processUserMessage(
+        text,
+        state,
+        messages,
+        voiceLanguage,
+        sharedSessionIdRef.current,
+        sharedSessionTokenRef.current || undefined
+      );
 
       if (returnedSessionId) {
         sharedSessionIdRef.current = returnedSessionId;
-        aiVoiceService.setSessionId(returnedSessionId);
+        if (returnedSessionToken) {
+          sharedSessionTokenRef.current = returnedSessionToken;
+        }
+        aiVoiceService.setSessionId(returnedSessionId, returnedSessionToken);
       }
       if (serverGeminiAvailable === false) {
         setDegradedNotice(
@@ -352,7 +382,7 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
       if (isVoiceActive && !isSpeakerMuted) {
         void aiVoiceService.speakText(aiMessage.text);
       }
-    } catch (err) {
+    } catch {
       setIsTyping(false);
       setMessages((prev) => [
         ...prev,
@@ -916,6 +946,32 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
                       <span className="italic flex-1 truncate">"{liveTranscript}"</span>
                     </div>
                   )}
+
+                  {/* Audio Input Device Selector & Live Transport Indicator */}
+                  <div className="flex items-center justify-between gap-2 text-[10px] text-slate-400">
+                    <span className="font-mono uppercase tracking-wider text-[#00C2C7]">
+                      {voiceTransport === 'gemini_live_ws' ? 'Live Audio Stream (16k/24k PCM)' : 'Voice Fallback Mode'}
+                    </span>
+                    {audioDevices.length > 1 && (
+                      <select
+                        aria-label="Select microphone input device"
+                        value={selectedDeviceId}
+                        onChange={(e) => {
+                          const nextId = e.target.value;
+                          setSelectedDeviceId(nextId);
+                          void aiVoiceService.setAudioInputDevice(nextId);
+                        }}
+                        className="bg-slate-900 border border-slate-700 text-slate-200 rounded px-1.5 py-0.5 text-[10px] max-w-[180px] truncate"
+                      >
+                        <option value="">Default Microphone</option>
+                        {audioDevices.map((d) => (
+                          <option key={d.deviceId} value={d.deviceId}>
+                            {d.label}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
 
                   {/* Voice Privacy Disclosure */}
                   <div className="flex items-center gap-1.5 text-[10px] text-slate-400 leading-tight">

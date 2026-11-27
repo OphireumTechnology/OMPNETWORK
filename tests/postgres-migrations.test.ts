@@ -1,5 +1,6 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
@@ -13,6 +14,8 @@ const MIGRATION_FILES = [
   '002_client_portal_commerce.sql',
   '003_enterprise_platform_expansion.sql',
   '004_reconciliation_hardening.sql',
+  '005_ai_conversation_persistence.sql',
+  '006_enterprise_reliability_and_ai_memory.sql',
 ];
 
 async function bootstrapSupabaseFixtures(pg: PGlite) {
@@ -96,7 +99,7 @@ async function bootstrapSupabaseFixtures(pg: PGlite) {
   `);
 }
 
-describe('Real PostgreSQL 16 Migration Chain (000–004), RLS, Storage & Atomic RPC Verification', () => {
+describe('Real PostgreSQL 16 Migration Chain (000–006), RLS, Storage, Atomic RPC & DR Verification', () => {
   let pg: PGlite;
 
   before(async () => {
@@ -108,7 +111,7 @@ describe('Real PostgreSQL 16 Migration Chain (000–004), RLS, Storage & Atomic 
     await pg.close();
   });
 
-  it('executes complete migration chain 000 -> 004 cleanly and verifies 004 idempotency', async () => {
+  it('executes complete migration chain 000 -> 006 cleanly and verifies 004, 005 & 006 idempotency', async () => {
     for (const file of MIGRATION_FILES) {
       const fullPath = path.join(MIGRATIONS_DIR, file);
       assert.ok(fs.existsSync(fullPath), `Migration missing: ${file}`);
@@ -116,15 +119,21 @@ describe('Real PostgreSQL 16 Migration Chain (000–004), RLS, Storage & Atomic 
       await pg.exec(sql);
     }
 
-    // Re-run 004 to confirm idempotent upgrade compatibility
-    const sql004 = fs.readFileSync(path.join(MIGRATIONS_DIR, '004_reconciliation_hardening.sql'), 'utf8');
-    await pg.exec(sql004);
+    // Re-run 004, 005, and 006 to confirm idempotent upgrade compatibility
+    for (const idempFile of [
+      '004_reconciliation_hardening.sql',
+      '005_ai_conversation_persistence.sql',
+      '006_enterprise_reliability_and_ai_memory.sql',
+    ]) {
+      const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, idempFile), 'utf8');
+      await pg.exec(sql);
+    }
 
     const tablesRes = await pg.query<{ table_name: string }>(
       `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name`
     );
     const names = new Set(tablesRes.rows.map((r) => r.table_name));
-    assert.ok(names.size >= 38, `Expected >= 38 public tables, found ${names.size}`);
+    assert.ok(names.size >= 60, `Expected >= 60 public tables after Migration 006, found ${names.size}`);
 
     for (const required of [
       'admin_users',
@@ -141,6 +150,13 @@ describe('Real PostgreSQL 16 Migration Chain (000–004), RLS, Storage & Atomic 
       'ai_agents',
       'ai_agent_executions',
       'ai_knowledge_documents',
+      'ai_knowledge_chunks',
+      'ai_conversation_sessions',
+      'ai_conversation_messages',
+      'ai_voice_sessions',
+      'ai_session_events',
+      'ai_session_usage',
+      'ai_session_checkpoints',
       'revoked_session_tokens',
       'distributed_rate_limit_buckets',
       'mfa_credentials',
@@ -341,5 +357,325 @@ describe('Real PostgreSQL 16 Migration Chain (000–004), RLS, Storage & Atomic 
     assert.equal(claimed.rows.length, 1);
     assert.equal(claimed.rows[0].job_type, 'email_retry');
     assert.equal(claimed.rows[0].status, 'processing');
+  });
+
+  it('verifies Migration 005 atomic append_ai_conversation_message RPC, optimistic concurrency, deduplication, zero raw audio check, append-only events, RLS isolation, and vector columns', async () => {
+    const userA = '11111111-1111-4111-8111-111111111111';
+    const userB = '22222222-2222-4222-8222-222222222222';
+
+    const sessA = await pg.query<{ id: string }>(
+      `INSERT INTO public.ai_conversation_sessions (session_key, owner_type, user_id, tenant_scope, channel_mode)
+       VALUES ('pg-sess-a', 'authenticated', $1::uuid, $2, 'unified')
+       RETURNING id`,
+      [userA, `customer:${userA}`]
+    );
+    const sessB = await pg.query<{ id: string }>(
+      `INSERT INTO public.ai_conversation_sessions (session_key, owner_type, user_id, tenant_scope, channel_mode)
+       VALUES ('pg-sess-b', 'authenticated', $1::uuid, $2, 'unified')
+       RETURNING id`,
+      [userB, `customer:${userB}`]
+    );
+    const idA = sessA.rows[0].id;
+    const idB = sessB.rows[0].id;
+
+    // 1. Atomic message append + version increment + deduplication
+    const m1 = await pg.query<{ sequence_number: number; session_version: number; deduplicated: boolean }>(
+      `SELECT sequence_number, session_version, deduplicated
+       FROM public.append_ai_conversation_message($1, 'user', 'chat', 'Hello OPHIREUM', 'cmsg-001', 1)`,
+      [idA]
+    );
+    assert.equal(m1.rows[0].sequence_number, 1);
+    assert.equal(m1.rows[0].session_version, 2);
+    assert.equal(m1.rows[0].deduplicated, false);
+
+    // Replaying the same client_message_id deduplicates cleanly without incrementing sequence
+    const m1Dup = await pg.query<{ sequence_number: number; session_version: number; deduplicated: boolean }>(
+      `SELECT sequence_number, session_version, deduplicated
+       FROM public.append_ai_conversation_message($1, 'user', 'chat', 'Hello OPHIREUM', 'cmsg-001', 1)`,
+      [idA]
+    );
+    assert.equal(m1Dup.rows[0].sequence_number, 1);
+    assert.equal(m1Dup.rows[0].deduplicated, true);
+
+    // Stale expected_version triggers optimistic concurrency conflict (SQLSTATE 40001)
+    await assert.rejects(
+      pg.query(
+        `SELECT * FROM public.append_ai_conversation_message($1, 'assistant', 'chat', 'Stale write', 'cmsg-002', 1)`,
+        [idA]
+      ),
+      /AI_SESSION_VERSION_CONFLICT/
+    );
+
+    // Correct expected_version = 2 succeeds
+    const m2 = await pg.query<{ sequence_number: number; session_version: number }>(
+      `SELECT sequence_number, session_version
+       FROM public.append_ai_conversation_message($1, 'assistant', 'live_audio', 'Welcome to OPHIREUM.', 'cmsg-002', 2)`,
+      [idA]
+    );
+    assert.equal(m2.rows[0].sequence_number, 2);
+    assert.equal(m2.rows[0].session_version, 3);
+
+    // 2. Zero raw audio persistence CHECK constraints enforced at DB level
+    await assert.rejects(
+      pg.query(
+        `INSERT INTO public.ai_voice_sessions (conversation_session_id, transport, raw_audio_persisted)
+         VALUES ($1, 'gemini_live_ws', true)`,
+        [idA]
+      ),
+      /check constraint/i
+    );
+    await assert.rejects(
+      pg.query(
+        `INSERT INTO public.ai_conversation_messages (session_id, sequence_number, sender, channel, content, contains_raw_audio)
+         VALUES ($1, 99, 'user', 'voice', 'audio blob', true)`,
+        [idA]
+      ),
+      /check constraint/i
+    );
+
+    // 3. Append-only ai_session_events trigger blocks tampering
+    await pg.query(
+      `INSERT INTO public.ai_session_events (conversation_session_id, event_type, actor)
+       VALUES ($1, 'tool_executed', 'receptionist')`,
+      [idA]
+    );
+    await assert.rejects(
+      pg.query(`UPDATE public.ai_session_events SET event_type = 'tampered' WHERE conversation_session_id = $1`, [idA]),
+      /append-only/i
+    );
+    await assert.rejects(
+      pg.query(`DELETE FROM public.ai_session_events WHERE conversation_session_id = $1`, [idA]),
+      /append-only/i
+    );
+
+    // 4. RLS isolation: Customer A sees only own conversation sessions & messages (not Customer B)
+    await pg.query(
+      `SELECT * FROM public.append_ai_conversation_message($1, 'user', 'chat', 'Customer B confidential message', 'b-1', 1)`,
+      [idB]
+    );
+
+    await pg.exec('BEGIN');
+    await pg.exec(`SET LOCAL ROLE authenticated`);
+    await pg.exec(`SELECT set_config('request.jwt.claim.sub', '${userA}', true)`);
+
+    const aSessions = await pg.query<{ session_key: string }>(`SELECT session_key FROM public.ai_conversation_sessions`);
+    assert.deepEqual(aSessions.rows.map((r) => r.session_key), ['pg-sess-a']);
+
+    const aMessages = await pg.query<{ content: string }>(`SELECT content FROM public.ai_conversation_messages ORDER BY sequence_number`);
+    assert.deepEqual(aMessages.rows.map((r) => r.content), ['Hello OPHIREUM', 'Welcome to OPHIREUM.']);
+
+    // authenticated cannot call SECURITY DEFINER append_ai_conversation_message directly
+    await assert.rejects(
+      pg.query(`SELECT * FROM public.append_ai_conversation_message($1, 'user', 'chat', 'direct bypass')`, [idA]),
+      /permission denied/i
+    );
+    await pg.exec('ROLLBACK');
+
+    // 5. Phase 24 knowledge vector & metadata columns exist on ai_knowledge_chunks
+    const cols = await pg.query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'ai_knowledge_chunks'`
+    );
+    const colSet = new Set(cols.rows.map((c) => c.column_name));
+    for (const expectedCol of [
+      'tenant_scope',
+      'category',
+      'embedding_model',
+      'embedding_dimensions',
+      'embedding_provider',
+      'embedding_values',
+      'document_version',
+    ]) {
+      assert.ok(colSet.has(expectedCol), `Missing ai_knowledge_chunks column: ${expectedCol}`);
+    }
+  });
+
+  it('verifies Migration 006 maker-checker DB constraint, append-only auth_security_events, claim_ai_workforce_job RPC, and legal policy acceptances RLS', async () => {
+    // 1. Maker-checker DB CHECK constraint blocks self-approval at PostgreSQL level
+    await assert.rejects(
+      pg.query(
+        `INSERT INTO public.financial_maker_checker_approvals
+           (action_type, entity_id, amount_minor, currency, requested_by_email, requested_by_role, approver_email, approver_role, status, justification)
+         VALUES
+           ('refund_above_threshold', 'ref-self-1', 75000, 'USD', 'finance@ophireum.test', 'finance_officer', 'FINANCE@OPHIREUM.TEST', 'finance_officer', 'approved', 'Self approval attempt')`
+      ),
+      /chk_maker_checker_distinct_actors/i
+    );
+
+    // Distinct second approver succeeds
+    const okApproval = await pg.query<{ id: string }>(
+      `INSERT INTO public.financial_maker_checker_approvals
+         (action_type, entity_id, amount_minor, currency, requested_by_email, requested_by_role, approver_email, approver_role, status, justification)
+       VALUES
+         ('refund_above_threshold', 'ref-ok-1', 75000, 'USD', 'finance@ophireum.test', 'finance_officer', 'ceo@ophireum.test', 'super_admin', 'approved', 'Dual-control verified refund')
+       RETURNING id`
+    );
+    assert.ok(okApproval.rows[0].id);
+
+    // 2. Append-only auth_security_events trigger blocks UPDATE and DELETE
+    const secEvt = await pg.query<{ id: string }>(
+      `INSERT INTO public.auth_security_events (principal_type, principal_identifier, event_type, outcome, ip_address)
+       VALUES ('admin', 'ceo@ophireum.test', 'login_mfa_verified', 'allowed', '127.0.0.1')
+       RETURNING id`
+    );
+    const secEvtId = secEvt.rows[0].id;
+    await assert.rejects(
+      pg.query(`UPDATE public.auth_security_events SET outcome = 'denied' WHERE id = $1`, [secEvtId]),
+      /append-only/i
+    );
+    await assert.rejects(
+      pg.query(`DELETE FROM public.auth_security_events WHERE id = $1`, [secEvtId]),
+      /append-only/i
+    );
+
+    // 3. claim_ai_workforce_job SECURITY DEFINER RPC atomically leases queued job and blocks authenticated caller
+    const execId = crypto.randomUUID();
+    await pg.query(
+      `INSERT INTO public.ai_workforce_job_queue (execution_id, agent_code, actor, actor_role, prompt, action_hash)
+       VALUES ($1, 'A01', 'ceo@ophireum.test', 'super_admin', 'Prepare executive summary', 'hash-a01-001')`,
+      [execId]
+    );
+    const claimed = await pg.query<{ agent_code: string; execution_state: string; worker_id: string; attempt_count: number }>(
+      `SELECT agent_code, execution_state, worker_id, attempt_count FROM public.claim_ai_workforce_job('replica-2', 90)`
+    );
+    assert.equal(claimed.rows.length, 1);
+    assert.equal(claimed.rows[0].agent_code, 'A01');
+    assert.equal(claimed.rows[0].execution_state, 'RUNNING');
+    assert.equal(claimed.rows[0].worker_id, 'replica-2');
+    assert.equal(claimed.rows[0].attempt_count, 1);
+
+    // Second worker receives empty result because job is already leased
+    const secondClaim = await pg.query(`SELECT * FROM public.claim_ai_workforce_job('replica-3', 90)`);
+    assert.equal(secondClaim.rows.length, 0);
+
+    // Authenticated role cannot call claim_ai_workforce_job directly
+    await pg.exec('BEGIN');
+    await pg.exec(`SET LOCAL ROLE authenticated`);
+    await assert.rejects(
+      pg.query(`SELECT * FROM public.claim_ai_workforce_job('attacker-worker', 60)`),
+      /permission denied/i
+    );
+    await pg.exec('ROLLBACK');
+
+    // 4. Legal policy acceptances owner RLS isolation
+    const userA = '11111111-1111-4111-8111-111111111111';
+    const userB = '22222222-2222-4222-8222-222222222222';
+    await pg.query(
+      `INSERT INTO public.legal_policy_acceptances (user_id, email, policy_slug, policy_version, review_status_at_acceptance)
+       VALUES
+         ($1, 'a@client.test', 'privacy-policy', '2026.1-draft', 'pending_legal_review'),
+         ($2, 'b@client.test', 'privacy-policy', '2026.1-draft', 'pending_legal_review')`,
+      [userA, userB]
+    );
+    await pg.exec('BEGIN');
+    await pg.exec(`SET LOCAL ROLE authenticated`);
+    await pg.exec(`SELECT set_config('request.jwt.claim.sub', '${userA}', true)`);
+    const ownAcceptances = await pg.query<{ email: string }>(`SELECT email FROM public.legal_policy_acceptances`);
+    assert.deepEqual(ownAcceptances.rows.map((r) => r.email), ['a@client.test']);
+    await pg.exec('ROLLBACK');
+  });
+
+  it('executes a real PostgreSQL 16 (PGlite) logical backup, SHA-256 checksum verification, and clean DR restore into a fresh instance', async () => {
+    // Capture deterministic logical snapshot from Primary Instance A
+    const snapshot = {
+      exportedAt: new Date().toISOString(),
+      users: (await pg.query<{ id: string; email: string }>(`SELECT id, email FROM auth.users ORDER BY email`)).rows,
+      profiles: (await pg.query<{ id: string; user_id: string; email: string; full_name: string }>(
+        `SELECT id, user_id, email, full_name FROM public.profiles ORDER BY email`
+      )).rows,
+      orders: (await pg.query<{ order_number: string; user_id: string; currency: string; payment_provider: string; subtotal_minor: number; total_minor: number; billing_details: unknown }>(
+        `SELECT order_number, user_id, currency, payment_provider, subtotal_minor, total_minor, billing_details FROM public.orders ORDER BY order_number`
+      )).rows,
+      makerChecker: (await pg.query<{ action_type: string; entity_id: string; amount_minor: number; currency: string; requested_by_email: string; requested_by_role: string; approver_email: string | null; approver_role: string | null; status: string; justification: string }>(
+        `SELECT action_type, entity_id, amount_minor, currency, requested_by_email, requested_by_role, approver_email, approver_role, status, justification FROM public.financial_maker_checker_approvals ORDER BY entity_id`
+      )).rows,
+      legalAcceptances: (await pg.query<{ user_id: string; email: string; policy_slug: string; policy_version: string; review_status_at_acceptance: string }>(
+        `SELECT user_id, email, policy_slug, policy_version, review_status_at_acceptance FROM public.legal_policy_acceptances ORDER BY email`
+      )).rows,
+    };
+
+    const serializedBackup = JSON.stringify(snapshot);
+    const backupSha256 = crypto.createHash('sha256').update(serializedBackup).digest('hex');
+    assert.equal(backupSha256.length, 64);
+    assert.ok(snapshot.orders.length >= 2, 'Primary snapshot must contain orders');
+
+    // Provision a completely fresh Disaster Recovery PostgreSQL 16 instance (Instance B)
+    const drPg = new PGlite({ extensions: { uuid_ossp, pgcrypto } });
+    try {
+      await bootstrapSupabaseFixtures(drPg);
+      for (const file of MIGRATION_FILES) {
+        const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8');
+        await drPg.exec(sql);
+      }
+
+      // Verify backup checksum prior to restore
+      const verifiedSha = crypto.createHash('sha256').update(serializedBackup).digest('hex');
+      assert.equal(verifiedSha, backupSha256, 'Backup artifact SHA-256 verification failed');
+      const parsed = JSON.parse(serializedBackup) as typeof snapshot;
+
+      for (const u of parsed.users) {
+        await drPg.query(`INSERT INTO auth.users (id, email) VALUES ($1, $2)`, [u.id, u.email]);
+      }
+      for (const p of parsed.profiles) {
+        await drPg.query(`INSERT INTO public.profiles (id, user_id, email, full_name) VALUES ($1, $2, $3, $4)`, [
+          p.id,
+          p.user_id,
+          p.email,
+          p.full_name,
+        ]);
+      }
+      for (const o of parsed.orders) {
+        await drPg.query(
+          `INSERT INTO public.orders (order_number, user_id, currency, payment_provider, subtotal_minor, total_minor, billing_details)
+           VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+          [o.order_number, o.user_id, o.currency, o.payment_provider, o.subtotal_minor, o.total_minor, JSON.stringify(o.billing_details)]
+        );
+      }
+      for (const mc of parsed.makerChecker) {
+        await drPg.query(
+          `INSERT INTO public.financial_maker_checker_approvals
+             (action_type, entity_id, amount_minor, currency, requested_by_email, requested_by_role, approver_email, approver_role, status, justification)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [
+            mc.action_type,
+            mc.entity_id,
+            mc.amount_minor,
+            mc.currency,
+            mc.requested_by_email,
+            mc.requested_by_role,
+            mc.approver_email,
+            mc.approver_role,
+            mc.status,
+            mc.justification,
+          ]
+        );
+      }
+      for (const la of parsed.legalAcceptances) {
+        await drPg.query(
+          `INSERT INTO public.legal_policy_acceptances (user_id, email, policy_slug, policy_version, review_status_at_acceptance)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [la.user_id, la.email, la.policy_slug, la.policy_version, la.review_status_at_acceptance]
+        );
+      }
+
+      // Assert 100% post-restore parity across every restored table
+      const drOrders = await drPg.query<{ order_number: string; total_minor: number }>(
+        `SELECT order_number, total_minor FROM public.orders ORDER BY order_number`
+      );
+      assert.deepEqual(
+        drOrders.rows.map((r) => r.order_number),
+        parsed.orders.map((r) => r.order_number)
+      );
+      const drMakerChecker = await drPg.query<{ entity_id: string; status: string }>(
+        `SELECT entity_id, status FROM public.financial_maker_checker_approvals ORDER BY entity_id`
+      );
+      assert.deepEqual(drMakerChecker.rows, [{ entity_id: 'ref-ok-1', status: 'approved' }]);
+      const drLegal = await drPg.query<{ email: string }>(
+        `SELECT email FROM public.legal_policy_acceptances ORDER BY email`
+      );
+      assert.equal(drLegal.rows.length, parsed.legalAcceptances.length);
+    } finally {
+      await drPg.close();
+    }
   });
 });
