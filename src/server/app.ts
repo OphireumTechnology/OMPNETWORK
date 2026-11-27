@@ -1247,8 +1247,8 @@ CONSULTATION BEHAVIOR:
         const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
         for (const turn of history) {
           contents.push({
-            role: turn.sender === 'user' ? 'user' : 'model',
-            parts: [{ text: turn.text }],
+            role: turn.sender === 'user' ? ('user' as const) : ('model' as const),
+            parts: [{ text: String(turn.text) }],
           });
         }
 
