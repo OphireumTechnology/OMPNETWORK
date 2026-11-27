@@ -1460,12 +1460,13 @@ Tone & Voice Rules:
 
     try {
       if (ai) {
-        const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = history.map(
-          (turn) => ({
+        const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
+        for (const turn of history) {
+          contents.push({
             role: turn.sender === 'user' ? 'user' : 'model',
-            parts: [{ text: turn.text }],
-          })
-        );
+            parts: [{ text: String(turn.text) }],
+          });
+        }
         contents.push({ role: 'user', parts: [{ text: userMessage }] });
 
         const timeoutPromise = new Promise<null>((_, reject) =>
