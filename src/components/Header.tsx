@@ -92,7 +92,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenPortal, onNavigate, active
         </button>
 
         {/* Zone 2: Navigation Links (13–14px medium, vertically centered) */}
-        <nav className="hidden lg:flex items-center gap-6 xl:gap-8 text-[13.5px] font-medium text-slate-300">
+        <nav className="hidden 2xl:flex items-center gap-6 text-[13.5px] font-medium text-slate-300">
           {navItems.map((item) => {
             const isActive = activeSection === item.id;
             return (
@@ -132,7 +132,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenPortal, onNavigate, active
         </div>
 
         {/* Mobile Hamburger & Direct Call Button */}
-        <div className="flex lg:hidden items-center gap-2">
+        <div className="flex 2xl:hidden items-center gap-2 shrink-0">
           <a
             href={COMPANY_CONFIG.mobileLink}
             className="p-2 text-[#00C2C7] bg-slate-900 rounded-lg border border-slate-800 sm:hidden"
@@ -152,7 +152,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenPortal, onNavigate, active
 
       {/* Mobile Drawer Menu */}
       {mobileMenuOpen && (
-        <div className="lg:hidden bg-[#0B1220] border-b border-slate-800 px-5 pt-3 pb-6 space-y-4 shadow-2xl">
+        <div className="2xl:hidden bg-[#0B1220] border-b border-slate-800 px-5 pt-3 pb-6 space-y-4 shadow-2xl">
           {/* Executive info on mobile */}
           <div className="p-3.5 rounded-lg bg-slate-900/90 border border-slate-800 space-y-1.5 text-xs">
             <div className="text-slate-300">
