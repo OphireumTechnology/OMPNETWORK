@@ -49,6 +49,25 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
 
     const launcher = page.getByRole('button', { name: /Open AI Solutions Consultant/i });
     await expect(launcher).toBeVisible();
+    // Verify the real pointer target, rather than forcing the click through an overlay.
+    // This detects CSS stacking/position regressions in the mobile viewport.
+    const launcherHitTarget = await launcher.evaluate((button) => {
+      const bounds = button.getBoundingClientRect();
+      const topElement = document.elementFromPoint(
+        bounds.left + bounds.width / 2,
+        bounds.top + bounds.height / 2
+      );
+      return {
+        clickable: !!topElement && (topElement === button || button.contains(topElement)),
+        position: getComputedStyle(button.parentElement as HTMLElement).position,
+        zIndex: getComputedStyle(button.parentElement as HTMLElement).zIndex,
+        blocker: topElement?.tagName.toLowerCase() || null,
+      };
+    });
+    expect(launcherHitTarget, JSON.stringify(launcherHitTarget)).toMatchObject({
+      clickable: true,
+      position: 'fixed',
+    });
     await launcher.click();
 
     if (browserName !== 'chromium') {

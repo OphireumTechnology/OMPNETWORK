@@ -474,7 +474,8 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
           FLOATING LAUNCHER BUTTON (Bottom-Right)
           ========================================================================= */}
       {!isOpen && (
-        <div className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] z-[2147483000] flex items-center gap-3 isolate pointer-events-auto">
+        <div className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] z-[2147483000] flex items-center gap-3 isolate pointer-events-auto"
+          style={{ position: 'fixed', right: '16px', bottom: '16px', zIndex: 2147483000, pointerEvents: 'auto' }}>
           {/* Subtle Callout Bubble */}
           {hasUnreadNotice && (
             <div className="hidden sm:flex items-center gap-2 px-3.5 py-2 bg-[#111827] border border-[#00C2C7]/30 text-xs text-slate-200 rounded-xl shadow-2xl animate-fade-in">
@@ -525,7 +526,8 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
           EXPANDABLE CHAT & VOICE PANEL
           ========================================================================= */}
       {isOpen && (
-        <div 
+        <div
+          style={{ position: 'fixed', zIndex: 2147483000, pointerEvents: 'auto' }}
           className={`fixed right-3 sm:right-6 bottom-3 sm:bottom-6 z-[2147483000] bg-[#0B1220] border border-slate-700 rounded-2xl shadow-2xl flex flex-col overflow-hidden transition-all duration-200 ${
             isMinimized 
               ? 'w-[min(320px,calc(100vw-24px))] h-16' 
