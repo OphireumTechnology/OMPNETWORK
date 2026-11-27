@@ -262,14 +262,23 @@ class AIVoiceService {
         ...(this.selectedDeviceId ? { deviceId: { exact: this.selectedDeviceId } } : {}),
       };
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Microphone capture requires a supported browser and secure context.');
+      }
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+      } catch (error) {
+        if (!(error instanceof DOMException) || !['OverconstrainedError', 'NotFoundError'].includes(error.name)) throw error;
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
       this.mediaStream = stream;
 
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioContextClass) {
         this.captureAudioContext = new AudioContextClass();
         if (this.captureAudioContext.state === 'suspended') {
-          await this.captureAudioContext.resume();
+          await Promise.race([this.captureAudioContext.resume(), new Promise<void>((resolve) => setTimeout(resolve, 1500))]);
         }
         const source = this.captureAudioContext.createMediaStreamSource(stream);
         this.analyser = this.captureAudioContext.createAnalyser();

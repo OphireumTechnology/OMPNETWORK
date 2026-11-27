@@ -20,7 +20,27 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
 
   test('opens AI Solutions Consultant widget, sends chat inquiry, and activates simulated-mic voice session', async ({
     page,
+    browserName,
   }) => {
+    // Firefox and WebKit do not support Chromium fake-device flags. Supply a real Web Audio MediaStream at the capture boundary in these test browsers only.
+    if (browserName !== 'chromium') {
+      await page.addInitScript(() => {
+        const media = navigator.mediaDevices;
+        Object.defineProperty(media, 'getUserMedia', { configurable: true, value: async () => {
+          const context = new AudioContext();
+          const destination = context.createMediaStreamDestination();
+          const oscillator = context.createOscillator();
+          const gain = context.createGain();
+          gain.gain.value = 0;
+          oscillator.connect(gain).connect(destination);
+          oscillator.start();
+          const track = destination.stream.getAudioTracks()[0];
+          const stop = track.stop.bind(track);
+          track.stop = () => { stop(); oscillator.stop(); void context.close(); };
+          return destination.stream;
+        }});
+      });
+    }
     await page.goto('/');
 
     const launcher = page.getByRole('button', { name: /Open AI Solutions Consultant/i });
