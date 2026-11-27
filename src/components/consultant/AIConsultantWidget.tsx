@@ -475,7 +475,7 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
           ========================================================================= */}
       {!isOpen && (
         <div className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] z-[2147483000] flex items-center gap-3 isolate pointer-events-auto"
-          style={{ position: 'fixed', right: '16px', bottom: '16px', zIndex: 2147483000, pointerEvents: 'auto' }}>
+          style={{ position: 'fixed', right: 'max(16px, env(safe-area-inset-right))', bottom: 'max(16px, env(safe-area-inset-bottom))', zIndex: 2147483000, pointerEvents: 'auto' }}>
           {/* Subtle Callout Bubble */}
           {hasUnreadNotice && (
             <div className="hidden sm:flex items-center gap-2 px-3.5 py-2 bg-[#111827] border border-[#00C2C7]/30 text-xs text-slate-200 rounded-xl shadow-2xl animate-fade-in">
