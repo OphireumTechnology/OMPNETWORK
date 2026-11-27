@@ -93,6 +93,9 @@ jobs:
       - name: Install Playwright browsers (Chromium, Firefox, WebKit)
         run: npx playwright install --with-deps chromium firefox webkit
 
+      - name: Build compiled application for browser acceptance
+        run: npm run build:all
+
       - name: Execute Playwright Multi-Browser Desktop, Tablet & Mobile E2E Suite
         run: npm run test:e2e
 

@@ -31,9 +31,9 @@ export default defineConfig({
   webServer: process.env.PLAYWRIGHT_SKIP_WEBSERVER
     ? undefined
     : {
-        command: 'npm run dev',
+        command: 'npm start',
         url: `${baseURL}/api/health`,
-        reuseExistingServer: !process.env.CI,
+        reuseExistingServer: false,
         timeout: 60_000,
         env: {
           ...process.env,
