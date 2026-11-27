@@ -58,15 +58,21 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
         bounds.left + bounds.width / 2,
         bounds.top + bounds.height / 2
       );
+      const layer = button.closest('.opm-consultant-layer');
+      const v = window.visualViewport;
+      const left = v?.offsetLeft ?? 0, top = v?.offsetTop ?? 0;
+      const right = left + (v?.width ?? innerWidth), bottom = top + (v?.height ?? innerHeight);
       return {
+        insideViewport: bounds.left >= left - 1 && bounds.top >= top - 1 && bounds.right <= right + 1 && bounds.bottom <= bottom + 1,
         clickable: !!topElement && (topElement === button || button.contains(topElement)),
-        position: getComputedStyle(button.parentElement as HTMLElement).position,
+        position: layer ? getComputedStyle(layer).position : null,
         zIndex: getComputedStyle(button.parentElement as HTMLElement).zIndex,
         blocker: topElement?.tagName.toLowerCase() || null,
       };
     });
     expect(launcherHitTarget, JSON.stringify(launcherHitTarget)).toMatchObject({
       clickable: true,
+      insideViewport: true,
       position: 'fixed',
     });
     // Exercise the actual input modality on touch-enabled devices.
