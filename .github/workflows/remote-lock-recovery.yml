@@ -4,7 +4,6 @@ on:
     branches: [fix/remote-postgresql-lock-recovery]
 permissions:
   contents: write
-  actions: read
 jobs:
   recover:
     runs-on: ubuntu-latest
@@ -15,21 +14,32 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - uses: actions/download-artifact@v4
-        with:
-          name: regenerated-lockfile
-          run-id: 46085744430
-          github-token: ${{ github.token }}
-      - run: npm ci --include=optional --no-audit --no-fund
-      - run: |
+      - name: Reconcile reviewed browser repairs and preserve PostgreSQL baseline
+        run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package-lock.json
-          git diff --cached --quiet || git commit -m "fix(ci): persist regenerated PostgreSQL and Gemini lockfile"
-          git push origin HEAD:fix/remote-postgresql-lock-recovery
-      - name: Reconcile successful PR 18 without overwriting conflicts
-        run: |
-          git merge --no-edit 94cbc7868ac470a7bc4d916400f12ebc2d09f111 || { git diff --name-only --diff-filter=U; git merge --abort; exit 1; }
+          git merge --no-commit --no-ff 94cbc7868ac470a7bc4d916400f12ebc2d09f111 || true
+          python3 - <<'PY'
+          import subprocess
+          from pathlib import Path
+          expected = {'e2e/enterprise-platform.spec.ts','e2e/public-and-ai.spec.ts','src/components/Header.tsx','src/components/Hero.tsx','src/components/consultant/AIConsultantWidget.tsx'}
+          conflicts = set(subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines())
+          assert conflicts == expected, conflicts
+          for name in sorted(conflicts):
+              ours = subprocess.check_output(['git','show',':2:'+name],text=True)
+              theirs = subprocess.check_output(['git','show',':3:'+name],text=True)
+              if name.endswith('enterprise-platform.spec.ts'):
+                  s = ours.replace('    expect(overflow).toBeLessThanOrEqual(0);', theirs[theirs.index('    if (overflow > 4)'):theirs.index('    expect(consoleErrors)')].replace('overflow > 4','overflow > 0').replace('innerWidth + 4','innerWidth').replace('toBeLessThanOrEqual(4)','toBeLessThanOrEqual(0)').rstrip())
+              elif name.endswith('public-and-ai.spec.ts'):
+                  s = theirs.replace('    // Verify services catalog is interactive','    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);\n    // Verify services catalog is interactive')
+              elif name.endswith('Hero.tsx'):
+                  s = theirs.replace('interactive={true}', 'interactive={false}').replace('w-[700px]', 'w-[min(700px,100vw)]').replace('w-[380px]', 'w-[min(380px,90vw)]').replace('right-10 w-[min', 'right-0 sm:right-10 w-[min')
+              else:
+                  s = theirs
+              Path(name).write_text(s)
+              subprocess.check_call(['git','add',name])
+          PY
+          git diff --cached --check
       - run: npm ci --include=optional --no-audit --no-fund
       - run: npm run typecheck
       - run: npm run lint
@@ -39,4 +49,13 @@ jobs:
       - run: npm run smoke:prod
       - run: npx playwright install --with-deps chromium firefox webkit
       - run: npm run test:e2e
-      - run: git push origin HEAD:fix/remote-postgresql-lock-recovery
+      - name: Publish validated reconciliation
+        run: |
+          git commit -m "fix: reconcile PostgreSQL baseline with validated browser recovery"
+          git push origin HEAD:fix/remote-postgresql-lock-recovery
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: reconciliation-browser-diagnostics
+          path: test-results/
+          if-no-files-found: ignore
