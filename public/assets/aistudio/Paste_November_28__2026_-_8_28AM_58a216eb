@@ -1,0 +1,2067 @@
+# OPHIREUM MULTIMEDIA PRODUCTION
+# MASTER SYSTEM RECOVERY, DEFECT ELIMINATION, FULL-STACK DEVELOPMENT AND PRODUCTION ACCEPTANCE DIRECTIVE
+
+VERSION: ENTERPRISE MASTER RECOVERY 10.0
+
+EXECUTION MODE: FULL IMPLEMENTATION AND REPAIR
+
+REPOSITORY: https://github.com/OphireumTechnology/OMPNETWORK
+
+PRODUCTION WEBSITE: https://ophireummultimedia.com/
+
+PRODUCTION API: https://api.ophireummultimedia.com/
+
+PRIMARY BRANCH: main
+
+RECOVERY BRANCH: fix/remote-postgresql-lock-recovery
+
+PREVIOUS VALIDATED REPAIR: PR #18 — fix/railway-build-startup-recovery
+
+## 1. PRIMARY EXECUTION DIRECTIVE
+
+Act as a coordinated enterprise software engineering team consisting of:
+
+- Chief Software Architect
+- Senior Full-Stack Engineer
+- React and TypeScript Engineer
+- PostgreSQL Database Architect
+- Supabase Integration Engineer
+- Artificial Intelligence Engineer
+- Gemini Voice Integration Engineer
+- Cybersecurity Engineer
+- DevOps Engineer
+- Railway Infrastructure Engineer
+- GitHub Actions Engineer
+- Quality Assurance Engineer
+- Playwright Automation Engineer
+- Mobile Application Engineer
+- Financial Systems Engineer
+- Site Reliability Engineer
+- Release Management Engineer
+
+Perform a comprehensive source-code audit, architectural reconciliation, defect diagnosis, implementation, repair, integration, regression testing and production readiness validation of the entire OMPNETWORK application.
+
+Do not merely produce recommendations, documentation, proposed code snippets, interface placeholders or development reports.
+
+Implement actual working repairs in the source code.
+
+Every confirmed defect must be corrected at its root cause.
+
+Every incomplete function must be evaluated against the original application architecture and implemented where its requirements are established.
+
+Preserve all previously completed and validated development.
+
+Do not regenerate the entire application from scratch.
+
+Do not declare production readiness without verifiable acceptance evidence.
+
+## 2. NON-NEGOTIABLE DEVELOPMENT RULES
+
+Apply the following throughout the entire development process:
+
+1. Do not remove working features to make tests pass.
+2. Do not skip, disable or delete failing tests.
+3. Do not use forced Playwright interactions to conceal UI defects.
+4. Do not weaken security assertions.
+5. Do not bypass authentication or authorization.
+6. Do not disable database row-level security.
+7. Do not introduce hardcoded production credentials.
+8. Do not expose API keys in frontend bundles.
+9. Do not simulate successful payment transactions in production.
+10. Do not falsely report email delivery.
+11. Do not falsely report appointment confirmation.
+12. Do not falsely report successful AI voice connectivity.
+13. Do not replace durable database persistence with browser storage.
+14. Do not introduce mock production repositories.
+15. Do not delete production database records.
+16. Do not execute destructive production migrations.
+17. Do not downgrade dependencies without documented technical justification.
+18. Do not overwrite validated source changes.
+19. Do not push partial or untested repairs directly to main.
+20. Do not force-push or rewrite shared Git history.
+21. Do not introduce additional workflow failures.
+22. Do not remove mandatory CI validation stages.
+23. Do not activate live financial transactions without separate authorization.
+24. Do not deploy until all mandatory release gates pass.
+25. Do not claim that a function is complete merely because its interface exists.
+
+## 3. PRESERVE THE EXISTING TECHNOLOGY ARCHITECTURE
+
+Maintain the existing application architecture unless a change is technically necessary and documented.
+
+Frontend:
+
+- React
+- TypeScript
+- Vite
+- Responsive component architecture
+- GitHub Pages hosting
+- Existing custom domain
+- Existing corporate design system
+
+Backend:
+
+- Node.js
+- Express
+- TypeScript
+- Railway hosting
+- Compiled production server
+- REST API architecture
+- Native PostgreSQL integration
+
+Database:
+
+- Supabase PostgreSQL
+- Native PostgreSQL connection pooling
+- Existing migration architecture
+- Row-level security
+- Durable application repositories
+- Private file storage
+
+Artificial intelligence:
+
+- Google Gemini
+- AI consultant
+- AI receptionist
+- AI voice services
+- AI conversation persistence
+- Existing AI workforce
+- Human escalation
+
+Communications:
+
+- Resend email integration
+- Appointment scheduling
+- Calendar integration
+- Notification processing
+
+Preserve the existing OPHIREUM corporate identity, official company name, logos, color palette, technological animations and enterprise presentation.
+
+## 4. PHASE ZERO — FREEZE AND ESTABLISH THE SOURCE OF TRUTH
+
+Before modifying any source file:
+
+1. Retrieve the latest main branch.
+2. Retrieve the latest recovery branch.
+3. Retrieve PR #18 and its last successful CI commit.
+4. Retrieve the latest PostgreSQL implementation.
+5. Retrieve the latest dependency recovery implementation.
+6. Retrieve all applicable architectural documents.
+7. Retrieve the latest workflow logs.
+8. Identify all unmerged repair branches.
+9. Identify duplicate or conflicting implementations.
+10. Record the exact starting commit SHA.
+11. Create a source inventory.
+12. Create a dependency inventory.
+13. Create a route inventory.
+14. Create a database migration inventory.
+15. Create a feature inventory.
+16. Create an automated test inventory.
+17. Establish a clean recovery workspace.
+18. Prevent simultaneous development processes from overwriting the same source files.
+
+Inspect these historical failure references:
+
+- Standard CI run 46087580664
+- Remote recovery run 46087580663
+- Remote recovery run 46087074761
+- Remote recovery run 46085744430
+- Standard CI run 46087074803
+- Previously successful PR #18 workflow #138
+
+Treat these as historical evidence. Retrieve the latest available results before implementing further repairs.
+
+Do not assume that an older successful branch represents the current production application.
+
+## 5. PHASE ONE — COMPREHENSIVE APPLICATION AUDIT
+
+Recursively inspect the entire repository.
+
+Audit:
+
+- All frontend components.
+- All backend modules.
+- All API endpoints.
+- All authentication handlers.
+- All database repositories.
+- All database migrations.
+- All SQL queries.
+- All AI integrations.
+- All payment integrations.
+- All communication providers.
+- All environment variables.
+- All GitHub workflows.
+- All build scripts.
+- All deployment configurations.
+- All automated tests.
+- All security controls.
+- All third-party dependencies.
+- All accessibility requirements.
+- All responsive layouts.
+- All operational documentation.
+
+Identify and classify:
+
+P0 — Critical:
+
+- Deployment failures.
+- Application crashes.
+- Authentication bypasses.
+- Database corruption risks.
+- Financial integrity defects.
+- Exposed credentials.
+- Broken production startup.
+- Mandatory CI failures.
+
+P1 — High:
+
+- Broken customer workflows.
+- AI voice failures.
+- Missing API integration.
+- Responsive layout failures.
+- Incorrect persistence.
+- Broken booking or support functionality.
+
+P2 — Medium:
+
+- Performance problems.
+- Accessibility defects.
+- Inconsistent interface states.
+- Incomplete error handling.
+- Operational deficiencies.
+
+P3 — Low:
+
+- Formatting.
+- Documentation.
+- Minor visual inconsistencies.
+- Maintainability improvements.
+
+Create a defect register containing:
+
+- Defect ID.
+- Severity.
+- Affected module.
+- Source file.
+- Reproduction steps.
+- Actual behavior.
+- Expected behavior.
+- Root cause.
+- Required repair.
+- Regression test.
+- Acceptance evidence.
+- Final status.
+
+Do not close a defect without supporting evidence.
+
+## 6. PHASE TWO — PERMANENT GIT SOURCE RECONCILIATION
+
+Resolve the previously confirmed source conflicts in:
+
+- e2e/enterprise-platform.spec.ts
+- e2e/public-and-ai.spec.ts
+- src/components/Header.tsx
+- src/components/Hero.tsx
+- src/components/consultant/AIConsultantWidget.tsx
+
+Additionally inspect all automatically merged files for semantic conflicts, including:
+
+- .github/workflows/ci.yml
+- railway.json
+- package.json
+- package-lock.json
+- Playwright configuration
+- Backend startup scripts
+- PostgreSQL repository implementations
+
+Perform a proper three-way reconciliation.
+
+Preserve:
+
+- Successful PR #18 browser repairs.
+- Native PostgreSQL development.
+- Gemini dependency updates.
+- Financial security controls.
+- Existing AI consultant functions.
+- Responsive navigation.
+- Existing production startup improvements.
+- New database migrations.
+- Existing security tests.
+
+Do not blindly select the entire ours or theirs version of conflicting files.
+
+Review each conflict individually.
+
+Correct the previously confirmed trailing-whitespace violations in AIConsultantWidget.tsx, including the historical lines 510, 558, 559, 1046 and 1047.
+
+Normalize affected text files using UTF-8 and appropriate repository line-ending conventions.
+
+Use a safe normalization operation equivalent to:
+
+```python
+from pathlib import Path
+
+path = Path(filename)
+source = path.read_text(encoding="utf-8")
+normalized = "\n".join(
+    line.rstrip() for line in source.splitlines()
+) + "\n"
+
+path.write_text(normalized, encoding="utf-8")
+```
+
+Apply this only to appropriate source files, without altering meaningful whitespace in sensitive fixtures or content.
+
+Run:
+
+```bash
+git diff --check
+git diff --cached --check
+git status --short
+git ls-files -u
+```
+
+Acceptance:
+
+- Zero unresolved merge conflicts.
+- Zero conflict markers.
+- Zero whitespace validation errors.
+- Zero unintended source removals.
+- All previously validated functionality preserved.
+
+Do not repeatedly execute an unchanged failing reconciliation workflow.
+
+## 7. PHASE THREE — PERMANENT DEPENDENCY AND LOCKFILE REPAIR
+
+Correct the confirmed npm EUSAGE dependency mismatch.
+
+Previously identified dependency issues include:
+
+- @google/genai lockfile version 2.32.0 conflicting with required version 3.6.1.
+- Missing pg version 8.23.1.
+- Missing @types/pg version 8.23.1.
+- Missing pg-protocol.
+- Missing pg-types.
+- Missing pg-cloudflare.
+- Missing pg-connection-string.
+- Missing pg-pool.
+- Missing pgpass.
+- Missing pg-int8.
+- Missing postgres-array.
+- Missing postgres-bytea.
+- Missing postgres-date.
+- Missing postgres-interval.
+- Missing split2.
+- Missing xtend.
+
+These versions reflect historical workflow evidence. Verify the current package manifest and dependency compatibility before selecting final versions.
+
+Audit:
+
+- package.json.
+- package-lock.json.
+- Node.js engine requirements.
+- npm version.
+- Optional dependencies.
+- Platform-specific dependencies.
+- Peer dependencies.
+- Native binary dependencies.
+- Development dependencies.
+- Production dependencies.
+- Dependency overrides.
+
+Standardize the Node.js runtime across development, CI and Railway.
+
+Use Node.js 22 LTS as the established recovery baseline unless the current application requires a separately validated compatible version.
+
+Regenerate the lockfile using the selected Node.js and npm versions.
+
+```bash
+node --version
+npm --version
+
+npm install --package-lock-only --include=optional --no-audit --no-fund
+
+npm ci --include=optional --no-audit --no-fund
+
+npm ls --all
+```
+
+Do not manually fabricate package integrity hashes.
+
+Do not use --force or --legacy-peer-deps merely to conceal incompatibility.
+
+Validate Linux and Windows compatibility.
+
+Commit package.json and package-lock.json together whenever dependency declarations change.
+
+Ensure the regenerated lockfile is permanently included in the release candidate rather than existing only as a temporary workflow artifact.
+
+Acceptance:
+
+- Clean npm ci succeeds.
+- Zero package-lock synchronization errors.
+- Zero unresolved dependency conflicts.
+- Required PostgreSQL dependencies installed.
+- Gemini SDK compatibility verified.
+- Production dependency vulnerability gate passes.
+
+## 8. PHASE FOUR — TYPESCRIPT, ESLINT AND BUILD INTEGRITY
+
+Audit all TypeScript source files.
+
+Correct:
+
+- Missing imports.
+- Invalid exports.
+- Incorrect types.
+- Undefined properties.
+- Incorrect generic definitions.
+- Incompatible SDK types.
+- Invalid asynchronous return types.
+- Unhandled promises.
+- Incorrect React hooks.
+- Stale closures.
+- Invalid event handlers.
+- Duplicate declarations.
+- Circular dependencies.
+- Invalid module resolution.
+- Frontend/backend interface mismatches.
+
+Preserve strict TypeScript configuration.
+
+Do not replace valid types with unrestricted any merely to eliminate compiler errors.
+
+Validate the existing package scripts and execute their supported equivalents:
+
+```bash
+npm run typecheck
+npm run lint
+npm run test:unit
+npm run test:security
+npm run test:migrations
+npm run test:pg
+npm run build:all
+npm run smoke:prod
+```
+
+If a script is missing, inspect the original test architecture and restore the correct implementation.
+
+Do not create empty scripts that return success.
+
+Acceptance:
+
+- Zero TypeScript errors.
+- Zero ESLint errors.
+- Zero unresolved ESLint warnings where zero warnings are required.
+- Successful production frontend compilation.
+- Successful production backend compilation.
+- No broken imports.
+- No missing production runtime modules.
+
+## 9. PHASE FIVE — FRONTEND ARCHITECTURAL RECOVERY
+
+Audit and repair every public and authenticated page.
+
+Preserve existing corporate branding:
+
+- Graphite: #111827
+- Technology Cyan: #00C2C7
+- Silver Gray: #F3F4F6
+- Existing dark technology theme.
+- Existing gold corporate emblem.
+- Existing animated technological backgrounds.
+
+Correct:
+
+- Blank pages.
+- Broken routes.
+- Invalid component rendering.
+- Duplicate navigation.
+- Broken links.
+- Broken buttons.
+- Inaccessible forms.
+- Incorrect loading indicators.
+- Missing error states.
+- Incorrect success messages.
+- Unhandled API failures.
+- Broken images.
+- Layout shifting.
+- Horizontal scrolling.
+- Incorrect modal positioning.
+- Overlapping interface components.
+- Incorrect z-index hierarchy.
+- Excessive animation resource consumption.
+
+Maintain a clean, modern, advanced-technology corporate appearance.
+
+Do not remove branding or technological animations merely to resolve layout defects.
+
+Implement animation fault isolation and reduced-motion support.
+
+## 10. PHASE SIX — RESPONSIVE DESIGN AND MOBILE REPAIR
+
+Rebuild defective responsive containers where necessary.
+
+Test the following viewport widths:
+
+- 320px.
+- 360px.
+- 375px.
+- 390px.
+- 393px.
+- 412px.
+- 430px.
+- 480px.
+- 768px.
+- 820px.
+- 1024px.
+- 1280px.
+- 1440px.
+- 1920px.
+- 2560px.
+
+Repair the Header component.
+
+Requirements:
+
+- Corporate name must not extend beyond the viewport.
+- Logo must retain correct proportions.
+- Navigation must collapse at appropriate breakpoints.
+- Mobile menu must remain accessible.
+- Desktop navigation must not overflow.
+- Navigation controls must have accessible names.
+- Menu opening and closing must work reliably.
+- Keyboard focus must be managed correctly.
+
+Repair the Hero component.
+
+Requirements:
+
+- No horizontal document overflow.
+- No oversized decorative canvases.
+- No off-screen fixed-width containers.
+- No decorative element intercepting user interaction.
+- Correct responsive typography.
+- Correct button positioning.
+- Correct text wrapping.
+
+Inspect:
+
+- flex-shrink.
+- min-width.
+- max-width.
+- grid constraints.
+- viewport units.
+- transforms.
+- absolute positioning.
+- fixed positioning.
+- stacking contexts.
+- overflow behavior.
+- safe-area insets.
+
+Do not simply apply overflow-x: hidden globally to conceal unresolved layout defects.
+
+Identify the actual overflowing elements.
+
+Generate diagnostic output containing:
+
+- Element selector.
+- Element bounding rectangle.
+- Document scroll width.
+- Viewport width.
+- Computed positioning.
+- Computed overflow.
+- Transform values.
+
+Acceptance:
+
+- No unintended horizontal scrolling.
+- All interactive elements reachable.
+- All corporate branding visible.
+- Mobile navigation fully functional.
+- Touch and keyboard interaction validated.
+
+## 11. PHASE SEVEN — AI CONSULTANT AND RECEPTIONIST RECONSTRUCTION
+
+Perform a complete architectural audit of the AI consultant and receptionist.
+
+Preserve all existing functions:
+
+- AI chat.
+- AI voice.
+- Customer inquiry.
+- Service recommendation.
+- Customer discovery.
+- Project requirements collection.
+- Appointment scheduling.
+- Executive escalation.
+- Conversation persistence.
+- Customer contact collection.
+- AI workforce integration.
+
+Repair the floating consultant launcher.
+
+The launcher must:
+
+- Remain within the visible viewport.
+- Remain above decorative backgrounds.
+- Remain clickable and tappable.
+- Avoid obstructing important navigation.
+- Respect mobile safe-area insets.
+- Reposition correctly when the virtual keyboard appears.
+- Remain functional after orientation changes.
+- Remain functional after scrolling.
+- Remain functional after opening and closing menus.
+- Avoid duplicate instances.
+- Maintain accessible control labels.
+
+Evaluate rendering the floating consultant through a dedicated React portal attached to a suitable top-level container.
+
+Ensure its parent does not introduce unwanted transforms or clipping.
+
+Use a consistent application-wide overlay hierarchy.
+
+Repair:
+
+- Minimized state.
+- Expanded state.
+- Chat input.
+- Voice activation.
+- Voice termination.
+- Booking state.
+- Loading state.
+- Error state.
+- Session restoration.
+- Human escalation state.
+
+Acceptance:
+
+- Launcher opens on desktop, tablet and mobile.
+- Chat remains usable.
+- Voice controls remain accessible.
+- Appointment functions remain available.
+- No clipped or inaccessible controls.
+- No unintended interaction interception.
+
+## 12. PHASE EIGHT — CROSS-BROWSER AI VOICE REPAIR
+
+Perform complete voice architecture validation.
+
+Audit:
+
+- navigator.mediaDevices.
+- getUserMedia.
+- AudioContext.
+- MediaStream.
+- AudioWorklet or supported audio processing.
+- Gemini session initialization.
+- Audio encoding.
+- Audio transmission.
+- Audio playback.
+- Voice interruption.
+- Session termination.
+- Microphone resource cleanup.
+
+Implement an explicit voice lifecycle:
+
+IDLE
+
+REQUESTING_PERMISSION
+
+INITIALIZING
+
+CONNECTING
+
+CONNECTED
+
+LISTENING
+
+PROCESSING
+
+SPEAKING
+
+MUTED
+
+RECONNECTING
+
+ENDING
+
+ENDED
+
+ERROR
+
+Prevent invalid state transitions.
+
+Handle:
+
+- Permission denied.
+- Missing microphone.
+- Microphone already in use.
+- Unsupported browser.
+- Insecure connection.
+- AudioContext suspension.
+- Network disconnection.
+- Provider timeout.
+- Provider rejection.
+- Session expiration.
+- Invalid audio payload.
+- Rate limiting.
+- Browser backgrounding.
+- Device changes.
+
+Restore browser-specific microphone configuration.
+
+Chromium:
+
+- Use supported fake-media flags for controlled browser tests.
+- Validate actual microphone permission handling.
+
+Firefox:
+
+- Use Firefox-compatible media preferences and supported test fixtures.
+- Do not apply Chromium-only launch arguments.
+
+WebKit:
+
+- Use supported media APIs and controlled test fixtures.
+- Do not assume Chromium-specific permission behavior.
+- Provide accurate fallback behavior when real voice is unsupported.
+
+Tablet and mobile:
+
+- Validate the actual configured browser engine.
+- Validate touch activation.
+- Validate permission prompts.
+- Validate microphone initialization following a user gesture.
+
+Ensure:
+
+- Mute actually disables audio transmission.
+- Unmute restores audio transmission appropriately.
+- Session termination stops microphone tracks.
+- Audio nodes are disconnected.
+- AudioContext resources are released.
+- Pending network requests are cancelled.
+- Session tokens are invalidated where applicable.
+
+Do not represent a mocked or simulated microphone test as proof of live Gemini connectivity.
+
+Acceptance:
+
+- Voice activation works.
+- Mute works.
+- Unmute works.
+- Session termination works.
+- Resource cleanup works.
+- Provider failures are accurately displayed.
+- No leaked microphone sessions.
+- No false connection indicators.
+
+## 13. PHASE NINE — GEMINI SDK AND AI GATEWAY REPAIR
+
+Audit the complete Gemini integration.
+
+Verify compatibility between the installed SDK version and all existing implementation methods.
+
+Correct:
+
+- Invalid model identifiers.
+- Deprecated SDK methods.
+- Invalid message history structures.
+- Incorrect conversation roles.
+- Incorrect audio configuration.
+- Invalid response parsing.
+- Unsupported streaming options.
+- Session initialization defects.
+- Missing provider configuration.
+- Incorrect authentication.
+- Unhandled provider errors.
+
+Implement:
+
+- Server-side API key handling.
+- Request validation.
+- Rate limiting.
+- Request timeout.
+- Bounded retry policy.
+- Exponential backoff where appropriate.
+- Circuit breaker.
+- Structured error responses.
+- Conversation correlation identifiers.
+- Privacy-aware logging.
+- Token usage monitoring.
+- Session lifecycle monitoring.
+
+Keep sensitive provider credentials exclusively on the backend.
+
+Do not embed Gemini API keys in Vite environment variables that are exposed to the browser.
+
+Validate both text and voice integrations independently.
+
+## 14. PHASE TEN — AI WORKFORCE AND CONVERSATION PERSISTENCE
+
+Audit all existing AI workforce modules.
+
+For every registered AI agent, verify:
+
+- Actual implementation.
+- Defined responsibility.
+- Input schema.
+- Output schema.
+- Authorized tools.
+- Permission boundaries.
+- Execution handler.
+- Persistence.
+- Error handling.
+- Audit logging.
+- Human escalation.
+- Test coverage.
+
+Identify agents that are registered but have no functional implementation.
+
+Complete established missing functionality without inventing unauthorized business capabilities.
+
+Ensure AI conversations persist in PostgreSQL.
+
+Validate:
+
+- Conversation creation.
+- Message persistence.
+- Conversation retrieval.
+- Session continuation.
+- Multi-replica consistency.
+- Concurrent requests.
+- Customer isolation.
+- Administrative access controls.
+- Retention policies.
+- Privacy controls.
+
+Do not use process-local memory as the sole source of truth for production conversations.
+
+## 15. PHASE ELEVEN — SERVICE CATALOG AND PUBLIC BUSINESS FUNCTIONS
+
+Preserve the existing service catalog and categories.
+
+The previously established catalog contains 78 services across 10 categories. Verify the latest authorized catalog before making changes.
+
+Validate:
+
+- Service listing.
+- Service categories.
+- Search.
+- Filtering.
+- Service details.
+- Starting-price presentation.
+- Project inquiry.
+- Service recommendation.
+- Consultation booking.
+- Customer requirements collection.
+- Contact forms.
+- Executive escalation.
+
+Ensure public pricing is consistent with authorized business rules.
+
+Do not introduce arbitrary price changes.
+
+Validate all public calls to action.
+
+## 16. PHASE TWELVE — BACKEND API CONTRACT REPAIR
+
+Create a complete inventory of backend routes and frontend API callers.
+
+For every endpoint verify:
+
+- HTTP method.
+- Route path.
+- Authentication requirement.
+- Authorization requirement.
+- Request schema.
+- Response schema.
+- Status codes.
+- Error codes.
+- Database persistence.
+- Rate limiting.
+- Idempotency requirements.
+- Audit logging.
+
+Correct mismatched API paths.
+
+Correct inconsistent request and response formats.
+
+Correct false success responses.
+
+Use consistent status handling:
+
+- 400 for invalid input.
+- 401 for missing or invalid authentication.
+- 403 for unauthorized access.
+- 404 for unavailable resources.
+- 409 for appropriate state conflicts.
+- 422 for semantic validation failures where appropriate.
+- 429 for rate limits.
+- 500 for unexpected internal failures.
+- 503 for unavailable required dependencies.
+
+Do not expose stack traces, database credentials or internal infrastructure details to public clients.
+
+Preserve existing compatible API contracts where possible.
+
+## 17. PHASE THIRTEEN — CUSTOMER AUTHENTICATION AND CLIENT PORTAL
+
+Audit and repair the complete customer account lifecycle.
+
+Validate:
+
+- Customer registration.
+- Email verification.
+- Login.
+- Logout.
+- Password recovery.
+- Password reset.
+- Session renewal.
+- Session expiration.
+- Session revocation.
+- Account profile.
+- Account deactivation.
+- Consent management.
+- Privacy settings.
+- Optional MFA where implemented.
+
+Use secure session handling.
+
+Implement or preserve:
+
+- HttpOnly cookies.
+- Secure cookie configuration.
+- Appropriate SameSite configuration.
+- CSRF protection where required.
+- Session rotation.
+- Session revocation.
+- Authentication rate limiting.
+- Account enumeration protection.
+
+Validate cross-origin authentication between the public website and backend API.
+
+Do not store sensitive authentication tokens in insecure browser storage.
+
+Repair all client portal routes.
+
+Verify:
+
+- Dashboard.
+- Profile.
+- Service requests.
+- Orders.
+- Invoices.
+- Payments.
+- Project status.
+- Documents.
+- Support tickets.
+- Notifications.
+
+Ensure customers cannot access other customers' records.
+
+## 18. PHASE FOURTEEN — SUPPORT TICKET API REPAIR
+
+Reconcile the support ticket frontend and backend contracts.
+
+Inspect the previously established endpoint:
+
+/api/portal/support
+
+Verify the current authorized route implementation.
+
+Correct:
+
+- Incorrect endpoint paths.
+- Invalid request payloads.
+- Missing authentication.
+- Incorrect status codes.
+- Missing ticket persistence.
+- Incorrect ticket identifiers.
+- Duplicate ticket creation.
+- Incorrect ownership filtering.
+- Missing validation.
+- Incorrect success messages.
+
+Implement complete support functionality where required by the existing architecture:
+
+- Ticket creation.
+- Ticket listing.
+- Ticket details.
+- Ticket messages.
+- Ticket priority.
+- Ticket assignment.
+- Ticket status.
+- Ticket resolution.
+- Administrative response.
+- Customer notification.
+- Audit trail.
+
+Acceptance:
+
+- A customer can create and retrieve their own ticket.
+- Unauthorized requests are rejected.
+- Cross-customer access is denied.
+- Duplicate submissions are controlled.
+- Tickets persist in PostgreSQL.
+- All corresponding browser tests pass.
+
+## 19. PHASE FIFTEEN — COMMERCE AND PAYMENT SECURITY
+
+Audit the complete commerce lifecycle.
+
+Validate:
+
+- Service selection.
+- Shopping cart.
+- Order creation.
+- Checkout.
+- Pricing.
+- Discounts.
+- Tax calculations where applicable.
+- Invoice generation.
+- Payment reference.
+- Payment initiation.
+- Payment verification.
+- Payment reconciliation.
+- Refund handling.
+- Order fulfillment.
+
+Implement server-authoritative financial calculations.
+
+Never trust browser-submitted prices.
+
+Use integer minor units or another established exact monetary representation.
+
+Reconcile the payment-state contract with the previously validated PR #18 behavior.
+
+An unverified payment must remain pending or another appropriate non-paid state.
+
+Do not mark a payment paid until verified provider evidence is received.
+
+Implement valid state transitions.
+
+Protect against:
+
+- Duplicate transactions.
+- Replay attacks.
+- Webhook forgery.
+- Price manipulation.
+- Currency manipulation.
+- Unauthorized refunds.
+- Duplicate fulfillment.
+- Cross-customer access.
+- Race conditions.
+
+Preserve atomic payment reference allocation.
+
+Where the existing architecture requires the Asia/Manila payment reference format, retain:
+
+MMDDYYYYHHMMAM/PMNNN
+
+Ensure uniqueness under concurrent requests.
+
+Validate configured payment providers in sandbox environments only.
+
+Keep unsupported or unapproved payment providers disabled.
+
+Do not activate live payments without explicit authorization.
+
+## 20. PHASE SIXTEEN — POSTGRESQL AND SUPABASE INTEGRATION
+
+Preserve and validate the existing native PostgreSQL architecture.
+
+Inspect migrations 000–007 and any subsequently authorized migrations.
+
+Verify:
+
+- Migration ordering.
+- Schema dependencies.
+- Foreign keys.
+- Unique constraints.
+- Check constraints.
+- Indexes.
+- Triggers.
+- Database functions.
+- Row-level security.
+- Storage policies.
+- Audit tables.
+- Transaction boundaries.
+
+Validate database repositories for:
+
+- Customer profiles.
+- Customer accounts.
+- Consultation appointments.
+- Solution requests.
+- AI conversations.
+- AI messages.
+- Notification records.
+- Audit logs.
+- Administrator accounts.
+- Orders.
+- Payments.
+- Invoices.
+- Support tickets.
+- Project records.
+- Documents.
+
+Reconcile the inventory against actual application requirements and implemented schemas.
+
+Implement safe native PostgreSQL connection pooling.
+
+Verify:
+
+- TLS configuration.
+- Connection timeout.
+- Idle timeout.
+- Pool size.
+- Query timeout.
+- Connection cleanup.
+- Graceful shutdown.
+- Parameterized queries.
+- Transaction rollback.
+- Deadlock handling.
+- Concurrency safety.
+
+Prevent SQL injection.
+
+Do not interpolate untrusted values into SQL or PostgREST filter expressions.
+
+Do not expose privileged Supabase credentials to the frontend.
+
+Do not create unrestricted RLS policies.
+
+Execute migrations against disposable PostgreSQL 16.
+
+Validate the actual TCP-connected PostgreSQL service, not only an in-memory or embedded substitute.
+
+Do not reset or modify the production database during automated testing.
+
+Acceptance:
+
+- All required migrations pass.
+- Native PostgreSQL repositories pass.
+- Transaction integrity passes.
+- RLS isolation passes.
+- Multi-replica persistence passes.
+- No unauthorized data access.
+- No destructive production operations.
+
+## 21. PHASE SEVENTEEN — EMAIL, APPOINTMENTS AND NOTIFICATIONS
+
+Audit all communication providers.
+
+Validate Resend configuration:
+
+- API key presence.
+- Authorized sending domain.
+- Sender identity.
+- Provider response handling.
+- Delivery event handling.
+- Retry behavior.
+- Failure logging.
+
+Distinguish:
+
+- Request accepted.
+- Queued.
+- Provider accepted.
+- Delivered.
+- Deferred.
+- Bounced.
+- Failed.
+
+Do not claim delivered when only provider acceptance is known.
+
+Repair appointment functionality:
+
+- Availability.
+- Time-zone handling.
+- Booking creation.
+- Booking confirmation.
+- Rescheduling.
+- Cancellation.
+- Duplicate booking prevention.
+- Calendar synchronization.
+- Customer notification.
+- Administrator notification.
+
+Persist appointments before reporting successful durable booking.
+
+Use transactional outbox or another reliable coordination mechanism where appropriate.
+
+Prevent calendar events from becoming orphaned when database persistence fails.
+
+Validate notification worker concurrency.
+
+Prevent duplicate notification delivery where possible.
+
+Implement bounded retries and failed-message handling.
+
+## 22. PHASE EIGHTEEN — ADMINISTRATOR PORTAL AND RBAC
+
+Audit all administrative routes.
+
+Preserve the established least-privilege role model.
+
+Validate:
+
+- Administrator authentication.
+- Administrator MFA.
+- Session binding.
+- Session expiration.
+- Session revocation.
+- Role verification.
+- Permission verification.
+- Account activation.
+- Account deactivation.
+- Audit logging.
+
+Ensure privileged actions are authorized server-side.
+
+Do not rely on hidden frontend buttons as authorization controls.
+
+Validate administrative functions for:
+
+- Customer management.
+- Service management.
+- Project management.
+- Appointment management.
+- Support management.
+- Payment review.
+- Financial reconciliation.
+- AI workforce monitoring.
+- Notification management.
+- Audit review.
+- Operational monitoring.
+
+Implement negative tests for unauthorized role access.
+
+Preserve append-only audit protections where established.
+
+## 23. PHASE NINETEEN — ENTERPRISE CYBERSECURITY
+
+Conduct a comprehensive security audit.
+
+Inspect for:
+
+- SQL injection.
+- Cross-site scripting.
+- CSRF.
+- Broken access control.
+- Insecure direct object references.
+- Authentication bypass.
+- Session fixation.
+- Session replay.
+- Credential leakage.
+- Secret exposure.
+- Server-side request forgery.
+- Unsafe file uploads.
+- Path traversal.
+- Open redirects.
+- Insecure CORS.
+- Insecure cookie configuration.
+- Webhook forgery.
+- Dependency vulnerabilities.
+- Unrestricted API access.
+- Resource exhaustion.
+- AI prompt injection.
+- Unauthorized AI tool execution.
+
+Restrict CORS to explicitly authorized origins.
+
+Do not allow arbitrary origins with credentials.
+
+Configure trusted proxy handling correctly.
+
+Do not trust spoofable forwarding headers for security decisions.
+
+Implement bounded rate limiting.
+
+Validate input size limits.
+
+Validate upload MIME types and file sizes.
+
+Use private storage and authorized download mechanisms.
+
+Prevent sensitive data from appearing in logs.
+
+Run dependency security audits.
+
+Investigate and resolve high and critical production dependency vulnerabilities.
+
+Do not suppress findings without documented risk acceptance.
+
+## 24. PHASE TWENTY — GITHUB ACTIONS RECONSTRUCTION
+
+Audit every GitHub workflow.
+
+Inspect:
+
+- Standard CI.
+- Security validation.
+- Migration validation.
+- PostgreSQL integration.
+- Playwright E2E.
+- Dependency lockfile repair.
+- Remote dependency recovery.
+- GitHub Pages deployment.
+- Pull request validation.
+
+Correct:
+
+- Invalid YAML.
+- Incorrect workflow triggers.
+- Incorrect permissions.
+- Missing dependencies.
+- Incorrect working directories.
+- Duplicate dependency installation.
+- Invalid environment configuration.
+- Missing artifacts.
+- Incorrect branch references.
+- Incorrect job dependencies.
+- Broken cache configuration.
+- Deprecated action versions.
+
+Review the previously reported Node.js 20 action-runtime deprecation warnings.
+
+Upgrade affected actions to verified compatible maintained versions.
+
+Do not confuse action-runtime warnings with actual application build failures.
+
+Implement appropriate concurrency controls to prevent unnecessary duplicate runs.
+
+Do not cancel required validation in a manner that creates false release acceptance.
+
+Use minimal workflow permissions.
+
+Keep recovery workflows separate from normal production release workflows.
+
+Do not allow recovery workflows to repeatedly push unvalidated commits.
+
+Once recovery is complete, retire temporary recovery mechanisms through a reviewed change.
+
+The standard CI pipeline must contain:
+
+1. Clean checkout.
+2. Consistent Node.js setup.
+3. Reproducible npm ci.
+4. TypeScript validation.
+5. ESLint validation.
+6. Unit tests.
+7. Security tests.
+8. AI workforce tests.
+9. Conversation persistence tests.
+10. Migration tests.
+11. Native PostgreSQL integration tests.
+12. Live disposable PostgreSQL tests.
+13. Frontend build.
+14. Backend build.
+15. Production startup smoke tests.
+16. Dependency vulnerability audit.
+17. Secret exposure checks.
+18. Payment security checks.
+19. SBOM generation.
+20. Full Playwright acceptance.
+
+All mandatory stages must pass.
+
+## 25. PHASE TWENTY-ONE — PLAYWRIGHT BROWSER ACCEPTANCE
+
+Restore the complete existing 45-test browser acceptance suite.
+
+Historical recovery results:
+
+- Previously reported baseline: 44/45.
+- Remote recovery regression: 26/45.
+- PR #18 workflow #138: successful workflow.
+- Latest standard recovery acceptance: retrieve current result.
+
+Do not assume any historical result remains valid for the latest commit.
+
+Validate all existing browser projects:
+
+- Chromium desktop.
+- Firefox desktop.
+- WebKit desktop.
+- Tablet.
+- Mobile.
+
+Preserve the exact existing device configurations where required.
+
+For every failure capture:
+
+- Test name.
+- Browser.
+- Device configuration.
+- Commit SHA.
+- Expected result.
+- Actual result.
+- Source location.
+- Console errors.
+- Network errors.
+- Screenshot.
+- Focused trace.
+- Root cause.
+
+Repair the application rather than weakening the test.
+
+Do not use:
+
+- test.skip.
+- test.fixme.
+- force: true.
+- Unconditional successful assertions.
+- Artificially inflated timeouts to conceal defects.
+- Disabled security assertions.
+- Removed browser projects.
+
+Use legitimate condition-based waits and accessible locators.
+
+Run targeted tests before the full suite.
+
+Execute the existing browser test command, for example:
+
+```bash
+npx playwright install --with-deps chromium firefox webkit
+
+npm run test:e2e
+```
+
+Verify the actual configured test command before execution.
+
+Acceptance:
+
+- 45/45 existing browser tests passed.
+- Zero skipped tests.
+- Zero failed tests.
+- Zero unexplained flaky tests.
+- All required browser projects executed.
+
+If new regression tests are added, preserve the original 45 tests and require the expanded suite to pass as well.
+
+## 26. PHASE TWENTY-TWO — PIXEL 7 MOBILE FAILURE DIAGNOSTICS
+
+Reproduce the previously persistent mobile AI consultant failure using the exact Pixel 7 Chromium configuration.
+
+Capture:
+
+- window.innerWidth.
+- window.innerHeight.
+- document.documentElement.clientWidth.
+- document.documentElement.scrollWidth.
+- visualViewport.width.
+- visualViewport.height.
+- visualViewport.offsetLeft.
+- visualViewport.offsetTop.
+- visualViewport.scale.
+- devicePixelRatio.
+- Launcher bounding rectangle.
+- Tap coordinates.
+- elementFromPoint result.
+- Computed z-index.
+- Computed pointer-events.
+- Ancestor transforms.
+- Ancestor clipping.
+
+Compare the actual tap coordinates with the visible launcher rectangle.
+
+Identify any intercepting element.
+
+Inspect screenshots and Playwright traces.
+
+Validate:
+
+- Initial page load.
+- Scrolled page.
+- Open mobile navigation.
+- Closed mobile navigation.
+- Expanded consultant.
+- Minimized consultant.
+- Active keyboard.
+- Orientation change.
+- Voice activation.
+
+Generate focused diagnostic artifacts containing only relevant failed-test evidence.
+
+Avoid uploading hundreds of megabytes of unrelated browser artifacts.
+
+Do not remove essential failure evidence.
+
+Validate the targeted Pixel 7 test before committing another repair.
+
+## 27. PHASE TWENTY-THREE — RAILWAY BUILD RECOVERY
+
+Investigate the previously confirmed Railway build failure:
+
+npm error EBUSY
+
+npm error syscall rmdir
+
+npm error path /app/node_modules/.cache
+
+npm error errno -16
+
+Root-cause hypothesis supported by the previous Railway diagnostic:
+
+The hosting builder installed dependencies, and the custom build command attempted a second npm ci operation against a mounted cache directory.
+
+Audit:
+
+- railway.json.
+- Railway service settings.
+- Builder selection.
+- Build command.
+- Install command.
+- Start command.
+- Root directory.
+- Node.js version.
+- Package manager selection.
+- Build cache.
+- Health-check configuration.
+- Environment configuration.
+
+Establish one authoritative dependency installation stage.
+
+Do not mix npm and Bun without a validated architectural requirement.
+
+Where Railway performs dependency installation automatically, the build command should only perform the required compilation.
+
+For example, if supported by the current package scripts:
+
+```bash
+npm run build && npm run build:server
+```
+
+Alternatively:
+
+```bash
+npm run build:all
+```
+
+Select the correct command based on actual repository scripts.
+
+Do not execute npm ci again inside the compilation command when the builder already installed dependencies.
+
+Do not blindly delete mounted cache directories.
+
+Validate the actual compiled server entry point.
+
+Ensure production startup:
+
+- Uses the compiled backend.
+- Binds to 0.0.0.0.
+- Uses the Railway-provided PORT.
+- Does not depend on a development server.
+- Does not depend on unavailable development-only packages.
+- Handles SIGTERM correctly.
+- Closes database connections gracefully.
+
+Verify the final production image in an isolated Railway sandbox before production deployment.
+
+## 28. PHASE TWENTY-FOUR — RAILWAY RUNTIME AND HEALTH READINESS
+
+Implement or validate the existing health endpoints:
+
+- /api/health
+- /api/ready
+- /api/version
+
+Health endpoints must accurately distinguish:
+
+- Process running.
+- Database connected.
+- Required dependencies available.
+- Optional providers unavailable.
+- Application degraded.
+- Application not ready.
+
+Readiness must fail closed when mandatory dependencies are unavailable.
+
+Do not return a false healthy status when the application cannot perform required operations.
+
+Validate:
+
+- PostgreSQL connectivity.
+- Supabase connectivity.
+- Gemini configuration.
+- Resend configuration.
+- Authentication configuration.
+- Session configuration.
+- Required environment variables.
+- Storage connectivity.
+- API route availability.
+
+Do not expose secret values in health responses.
+
+Validate the production API custom domain, TLS and routing.
+
+Record the deployed commit SHA in the version endpoint where supported.
+
+## 29. PHASE TWENTY-FIVE — GITHUB PAGES FRONTEND DEPLOYMENT
+
+Audit the frontend deployment pipeline.
+
+Validate:
+
+- Vite base path.
+- Custom domain configuration.
+- CNAME file.
+- SPA fallback.
+- 404 routing.
+- Static assets.
+- Production environment variables.
+- API base URL.
+- Browser cache behavior.
+- Asset versioning.
+- Build artifact contents.
+
+Ensure direct navigation and refresh work on all supported SPA routes.
+
+Validate frontend/backend compatibility.
+
+Prevent the deployment of a new frontend against an incompatible backend.
+
+Do not expose backend-only secrets in the frontend build.
+
+Confirm that the deployed frontend corresponds to the accepted release commit.
+
+## 30. PHASE TWENTY-SIX — PERFORMANCE AND RESOURCE OPTIMIZATION
+
+Audit:
+
+- JavaScript bundle sizes.
+- Image sizes.
+- Corporate logo assets.
+- Animation assets.
+- Font loading.
+- API latency.
+- Database query performance.
+- Memory consumption.
+- CPU consumption.
+- Network requests.
+- React rendering frequency.
+- AI session resource usage.
+
+Implement appropriate:
+
+- Code splitting.
+- Lazy loading.
+- Asset compression.
+- Image optimization.
+- Component memoization where beneficial.
+- Request cancellation.
+- Database indexing.
+- Connection pooling.
+- Pagination.
+- Caching with proper invalidation.
+- Animation throttling.
+
+Do not sacrifice required visual quality or functionality.
+
+Validate mobile performance and reduced-motion behavior.
+
+Record measured performance before and after optimization.
+
+## 31. PHASE TWENTY-SEVEN — OBSERVABILITY AND OPERATIONAL RELIABILITY
+
+Implement or validate structured operational logging.
+
+Include:
+
+- Timestamp.
+- Request identifier.
+- Correlation identifier.
+- Service name.
+- Severity.
+- Route.
+- Response status.
+- Duration.
+- Sanitized error category.
+- Deployment version.
+
+Monitor:
+
+- API availability.
+- Database connectivity.
+- Database connection pool.
+- AI provider availability.
+- AI session failures.
+- Email provider failures.
+- Appointment failures.
+- Authentication failures.
+- Payment verification failures.
+- Memory usage.
+- CPU usage.
+- Request latency.
+
+Prevent secrets and sensitive customer information from entering logs.
+
+Implement appropriate alerting and operational runbooks.
+
+Validate graceful shutdown and recovery behavior.
+
+## 32. PHASE TWENTY-EIGHT — BACKUP, RECOVERY AND DISASTER READINESS
+
+Audit the existing database backup architecture.
+
+Validate:
+
+- Backup creation.
+- Backup retention.
+- Backup encryption.
+- Restore procedure.
+- Schema compatibility.
+- Data integrity.
+- Recovery time.
+- Recovery point.
+- Rollback procedure.
+
+Perform restore validation only against an isolated environment.
+
+Do not restore over production during testing.
+
+Validate application behavior following database restart and temporary network interruption.
+
+Record recovery evidence.
+
+## 33. PHASE TWENTY-NINE — COMPLETE FUNCTIONAL DEVELOPMENT
+
+Compare the entire implemented application against the original OMPNETWORK architectural design.
+
+Identify every:
+
+- Missing feature.
+- Incomplete workflow.
+- Unimplemented API.
+- Unimplemented AI agent function.
+- Placeholder component.
+- Mock production implementation.
+- Missing database repository.
+- Missing administrative control.
+- Missing validation.
+- Missing operational function.
+
+Complete established requirements through actual implementation.
+
+For every module, verify all layers:
+
+1. Frontend interface.
+2. Frontend validation.
+3. API integration.
+4. Backend business logic.
+5. Authentication.
+6. Authorization.
+7. Database persistence.
+8. Transaction integrity.
+9. Error handling.
+10. Audit logging.
+11. Automated tests.
+12. Hosted acceptance.
+
+Do not classify a feature as complete if only its interface or API route exists.
+
+Where requirements are ambiguous, preserve existing behavior and identify the necessary owner decision rather than inventing unauthorized business rules.
+
+## 34. PHASE THIRTY — MANDATORY END-TO-END ACCEPTANCE
+
+Execute the complete validation pipeline against one immutable release candidate.
+
+Use a clean checkout.
+
+Run the existing supported equivalents of:
+
+```bash
+git diff --check
+
+npm ci --include=optional --no-audit --no-fund
+
+npm run typecheck
+
+npm run lint
+
+npm run test:unit
+
+npm run test:security
+
+npm run test:migrations
+
+npm run test:pg
+
+npm run build:all
+
+npm run smoke:prod
+
+npx playwright install --with-deps chromium firefox webkit
+
+npm run test:e2e
+```
+
+Additionally execute:
+
+- Live disposable PostgreSQL 16 integration.
+- Native PostgreSQL repository tests.
+- Multi-replica AI persistence tests.
+- Tenant isolation tests.
+- Authentication lifecycle tests.
+- Authorization negative tests.
+- Payment integrity tests.
+- Support ticket tests.
+- Mobile navigation tests.
+- Pixel 7 consultant tests.
+- AI voice lifecycle tests.
+- Production startup tests.
+- Graceful shutdown tests.
+- Dependency vulnerability audit.
+- Secret scanning.
+- Release integrity verification.
+
+If any test fails:
+
+1. Capture exact failure evidence.
+2. Identify the root cause.
+3. Implement the actual repair.
+4. Execute the targeted regression test.
+5. Execute the affected test suite.
+6. Execute the complete mandatory acceptance suite.
+7. Record the final result.
+
+Do not repeat identical failing commands without a relevant repair or diagnostic change.
+
+## 35. PHASE THIRTY-ONE — CONSOLIDATED RELEASE CANDIDATE
+
+After completing all repairs:
+
+1. Review every modified file.
+2. Remove temporary debugging code that is not operationally required.
+3. Remove generated build artifacts from version control where appropriate.
+4. Preserve required diagnostic and acceptance documentation.
+5. Validate package-lock.json.
+6. Validate migration integrity.
+7. Validate workflow integrity.
+8. Validate Git whitespace checks.
+9. Confirm no unresolved merge conflicts.
+10. Confirm no unintended source removals.
+11. Confirm no credentials are included.
+12. Create a consolidated validated commit on the dedicated recovery branch.
+13. Record the commit SHA.
+14. Prepare the pull request against main.
+15. Record the complete acceptance evidence.
+
+Recommended commit message:
+
+fix(platform): reconcile PostgreSQL and browser recovery, eliminate application regressions and restore production readiness
+
+Do not create unnecessary individual commits that trigger duplicate workflows for each minor change.
+
+Do not bypass the final pull request acceptance process.
+
+## 36. PHASE THIRTY-TWO — CONTROLLED RAILWAY AND FRONTEND RELEASE
+
+Proceed only after mandatory acceptance gates pass and the release is authorized.
+
+Deployment sequence:
+
+1. Confirm accepted commit SHA.
+2. Confirm backup and rollback readiness.
+3. Confirm Railway sandbox acceptance.
+4. Confirm required production environment configuration.
+5. Confirm migration compatibility.
+6. Apply authorized production migrations through the established release procedure.
+7. Deploy the accepted backend.
+8. Verify backend health.
+9. Verify backend readiness.
+10. Verify backend version.
+11. Verify PostgreSQL connectivity.
+12. Deploy the compatible frontend.
+13. Verify the public website.
+14. Verify direct route navigation.
+15. Verify authentication.
+16. Verify customer portal.
+17. Verify AI chat.
+18. Verify authorized AI voice acceptance.
+19. Verify booking.
+20. Verify support ticket creation.
+21. Verify administrator access.
+22. Verify monitoring.
+23. Record deployment evidence.
+
+If a mandatory production smoke test fails, stop the rollout and follow the authorized rollback procedure.
+
+Do not enable live payments as part of general application recovery.
+
+## 37. FINAL RELEASE ACCEPTANCE CRITERIA
+
+The application must not be classified as production-ready until the following conditions are satisfied:
+
+- Zero unresolved P0 defects.
+- Zero unresolved release-blocking P1 defects.
+- Zero unresolved Git conflicts.
+- Zero dependency synchronization errors.
+- Zero TypeScript errors.
+- Zero ESLint errors.
+- Successful unit tests.
+- Successful security tests.
+- Successful database migrations.
+- Successful live disposable PostgreSQL integration.
+- Successful native PostgreSQL repository validation.
+- Successful AI conversation persistence validation.
+- Successful frontend build.
+- Successful backend build.
+- Successful production startup smoke test.
+- Successful dependency security gate.
+- 45/45 existing browser tests passed.
+- Zero skipped mandatory browser tests.
+- Successful expanded regression suite where applicable.
+- Successful mobile AI consultant acceptance.
+- Successful cross-browser voice lifecycle acceptance.
+- Successful support ticket acceptance.
+- Successful payment security acceptance.
+- Successful Railway sandbox build.
+- Successful Railway sandbox startup.
+- Successful authorized hosted acceptance.
+- Verified rollback readiness.
+
+Do not equate a successful build with complete production readiness.
+
+## 38. MANDATORY FINAL DEVELOPMENT REPORT
+
+Generate a comprehensive evidence-based report containing:
+
+A. Executive summary.
+
+B. Initial development condition.
+
+C. Original confirmed defects.
+
+D. Newly discovered defects.
+
+E. Root-cause analysis.
+
+F. Implemented source repairs.
+
+G. Completed remaining functionality.
+
+H. Source files modified.
+
+I. Dependency changes.
+
+J. Database changes.
+
+K. API contract changes.
+
+L. Frontend improvements.
+
+M. AI functionality improvements.
+
+N. Security improvements.
+
+O. GitHub Actions repairs.
+
+P. Railway configuration repairs.
+
+Q. Before-and-after browser test results.
+
+R. Complete test results.
+
+S. Database integration results.
+
+T. Performance measurements.
+
+U. Security validation results.
+
+V. Remaining defects.
+
+W. Remaining owner decisions.
+
+X. Production readiness assessment.
+
+Y. Deployment evidence.
+
+Z. Rollback instructions.
+
+For every claimed completed item, provide supporting evidence.
+
+Include:
+
+- Exact commit SHA.
+- Branch name.
+- Pull request number.
+- Workflow run identifier.
+- Test command.
+- Test result.
+- Deployment identifier where applicable.
+- Verified endpoint response where applicable.
+
+Clearly distinguish:
+
+IMPLEMENTED
+
+LOCALLY VALIDATED
+
+CI VALIDATED
+
+STAGING VALIDATED
+
+PRODUCTION VERIFIED
+
+BLOCKED
+
+NOT IMPLEMENTED
+
+OWNER DECISION REQUIRED
+
+Never fabricate execution results.
+
+If the development environment cannot execute a required test, access GitHub, access Railway or validate a provider, explicitly report the limitation.
+
+## 39. FINAL EXECUTION ORDER
+
+Execute the entire instruction in dependency order.
+
+PRIORITY 1:
+Source reconciliation, trailing whitespace, dependency lockfile and reproducible installation.
+
+PRIORITY 2:
+Restore the successful PR #18 implementation while preserving native PostgreSQL development.
+
+PRIORITY 3:
+Repair all remaining browser regressions, responsive layouts, microphone initialization and AI consultant functionality.
+
+PRIORITY 4:
+Repair customer portal, support tickets, commerce, authentication and financial security.
+
+PRIORITY 5:
+Validate PostgreSQL, migrations, AI workforce, persistence and enterprise security.
+
+PRIORITY 6:
+Complete all remaining established application functionality.
+
+PRIORITY 7:
+Execute full standard CI and achieve complete browser acceptance.
+
+PRIORITY 8:
+Validate Railway sandbox deployment and production readiness.
+
+PRIORITY 9:
+Prepare the consolidated release candidate and evidence.
+
+PRIORITY 10:
+Execute authorized production deployment only after all mandatory gates pass.
+
+BEGIN ACTUAL IMPLEMENTATION NOW.
+
+Do not stop after generating an audit.
+
+Do not stop after generating recommendations.
+
+Do not stop after creating interface placeholders.
+
+Do not stop after correcting only one workflow.
+
+Complete all executable repairs, validate the results and report any genuine external blockers.
+
+The final objective is a stable, secure, fully integrated, reproducible and production-ready OPHIREUM MULTIMEDIA PRODUCTION enterprise application.

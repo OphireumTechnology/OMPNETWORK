@@ -699,6 +699,18 @@ describe('Native Railway PostgreSQL 16 Full-Stack Integration (Phases 48–63)',
       });
       assert.equal(replyARes.status, 200);
 
+      // Backward-compatible /api/portal/support/tickets alias must also work seamlessly
+      const aliasTicketRes = await fetch(`${srv.baseUrl}/api/portal/support/tickets`, {
+        method: 'POST',
+        headers: headersA,
+        body: JSON.stringify({
+          category: 'Technical Support',
+          subject: 'Tenant A Alias Route Verification',
+          body: 'Confirming alias endpoint persistence on native PostgreSQL.',
+        }),
+      });
+      assert.equal(aliasTicketRes.status, 201);
+
       // User B must NOT see User A's ticket and must NOT be able to reply to it
       const listBRes = await fetch(`${srv.baseUrl}/api/portal/support`, { headers: headersB });
       assert.equal(listBRes.status, 200);

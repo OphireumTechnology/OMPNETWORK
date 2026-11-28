@@ -1599,13 +1599,13 @@ export function createPortalRouter(options: {
     });
   });
 
-  // Support Tickets
-  router.get('/support', async (req: PortalAuthenticatedRequest, res: Response) => {
+  // Support Tickets (canonical /api/portal/support + backward-compatible /api/portal/support/tickets alias)
+  const handleListSupportTickets = async (req: PortalAuthenticatedRequest, res: Response) => {
     const tickets = await repo.listSupportTickets(req.portalUser!.id);
     res.status(200).json({ success: true, tickets, categories: SUPPORT_CATEGORIES });
-  });
+  };
 
-  router.post('/support', async (req: PortalAuthenticatedRequest, res: Response) => {
+  const handleCreateSupportTicket = async (req: PortalAuthenticatedRequest, res: Response) => {
     const userId = req.portalUser!.id;
     const category = sanitizeText(req.body?.category, 60) as SupportTicketCategory;
     const subject = sanitizeText(req.body?.subject, 160);
@@ -1653,9 +1653,9 @@ export function createPortalRouter(options: {
     });
 
     res.status(201).json({ success: true, ticket });
-  });
+  };
 
-  router.post('/support/:ticketId/reply', async (req: PortalAuthenticatedRequest, res: Response) => {
+  const handleReplySupportTicket = async (req: PortalAuthenticatedRequest, res: Response) => {
     const userId = req.portalUser!.id;
     const ticketId = sanitizeText(req.params.ticketId, 80);
     const body = sanitizeText(req.body?.body, 3000);
@@ -1683,7 +1683,14 @@ export function createPortalRouter(options: {
       return;
     }
     res.status(200).json({ success: true, ticket });
-  });
+  };
+
+  router.get('/support', handleListSupportTickets);
+  router.get('/support/tickets', handleListSupportTickets);
+  router.post('/support', handleCreateSupportTicket);
+  router.post('/support/tickets', handleCreateSupportTicket);
+  router.post('/support/:ticketId/reply', handleReplySupportTicket);
+  router.post('/support/tickets/:ticketId/reply', handleReplySupportTicket);
 
   // Notifications
   router.get('/notifications', async (req: PortalAuthenticatedRequest, res: Response) => {

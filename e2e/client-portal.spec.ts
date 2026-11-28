@@ -57,10 +57,11 @@ test.describe('Phase 26 E2E — Client Portal Registration, Commerce, Orders, Pr
     expect(checkoutRes.status()).toBe(201);
     const orderData = await checkoutRes.json();
     expect(orderData.order.orderNumber).toBeTruthy();
-    expect(orderData.order.paymentStatus).toBe('unpaid');
+    expect(['pending', 'unpaid']).toContain(orderData.order.paymentStatus);
+    expect(orderData.order.paymentStatus).not.toBe('paid');
 
-    // Create a support ticket
-    const ticketRes = await request.post('/api/portal/support/tickets', {
+    // Create a support ticket on canonical /api/portal/support and verify durable retrieval
+    const ticketRes = await request.post('/api/portal/support', {
       headers: { Authorization: `Bearer ${regJson.token}` },
       data: {
         category: 'Orders',
@@ -69,5 +70,14 @@ test.describe('Phase 26 E2E — Client Portal Registration, Commerce, Orders, Pr
       },
     });
     expect(ticketRes.status()).toBe(201);
+    const createdTicket = await ticketRes.json();
+    expect(createdTicket.ticket?.id).toBeTruthy();
+
+    const listRes = await request.get('/api/portal/support', {
+      headers: { Authorization: `Bearer ${regJson.token}` },
+    });
+    expect(listRes.status()).toBe(200);
+    const listData = await listRes.json();
+    expect((listData.tickets || []).some((t: { id: string }) => t.id === createdTicket.ticket.id)).toBe(true);
   });
 });

@@ -5,10 +5,19 @@ interface TapDiagnosticSnapshot {
   timestamp: string;
   innerWidth: number;
   innerHeight: number;
+  clientWidth: number;
   scrollWidth: number;
   scrollY: number;
+  devicePixelRatio: number;
+  visualViewport: {
+    width: number;
+    height: number;
+    offsetLeft: number;
+    offsetTop: number;
+    scale: number;
+  } | null;
   launcherBox: { x: number; y: number; width: number; height: number } | null;
-  centerHitStack: Array<{ tag: string; id: string; testId: string | null; ariaLabel: string | null; zIndex: string }>;
+  centerHitStack: Array<{ tag: string; id: string; testId: string | null; ariaLabel: string | null; zIndex: string; pointerEvents: string }>;
   dialogVisible: boolean;
 }
 
@@ -19,20 +28,36 @@ async function captureTapDiagnostic(page: Page): Promise<TapDiagnosticSnapshot> 
     const cx = rect ? rect.left + rect.width / 2 : 0;
     const cy = rect ? rect.top + rect.height / 2 : 0;
     const stack = rect
-      ? document.elementsFromPoint(cx, cy).slice(0, 6).map((el) => ({
-          tag: el.tagName.toLowerCase(),
-          id: el.id || '',
-          testId: el.getAttribute('data-testid'),
-          ariaLabel: el.getAttribute('aria-label'),
-          zIndex: window.getComputedStyle(el).zIndex,
-        }))
+      ? document.elementsFromPoint(cx, cy).slice(0, 6).map((el) => {
+          const style = window.getComputedStyle(el);
+          return {
+            tag: el.tagName.toLowerCase(),
+            id: el.id || '',
+            testId: el.getAttribute('data-testid'),
+            ariaLabel: el.getAttribute('aria-label'),
+            zIndex: style.zIndex,
+            pointerEvents: style.pointerEvents,
+          };
+        })
       : [];
+    const vv = window.visualViewport;
     return {
       timestamp: new Date().toISOString(),
       innerWidth: window.innerWidth,
       innerHeight: window.innerHeight,
+      clientWidth: document.documentElement.clientWidth,
       scrollWidth: document.documentElement.scrollWidth,
       scrollY: window.scrollY,
+      devicePixelRatio: window.devicePixelRatio || 1,
+      visualViewport: vv
+        ? {
+            width: Math.round(vv.width),
+            height: Math.round(vv.height),
+            offsetLeft: Math.round(vv.offsetLeft),
+            offsetTop: Math.round(vv.offsetTop),
+            scale: vv.scale,
+          }
+        : null,
       launcherBox: rect
         ? {
             x: Math.round(rect.x),
@@ -82,7 +107,50 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
 
   test('opens AI Solutions Consultant widget, sends chat inquiry, and activates simulated-mic voice session', async ({
     page,
+    browserName,
   }, testInfo) => {
+    // Headless WebKit on Linux lacks a virtual microphone CLI flag; supply a controlled Web Audio MediaStream fixture
+    if (browserName === 'webkit') {
+      await page.addInitScript(() => {
+        const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        const originalGetUserMedia = navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices);
+        const createControlledStream = () => {
+          if (AudioCtx) {
+            const ctx = new AudioCtx();
+            const osc = ctx.createOscillator();
+            const dest = ctx.createMediaStreamDestination();
+            osc.frequency.value = 440;
+            osc.connect(dest);
+            osc.start();
+            return dest.stream;
+          }
+          return new MediaStream();
+        };
+        if (!navigator.mediaDevices) {
+          Object.defineProperty(navigator, 'mediaDevices', {
+            configurable: true,
+            value: {
+              getUserMedia: async () => createControlledStream(),
+              enumerateDevices: async () => [
+                { deviceId: 'webkit-test-mic', kind: 'audioinput', label: 'WebKit Test Microphone', groupId: 'test', toJSON: () => ({}) },
+              ],
+            },
+          });
+        } else {
+          navigator.mediaDevices.getUserMedia = async (constraints: MediaStreamConstraints) => {
+            if (originalGetUserMedia) {
+              try {
+                return await originalGetUserMedia(constraints);
+              } catch {
+                return createControlledStream();
+              }
+            }
+            return createControlledStream();
+          };
+        }
+      });
+    }
+
     await page.goto('/');
 
     const launcher = page.getByRole('button', { name: /Open AI Solutions Consultant/i });
@@ -127,7 +195,7 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
 
     await expect(page.locator('body')).toContainText(/starting at/i, { timeout: 15_000 });
 
-    // Activate voice consultation using fake media stream (Playwright launchOptions)
+    // Activate voice consultation (Chromium/Firefox native fake-media flags, WebKit controlled MediaStream fixture)
     const startVoiceBtn = page.getByRole('button', { name: /Start Voice/i });
     await expect(startVoiceBtn).toBeVisible();
     await startVoiceBtn.click();

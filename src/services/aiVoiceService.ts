@@ -26,6 +26,22 @@ export type VoiceState =
   | 'thinking'
   | 'speaking'
   | 'error';
+
+export type VoiceLifecycleState =
+  | 'IDLE'
+  | 'REQUESTING_PERMISSION'
+  | 'INITIALIZING'
+  | 'CONNECTING'
+  | 'CONNECTED'
+  | 'LISTENING'
+  | 'PROCESSING'
+  | 'SPEAKING'
+  | 'MUTED'
+  | 'RECONNECTING'
+  | 'ENDING'
+  | 'ENDED'
+  | 'ERROR';
+
 export type VoiceLanguage = 'en-US' | 'fil-PH';
 export type VoiceTransportKind = 'gemini_live_ws' | 'fallback_http';
 
@@ -36,6 +52,7 @@ export interface AudioInputDeviceOption {
 
 export interface VoiceEventCallbacks {
   onStatusChange?: (status: VoiceState) => void;
+  onLifecycleChange?: (lifecycle: VoiceLifecycleState) => void;
   onTransportChange?: (transport: VoiceTransportKind) => void;
   onTranscript?: (text: string, isFinal: boolean) => void;
   onAiResponse?: (text: string, intent?: any) => void;
@@ -79,12 +96,14 @@ function buildLiveWsUrl(): string {
 
 class AIVoiceService {
   private status: VoiceState = 'disconnected';
+  private lifecycleState: VoiceLifecycleState = 'IDLE';
   private transport: VoiceTransportKind = 'fallback_http';
   private language: VoiceLanguage = 'en-US';
   private callbacks: VoiceEventCallbacks = {};
 
   private captureAudioContext: AudioContext | null = null;
   private playbackAudioContext: AudioContext | null = null;
+  private mediaStreamSource: MediaStreamAudioSourceNode | null = null;
   private analyser: AnalyserNode | null = null;
   private workletNode: AudioWorkletNode | null = null;
   private scriptProcessor: ScriptProcessorNode | null = null;
@@ -152,6 +171,10 @@ class AIVoiceService {
     return this.status;
   }
 
+  public getLifecycleState(): VoiceLifecycleState {
+    return this.lifecycleState;
+  }
+
   public getTransport(): VoiceTransportKind {
     return this.transport;
   }
@@ -217,8 +240,15 @@ class AIVoiceService {
     if (this.liveWs && this.liveWs.readyState === WebSocket.OPEN) {
       this.liveWs.send(JSON.stringify({ type: 'mute', muted }));
     }
-    if (muted && this.status === 'listening') {
-      this.setStatus('idle');
+    if (muted) {
+      if (this.status === 'listening') {
+        this.setStatus('idle');
+      }
+      if (this.status !== 'disconnected') {
+        this.setLifecycleState('MUTED');
+      }
+    } else if (this.status !== 'disconnected') {
+      this.setLifecycleState('CONNECTED');
     }
   }
 
@@ -249,11 +279,24 @@ class AIVoiceService {
     }
 
     this.intentionalStop = false;
+    this.isMicMuted = false;
+    this.setLifecycleState('REQUESTING_PERMISSION');
     this.setStatus('connecting');
     this.recognitionReconnectAttempts = 0;
     this.wsReconnectAttempts = 0;
 
     try {
+      if (typeof window !== 'undefined' && window.isSecureContext === false && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+        const err = new Error('Voice consultation requires a secure HTTPS connection.');
+        err.name = 'SecurityError';
+        throw err;
+      }
+      if (typeof navigator === 'undefined' || !navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+        const err = new Error('Microphone capture API is not supported in this browser.');
+        err.name = 'NotSupportedError';
+        throw err;
+      }
+
       const audioConstraints: MediaTrackConstraints = {
         echoCancellation: true,
         noiseSuppression: true,
@@ -264,6 +307,7 @@ class AIVoiceService {
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
       this.mediaStream = stream;
+      this.setLifecycleState('INITIALIZING');
 
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioContextClass) {
@@ -272,6 +316,7 @@ class AIVoiceService {
           await this.captureAudioContext.resume();
         }
         const source = this.captureAudioContext.createMediaStreamSource(stream);
+        this.mediaStreamSource = source;
         this.analyser = this.captureAudioContext.createAnalyser();
         this.analyser.fftSize = 64;
         source.connect(this.analyser);
@@ -285,6 +330,8 @@ class AIVoiceService {
           this.playbackAudioContext = new AudioContextClass();
         }
       }
+
+      this.setLifecycleState('CONNECTING');
 
       // Negotiate voice session & continuity metadata over HTTP first
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -333,6 +380,7 @@ class AIVoiceService {
       if (connectedLive) {
         this.transport = 'gemini_live_ws';
         this.callbacks.onTransportChange?.('gemini_live_ws');
+        this.setLifecycleState('CONNECTED');
         this.setStatus('idle');
         return true;
       }
@@ -347,6 +395,7 @@ class AIVoiceService {
         this.setupRecognition(SpeechRecognitionClass);
       }
 
+      this.setLifecycleState('CONNECTED');
       this.setStatus('idle');
       const greeting = this.language.startsWith('fil')
         ? 'Magandang araw po. Ako ang inyong OPHIREUM AI Solutions Consultant. Paano ko po matutulungan ang inyong multimedia o software development project ngayon?'
@@ -355,11 +404,21 @@ class AIVoiceService {
       void this.speakText(greeting, true);
       return true;
     } catch (err: any) {
+      this.setLifecycleState('ERROR');
       this.setStatus('error');
+      const errName = String(err?.name || '');
       const msg =
-        err?.name === 'NotAllowedError'
+        errName === 'NotAllowedError' || errName === 'PermissionDeniedError'
           ? 'Microphone permission denied. Please allow microphone access in your browser settings to activate voice communication.'
-          : 'Could not initialize audio input. Returning to text chat.';
+          : errName === 'NotFoundError' || errName === 'DevicesNotFoundError'
+            ? 'No microphone device was detected. Text consultation remains fully active.'
+            : errName === 'NotReadableError' || errName === 'TrackStartError'
+              ? 'Microphone is currently in use by another application. Please close it and retry, or continue in text chat.'
+              : errName === 'SecurityError'
+                ? 'Voice consultation requires a secure HTTPS connection. Text consultation remains active.'
+                : errName === 'NotSupportedError'
+                  ? 'Real-time microphone capture is not supported in this browser. Text consultation remains active.'
+                  : 'Could not initialize audio input. Returning to text chat.';
       this.callbacks.onError?.(msg);
       this.stopSession();
       return false;
@@ -682,6 +741,7 @@ class AIVoiceService {
 
   public stopSession() {
     this.intentionalStop = true;
+    this.setLifecycleState('ENDING');
     this.cancelSpeech();
 
     if (this.wsReconnectTimer) {
@@ -700,6 +760,24 @@ class AIVoiceService {
       }
       this.liveWs = null;
       this.liveWsActive = false;
+    }
+
+    if (this.mediaStreamSource) {
+      try {
+        this.mediaStreamSource.disconnect();
+      } catch {
+        // ignore
+      }
+      this.mediaStreamSource = null;
+    }
+
+    if (this.analyser) {
+      try {
+        this.analyser.disconnect();
+      } catch {
+        // ignore
+      }
+      this.analyser = null;
     }
 
     if (this.workletNode) {
@@ -728,6 +806,7 @@ class AIVoiceService {
       }
       this.isRecordingClip = false;
     }
+    this.mediaRecorder = null;
 
     if (this.recognition) {
       try {
@@ -735,6 +814,7 @@ class AIVoiceService {
       } catch {
         // ignore
       }
+      this.recognition = null;
       this.isRecognitionRunning = false;
     }
 
@@ -771,7 +851,10 @@ class AIVoiceService {
       this.playbackAudioContext = null;
     }
 
+    this.isMicMuted = false;
     this.setStatus('disconnected');
+    this.setLifecycleState('ENDED');
+    this.setLifecycleState('IDLE');
     this.callbacks.onVolumeChange?.(0);
   }
 
@@ -1028,8 +1111,17 @@ class AIVoiceService {
     }
   }
 
+  private setLifecycleState(next: VoiceLifecycleState) {
+    this.lifecycleState = next;
+    this.callbacks.onLifecycleChange?.(next);
+  }
+
   private setStatus(newStatus: VoiceState) {
     this.status = newStatus;
+    if (newStatus === 'listening') this.setLifecycleState('LISTENING');
+    else if (newStatus === 'thinking') this.setLifecycleState('PROCESSING');
+    else if (newStatus === 'speaking') this.setLifecycleState('SPEAKING');
+    else if (newStatus === 'error') this.setLifecycleState('ERROR');
     this.callbacks.onStatusChange?.(newStatus);
   }
 

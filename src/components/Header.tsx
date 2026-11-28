@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Menu, X, ArrowUpRight, Shield, Phone, MapPin } from 'lucide-react';
 import { COMPANY_CONFIG } from '../data/companyConfig';
 import { BrandLogo } from './BrandLogo';
@@ -11,6 +11,19 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({ onOpenPortal, onNavigate, activeSection }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const mobileToggleRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setMobileMenuOpen(false);
+        mobileToggleRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [mobileMenuOpen]);
 
   const navItems = [
     { id: 'about', label: 'About & Leadership' },
@@ -27,7 +40,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenPortal, onNavigate, active
 
   return (
     <header className="sticky top-0 z-50 w-full bg-[#0B1220]/95 backdrop-blur-md border-b border-slate-800 transition-colors shadow-lg">
-      
+
       {/* Top Executive Micro-Bar (Seamlessly Integrated) */}
       <div className="hidden xl:flex items-center justify-between px-6 lg:px-8 py-1.5 bg-[#080d18] border-b border-slate-800/80 text-[11px] text-slate-400">
         <div className="flex items-center gap-4">
@@ -62,7 +75,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenPortal, onNavigate, active
 
       {/* Main Navigation Bar — Desktop Height 88px */}
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 min-h-[76px] sm:h-[88px] py-2 sm:py-0 flex items-center justify-between gap-2 sm:gap-4">
-        
+
         {/* Zone 1: Official Corporate Emblem & Exact Registered Name */}
         <button
           type="button"
@@ -133,7 +146,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenPortal, onNavigate, active
         </div>
 
         {/* Mobile Hamburger & Direct Call Button */}
-        <div className="flex lg:hidden items-center gap-2">
+        <div className="flex lg:hidden items-center gap-2 shrink-0">
           <a
             href={COMPANY_CONFIG.mobileLink}
             className="p-2 text-[#00C2C7] bg-slate-900 rounded-lg border border-slate-800 sm:hidden"
@@ -142,9 +155,13 @@ export const Header: React.FC<HeaderProps> = ({ onOpenPortal, onNavigate, active
             <Phone className="w-4 h-4" />
           </a>
           <button
+            ref={mobileToggleRef}
+            type="button"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="p-2.5 text-slate-300 hover:text-white focus:outline-none cursor-pointer rounded-lg bg-slate-900 border border-slate-800"
+            className="p-2.5 text-slate-300 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00C2C7] cursor-pointer rounded-lg bg-slate-900 border border-slate-800"
             aria-label="Toggle navigation menu"
+            aria-expanded={mobileMenuOpen}
+            aria-controls="mobile-primary-nav"
           >
             {mobileMenuOpen ? <X className="w-5 h-5 text-[#00C2C7]" /> : <Menu className="w-5 h-5" />}
           </button>
@@ -153,7 +170,11 @@ export const Header: React.FC<HeaderProps> = ({ onOpenPortal, onNavigate, active
 
       {/* Mobile Drawer Menu */}
       {mobileMenuOpen && (
-        <div className="lg:hidden bg-[#0B1220] border-b border-slate-800 px-5 pt-3 pb-6 space-y-4 shadow-2xl">
+        <nav
+          id="mobile-primary-nav"
+          aria-label="Mobile navigation"
+          className="lg:hidden bg-[#0B1220] border-b border-slate-800 px-5 pt-3 pb-6 space-y-4 shadow-2xl"
+        >
           {/* Executive info on mobile */}
           <div className="p-3.5 rounded-lg bg-slate-900/90 border border-slate-800 space-y-1.5 text-xs">
             <div className="text-slate-300">
@@ -199,7 +220,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenPortal, onNavigate, active
               <ArrowUpRight className="w-4 h-4" />
             </button>
           </div>
-        </div>
+        </nav>
       )}
     </header>
   );

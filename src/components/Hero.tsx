@@ -23,7 +23,7 @@ export const Hero: React.FC<HeroProps> = ({ onNavigate, onOpenPortal }) => {
       <div aria-hidden="true" className="absolute top-1/3 right-0 sm:right-10 w-[min(380px,90vw)] h-[380px] bg-[#D4AF37]/6 blur-[130px] rounded-full pointer-events-none" />
 
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        
+
         {/* Trust & Location Indicator */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium text-slate-400 mb-6 pointer-events-auto">
           <a
@@ -43,10 +43,10 @@ export const Hero: React.FC<HeroProps> = ({ onNavigate, onOpenPortal }) => {
 
         {/* 2-Column Split: Editorial Value Proposition & Corporate Technology Identity Card */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-14 items-center">
-          
+
           {/* Left Column: Heading, Subtitle & 4 Primary Actions */}
           <div className="lg:col-span-7 flex flex-col justify-center pointer-events-auto">
-            
+
             <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-[3.25rem] font-extrabold tracking-tight text-white leading-[1.14] text-balance">
               {COMPANY_CONFIG.headline}
             </h1>
@@ -110,13 +110,13 @@ export const Hero: React.FC<HeroProps> = ({ onNavigate, onOpenPortal }) => {
           {/* Right Column: Redesigned Corporate Technology Identity Card (180–220px Emblem) */}
           <div className="lg:col-span-5 flex justify-center pointer-events-auto">
             <div className="relative group max-w-sm sm:max-w-md w-full">
-              
+
               {/* Subtle ambient lighting halo */}
               <div className="absolute -inset-1.5 bg-gradient-to-br from-[#D4AF37]/20 via-[#00C2C7]/25 to-slate-800/40 rounded-3xl blur-lg opacity-70 group-hover:opacity-95 transition duration-500" />
-              
+
               {/* Clean Corporate Identity Card */}
               <div className="relative rounded-2xl bg-[#111827] border border-slate-700/80 p-7 sm:p-8 shadow-2xl flex flex-col items-center text-center">
-                
+
                 {/* Official Circular Logo with 190-210px dimensions, centered */}
                 <BrandLogo
                   variant="emblem"

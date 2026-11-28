@@ -1,18 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { 
-  Bot, X, Send, Calendar, FileText, Phone, Minimize2, 
+import {
+  Bot, X, Send, Calendar, FileText, Phone, Minimize2,
   Maximize2, RotateCcw, Shield, Building,
   MapPin, Mic, MicOff, Volume2, VolumeX, PhoneOff, Globe,
   Square, AlertCircle, Sparkles
 } from 'lucide-react';
 import { COMPANY_CONFIG } from '../../data/companyConfig';
 import { BrandLogo } from '../BrandLogo';
-import { 
-  aiConsultantService, 
-  ChatMessage, 
-  ConsultationState, 
-  INITIAL_CONSULTATION_STATE 
+import {
+  aiConsultantService,
+  ChatMessage,
+  ConsultationState,
+  INITIAL_CONSULTATION_STATE
 } from '../../services/aiConsultantService';
 import { supabaseService, ProjectBrief, ConsultationAppointment } from '../../services/supabaseService';
 import {
@@ -569,8 +569,8 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
                 <div className="flex items-center gap-1.5">
                   <h3 className="text-xs font-bold text-white tracking-wide">OPHIREUM AI Solutions</h3>
                   <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${
-                    isVoiceActive 
-                      ? 'text-[#00C2C7] bg-[#00C2C7]/15 border-[#00C2C7]/40 font-bold' 
+                    isVoiceActive
+                      ? 'text-[#00C2C7] bg-[#00C2C7]/15 border-[#00C2C7]/40 font-bold'
                       : 'text-slate-400 bg-slate-800 border-slate-700'
                   }`}>
                     {isVoiceActive ? 'VOICE ACTIVE' : 'ONLINE'}
