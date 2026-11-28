@@ -126,17 +126,51 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
     page,
     browserName,
   }, testInfo) => {
+    const sanitizedConsoleErrors: string[] = [];
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') {
+        const clean = msg
+          .text()
+          .replace(/(Bearer\s+|token=|secret=|key=)[^\s,&"']+/gi, '$1[REDACTED]')
+          .slice(0, 300);
+        if (sanitizedConsoleErrors.length < 25) {
+          sanitizedConsoleErrors.push(clean);
+        }
+      }
+    });
+    page.on('pageerror', (err) => {
+      if (sanitizedConsoleErrors.length < 25) {
+        sanitizedConsoleErrors.push(`pageerror: ${String(err.message || err).slice(0, 300)}`);
+      }
+    });
+
     // Headless WebKit on Linux (Desktop Safari + iPad Pro 11 tablet) lacks virtual microphone CLI flags and
-    // unsupported permissions API; install a controlled test-only MediaStream fixture (never in production code)
-    // that retains audio resources until track.stop() and guarantees a live mutable audio track.
+    // unsupported permissions API, AND JavaScriptCore garbage-collects unretained navigator.mediaDevices wrappers
+    // causing own-property patches to revert to native getUserMedia. Patch MediaDevices.prototype AND retain the
+    // test-only fixture cleanly (strictly isolated to E2E tests, never in production code).
     if (browserName === 'webkit') {
       await page.addInitScript(() => {
         const AudioCtx =
           window.AudioContext ||
           (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
         const retainedContexts: Array<{ ctx: AudioContext; osc: OscillatorNode }> = [];
+        const trackedAudioTracks: Array<{ enabled: boolean; readyState: string }> = [];
+
+        (window as unknown as Record<string, unknown>).__ophireumWebkitVoiceFixture = {
+          getUserMediaCalls: 0,
+          getLatestTrackState: () => {
+            const latest = trackedAudioTracks[trackedAudioTracks.length - 1];
+            if (!latest) return null;
+            return { enabled: Boolean(latest.enabled), readyState: String(latest.readyState) };
+          },
+          getTrackCount: () => trackedAudioTracks.length,
+        };
 
         const createControlledStream = (): MediaStream => {
+          const fixture = (window as unknown as Record<string, { getUserMediaCalls: number }>)
+            .__ophireumWebkitVoiceFixture;
+          fixture.getUserMediaCalls += 1;
+
           if (AudioCtx) {
             try {
               const ctx = new AudioCtx();
@@ -148,10 +182,12 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
               const stream = dest.stream;
               const audioTracks = stream.getAudioTracks();
               if (audioTracks.length > 0 && audioTracks[0].readyState === 'live') {
+                const track = audioTracks[0];
                 const entry = { ctx, osc };
                 retainedContexts.push(entry);
-                const origStop = audioTracks[0].stop.bind(audioTracks[0]);
-                audioTracks[0].stop = () => {
+                trackedAudioTracks.push(track);
+                const origStop = track.stop.bind(track);
+                track.stop = () => {
                   origStop();
                   try {
                     osc.stop();
@@ -210,6 +246,7 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
             },
             applyConstraints: async () => {},
           };
+          trackedAudioTracks.push(track);
 
           const controlledStream = {
             id: `webkit-test-stream-${Date.now()}`,
@@ -245,6 +282,24 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
 
         const testGetUserMedia = async () => createControlledStream();
 
+        // Patch MediaDevices.prototype so newly-materialized JSC DOM wrappers in WebKit ALWAYS use the fixture
+        if (typeof MediaDevices !== 'undefined' && MediaDevices.prototype) {
+          try {
+            Object.defineProperty(MediaDevices.prototype, 'getUserMedia', {
+              configurable: true,
+              writable: true,
+              value: testGetUserMedia,
+            });
+            Object.defineProperty(MediaDevices.prototype, 'enumerateDevices', {
+              configurable: true,
+              writable: true,
+              value: testEnumerateDevices,
+            });
+          } catch {
+            // Fall through to instance/navigator definition below
+          }
+        }
+
         if (!navigator.mediaDevices) {
           Object.defineProperty(navigator, 'mediaDevices', {
             configurable: true,
@@ -254,6 +309,8 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
             },
           });
         } else {
+          // Retain the current wrapper on window so JSC never sweeps own-property overrides either
+          (window as unknown as Record<string, unknown>).__ophireumPinnedMediaDevices = navigator.mediaDevices;
           try {
             Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
               configurable: true,
@@ -322,39 +379,146 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
 
     await expect(page.locator('body')).toContainText(/starting at/i, { timeout: 15_000 });
 
-    // Activate voice consultation: Start Voice -> Pre-Mic Voice Disclosure -> Explicit Consent -> Mic Acquisition
-    const startVoiceBtn = page.getByRole('button', { name: /Start Voice/i });
-    await expect(startVoiceBtn).toBeVisible();
-    await startVoiceBtn.click();
+    const observedLifecycles: string[] = [];
+    const recordLifecycle = async (label: string) => {
+      const state = await page.evaluate(() => {
+        const el = document.querySelector<HTMLElement>('[data-testid="voice-active-controls"]');
+        return el
+          ? `${el.getAttribute('data-voice-status') || ''}/${el.getAttribute('data-voice-lifecycle') || ''}`
+          : 'inactive';
+      });
+      observedLifecycles.push(`${label}:${state}`);
+    };
 
-    // Voice Disclosure MUST render BEFORE microphone permission/acquisition on all browsers (including WebKit)
-    const disclosurePanel = page.getByTestId('voice-disclosure-panel');
-    await expect(disclosurePanel).toBeVisible({ timeout: 10_000 });
-    await expect(disclosurePanel).toContainText(/Voice Disclosure/i);
+    try {
+      // Activate voice consultation: Start Voice -> Pre-Mic Voice Disclosure -> Explicit Consent -> Mic Acquisition
+      const startVoiceBtn = page.getByRole('button', { name: /Start Voice/i });
+      await expect(startVoiceBtn).toBeVisible();
+      await startVoiceBtn.click();
 
-    // Explicitly grant consent to acquire microphone
-    const confirmConsentBtn = page.getByTestId('voice-consent-confirm');
-    await expect(confirmConsentBtn).toBeVisible();
-    await confirmConsentBtn.click();
+      // Voice Disclosure MUST render BEFORE microphone permission/acquisition on all browsers (including WebKit)
+      const disclosurePanel = page.getByTestId('voice-disclosure-panel');
+      await expect(disclosurePanel).toBeVisible({ timeout: 10_000 });
+      await expect(disclosurePanel).toContainText(/Voice Disclosure/i);
 
-    // Mute, verify Unmute + aria-pressed, unmute back to active listening, then end voice cleanly
-    const muteMicBtn = page.getByRole('button', { name: 'Mute Microphone' });
-    await expect(muteMicBtn).toBeVisible({ timeout: 10_000 });
-    await expect(muteMicBtn).toHaveAttribute('aria-pressed', 'false');
-    await muteMicBtn.click();
+      // Explicitly grant consent to acquire microphone
+      const confirmConsentBtn = page.getByTestId('voice-consent-confirm');
+      await expect(confirmConsentBtn).toBeVisible();
+      await confirmConsentBtn.click();
 
-    const unmuteMicBtn = page.getByRole('button', { name: 'Unmute Microphone' });
-    await expect(unmuteMicBtn).toBeVisible();
-    await expect(unmuteMicBtn).toHaveAttribute('aria-pressed', 'true');
-    await unmuteMicBtn.click();
+      // Active voice controls & Mute Microphone button
+      const muteMicBtn = page.getByRole('button', { name: 'Mute Microphone' });
+      await expect(muteMicBtn).toBeVisible({ timeout: 10_000 });
+      await expect(muteMicBtn).toHaveAttribute('aria-pressed', 'false');
+      await recordLifecycle('after-connect');
 
-    await expect(page.getByRole('button', { name: 'Mute Microphone' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Mute Microphone' })).toHaveAttribute('aria-pressed', 'false');
+      if (browserName === 'webkit') {
+        const trackBeforeMute = await page.evaluate(() => {
+          const fx = (window as unknown as Record<string, { getLatestTrackState: () => { enabled: boolean; readyState: string } | null }>)
+            .__ophireumWebkitVoiceFixture;
+          return fx?.getLatestTrackState() ?? null;
+        });
+        expect(trackBeforeMute).toEqual({ enabled: true, readyState: 'live' });
+      }
 
-    const endVoiceBtn = page.getByRole('button', { name: 'End Voice Conversation' });
-    await expect(endVoiceBtn).toBeVisible();
-    await endVoiceBtn.click();
-    await expect(page.getByRole('button', { name: /Start Voice/i })).toBeVisible();
+      // Mute Microphone -> verify Unmute Microphone + aria-pressed + actual MediaStreamTrack.enabled === false
+      await muteMicBtn.click();
+      const unmuteMicBtn = page.getByRole('button', { name: 'Unmute Microphone' });
+      await expect(unmuteMicBtn).toBeVisible();
+      await expect(unmuteMicBtn).toHaveAttribute('aria-pressed', 'true');
+      await recordLifecycle('after-mute');
+
+      if (browserName === 'webkit') {
+        const trackMuted = await page.evaluate(() => {
+          const fx = (window as unknown as Record<string, { getLatestTrackState: () => { enabled: boolean; readyState: string } | null }>)
+            .__ophireumWebkitVoiceFixture;
+          return fx?.getLatestTrackState() ?? null;
+        });
+        expect(trackMuted).toEqual({ enabled: false, readyState: 'live' });
+      }
+
+      // Unmute Microphone -> verify Mute Microphone + aria-pressed + actual MediaStreamTrack.enabled === true
+      await unmuteMicBtn.click();
+      await expect(page.getByRole('button', { name: 'Mute Microphone' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Mute Microphone' })).toHaveAttribute('aria-pressed', 'false');
+      await recordLifecycle('after-unmute');
+
+      if (browserName === 'webkit') {
+        const trackUnmuted = await page.evaluate(() => {
+          const fx = (window as unknown as Record<string, { getLatestTrackState: () => { enabled: boolean; readyState: string } | null }>)
+            .__ophireumWebkitVoiceFixture;
+          return fx?.getLatestTrackState() ?? null;
+        });
+        expect(trackUnmuted).toEqual({ enabled: true, readyState: 'live' });
+      }
+
+      // Speaker Mute & Unmute controls
+      const muteSpeakerBtn = page.getByRole('button', { name: 'Mute Speaker Output' });
+      await expect(muteSpeakerBtn).toBeVisible();
+      await expect(muteSpeakerBtn).toHaveAttribute('aria-pressed', 'false');
+      await muteSpeakerBtn.click();
+      const unmuteSpeakerBtn = page.getByRole('button', { name: 'Unmute Speaker Output' });
+      await expect(unmuteSpeakerBtn).toBeVisible();
+      await expect(unmuteSpeakerBtn).toHaveAttribute('aria-pressed', 'true');
+      await unmuteSpeakerBtn.click();
+      await expect(page.getByRole('button', { name: 'Mute Speaker Output' })).toHaveAttribute('aria-pressed', 'false');
+
+      // End Voice Conversation cleanly -> returns to Start Voice and stops live track
+      const endVoiceBtn = page.getByRole('button', { name: 'End Voice Conversation' });
+      await expect(endVoiceBtn).toBeVisible();
+      await endVoiceBtn.click();
+      await expect(page.getByRole('button', { name: /Start Voice/i })).toBeVisible();
+      await recordLifecycle('after-end');
+
+      if (browserName === 'webkit') {
+        const trackStopped = await page.evaluate(() => {
+          const fx = (window as unknown as Record<string, { getLatestTrackState: () => { enabled: boolean; readyState: string } | null }>)
+            .__ophireumWebkitVoiceFixture;
+          return fx?.getLatestTrackState() ?? null;
+        });
+        expect(trackStopped?.readyState).toBe('ended');
+      }
+
+      // Session Restart Verification: Start Voice -> Consent -> Active Controls -> End cleanly
+      await page.getByRole('button', { name: /Start Voice/i }).click();
+      await expect(page.getByTestId('voice-disclosure-panel')).toBeVisible();
+      await page.getByTestId('voice-consent-confirm').click();
+      await expect(page.getByRole('button', { name: 'Mute Microphone' })).toBeVisible({ timeout: 10_000 });
+      await recordLifecycle('after-restart');
+      await page.getByRole('button', { name: 'End Voice Conversation' }).click();
+      await expect(page.getByRole('button', { name: /Start Voice/i })).toBeVisible();
+    } catch (err) {
+      await recordLifecycle('on-failure');
+      const voiceDiag = await page.evaluate(() => {
+        const activeBar = document.querySelector<HTMLElement>('[data-testid="voice-active-controls"]');
+        const dialogEl = document.querySelector<HTMLElement>('[data-testid="ai-consultant-dialog"]');
+        return {
+          hasActiveControls: Boolean(activeBar),
+          voiceStatus: activeBar?.getAttribute('data-voice-status') || null,
+          voiceLifecycle: activeBar?.getAttribute('data-voice-lifecycle') || null,
+          micMuted: activeBar?.getAttribute('data-mic-muted') || null,
+          speakerMuted: activeBar?.getAttribute('data-speaker-muted') || null,
+          consentPanelVisible: Boolean(document.querySelector('[data-testid="voice-consent-confirm"]')),
+          dialogTextSnippet: (dialogEl?.innerText || '').slice(0, 600),
+        };
+      });
+      await fs.writeFile(
+        testInfo.outputPath('voice-failure-diagnostics.json'),
+        JSON.stringify(
+          {
+            project: testInfo.project.name,
+            browserName,
+            observedLifecycles,
+            voiceDiag,
+            sanitizedConsoleErrors,
+          },
+          null,
+          2
+        ),
+        'utf8'
+      );
+      throw err;
+    }
   });
 
   test('navigates cleanly to Legal & Compliance Trust Center routes', async ({ page }) => {

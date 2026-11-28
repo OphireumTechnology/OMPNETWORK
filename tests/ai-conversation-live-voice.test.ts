@@ -697,4 +697,142 @@ describe('Phases 21–24: Persistent AI Conversations, Realtime Live Voice WebSo
       }
     }
   });
+
+  it('Recovery 12.1: AIVoiceService handles Safari interrupted/closed AudioContext, optional visualizer failure, ended-track rejection, speaker mute, network interruption fallback, and clean session restart', async () => {
+    const origNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    const origWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const origFetch = globalThis.fetch;
+
+    let returnEndedTrack = false;
+    let resumeAttempts = 0;
+    let closedContexts = 0;
+    const createdTracks: Array<{ enabled: boolean; readyState: 'live' | 'ended'; stop: () => void }> = [];
+
+    const makeStream = () => {
+      const t = {
+        kind: 'audio',
+        enabled: true,
+        readyState: (returnEndedTrack ? 'ended' : 'live') as 'live' | 'ended',
+        stop() {
+          this.readyState = 'ended';
+          this.enabled = false;
+        },
+        addEventListener() {},
+        removeEventListener() {},
+      };
+      createdTracks.push(t);
+      return {
+        getTracks: () => [t],
+        getAudioTracks: () => [t],
+      };
+    };
+
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: {
+        mediaDevices: {
+          getUserMedia: async () => makeStream(),
+        },
+      },
+    });
+
+    class InterruptedSafariAudioContext {
+      state: string = 'interrupted';
+      onstatechange: (() => void) | null = null;
+      resume() {
+        resumeAttempts += 1;
+        this.state = 'running';
+        return Promise.resolve();
+      }
+      createMediaStreamSource() {
+        return { connect() {}, disconnect() {} };
+      }
+      createAnalyser() {
+        throw new Error('Visualizer analyser unavailable');
+      }
+      close() {
+        this.state = 'closed';
+        closedContexts += 1;
+        return Promise.resolve();
+      }
+    }
+
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        isSecureContext: true,
+        location: { hostname: '127.0.0.1', protocol: 'http:', host: '127.0.0.1:3000' },
+        AudioContext: InterruptedSafariAudioContext,
+      },
+    });
+
+    // Simulate network interruption on /api/voice/session
+    globalThis.fetch = (async () => {
+      throw new Error('Simulated network interruption');
+    }) as unknown as typeof fetch;
+
+    try {
+      const voice = new AIVoiceService();
+      const degradedNotices: Array<string | null> = [];
+      voice.setCallbacks({
+        onDegradedNotice: (n) => degradedNotices.push(n),
+      });
+
+      // 1. Ended audio track MUST be rejected honestly (never fabricate active session)
+      returnEndedTrack = true;
+      const endedStart = await voice.startSession('ended-track-session');
+      assert.equal(endedStart, false);
+      assert.equal(voice.getStatus(), 'disconnected');
+      assert.ok(closedContexts >= 1, 'Pre-warmed AudioContext must be closed when track acquisition fails');
+
+      // 2. Live track + Safari 'interrupted' AudioContext + visualizer throw + network interruption
+      returnEndedTrack = false;
+      const started = await voice.startSession('interrupted-network-session');
+      assert.equal(started, true, 'Live track session must survive interrupted AudioContext, visualizer error, and network fallback');
+      assert.ok(resumeAttempts >= 1, 'Interrupted AudioContext should attempt safe resume');
+      assert.equal(voice.getTransport(), 'fallback_http');
+      assert.ok(degradedNotices.some((n) => typeof n === 'string' && n.includes('fallback')), 'Must surface honest degraded notice');
+
+      // Speaker mute & unmute
+      voice.setSpeakerMuted(true);
+      assert.equal(voice.getIsSpeakerMuted(), true);
+      voice.setSpeakerMuted(false);
+      assert.equal(voice.getIsSpeakerMuted(), false);
+
+      // Mute & unmute track
+      const activeTrack = createdTracks[createdTracks.length - 1];
+      voice.setMicMuted(true);
+      assert.equal(activeTrack.enabled, false);
+      voice.setMicMuted(false);
+      assert.equal(activeTrack.enabled, true);
+
+      // Stop & cleanly restart session
+      voice.stopSession();
+      assert.equal(activeTrack.readyState, 'ended');
+      assert.equal(voice.getStatus(), 'disconnected');
+
+      const restarted = await voice.startSession('restarted-session');
+      assert.equal(restarted, true);
+      const restartedTrack = createdTracks[createdTracks.length - 1];
+      assert.notEqual(restartedTrack, activeTrack);
+      assert.equal(restartedTrack.readyState, 'live');
+      assert.equal(restartedTrack.enabled, true);
+
+      voice.stopSession();
+      assert.equal(restartedTrack.readyState, 'ended');
+      assert.equal(voice.getStatus(), 'disconnected');
+    } finally {
+      globalThis.fetch = origFetch;
+      if (origNavigatorDescriptor) {
+        Object.defineProperty(globalThis, 'navigator', origNavigatorDescriptor);
+      } else {
+        delete (globalThis as Record<string, unknown>).navigator;
+      }
+      if (origWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', origWindowDescriptor);
+      } else {
+        delete (globalThis as Record<string, unknown>).window;
+      }
+    }
+  });
 });

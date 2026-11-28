@@ -120,6 +120,7 @@ export class AIVoiceService {
   private intentionalStop = false;
   private sessionGeneration = 0;
   private isStarting = false;
+  private trackEndedCleanup: (() => void) | null = null;
 
   private recognition: any = null;
   private isRecognitionRunning = false;
@@ -334,58 +335,138 @@ export class AIVoiceService {
         ...(this.selectedDeviceId ? { deviceId: { exact: this.selectedDeviceId } } : {}),
       };
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
-      if (this.isStaleSession(gen)) {
-        stream?.getTracks?.().forEach((track) => track.stop());
-        return false;
-      }
-      const audioTracks = typeof stream?.getAudioTracks === 'function' ? stream.getAudioTracks() : [];
-      if (!stream || audioTracks.length === 0) {
-        stream?.getTracks?.().forEach((track) => track.stop());
-        const err = new Error('No active microphone audio track was returned by the browser.');
-        err.name = 'NotFoundError';
-        throw err;
-      }
-      this.mediaStream = stream;
-      this.setLifecycleState('INITIALIZING');
-
-      // Web Audio visualizer & PCM capture pipeline are non-fatal enhancements once a real MediaStream
-      // audio track has been acquired — WebKit/Safari audio-graph restrictions must not kill an active mic session.
+      // Pre-warm AudioContext synchronously within the user-gesture turn (preserves Safari/iOS/iPadOS activation)
       const AudioContextClass =
         typeof window !== 'undefined'
           ? window.AudioContext || (window as any).webkitAudioContext
           : undefined;
+      let prewarmedCtx: AudioContext | null = null;
       if (AudioContextClass) {
         try {
-          const captureCtx = new AudioContextClass();
+          prewarmedCtx = new AudioContextClass();
+          const ctxState = prewarmedCtx.state as string;
+          if (ctxState === 'suspended' || ctxState === 'interrupted') {
+            void this.resumeAudioContextSafely(prewarmedCtx, 250);
+          }
+        } catch {
+          prewarmedCtx = null;
+        }
+      }
+
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+      } catch (micErr) {
+        if (prewarmedCtx && prewarmedCtx.state !== 'closed') {
+          try {
+            void prewarmedCtx.close();
+          } catch {
+            // ignore
+          }
+        }
+        throw micErr;
+      }
+
+      if (this.isStaleSession(gen)) {
+        stream?.getTracks?.().forEach((track) => track.stop());
+        if (prewarmedCtx && prewarmedCtx.state !== 'closed') {
+          try {
+            void prewarmedCtx.close();
+          } catch {
+            // ignore
+          }
+        }
+        return false;
+      }
+
+      const audioTracks = typeof stream?.getAudioTracks === 'function' ? stream.getAudioTracks() : [];
+      const liveAudioTracks = audioTracks.filter((track) => track.readyState !== 'ended');
+      if (!stream || liveAudioTracks.length === 0) {
+        stream?.getTracks?.().forEach((track) => track.stop());
+        if (prewarmedCtx && prewarmedCtx.state !== 'closed') {
+          try {
+            void prewarmedCtx.close();
+          } catch {
+            // ignore
+          }
+        }
+        const err = new Error('No active microphone audio track was returned by the browser.');
+        err.name = 'NotFoundError';
+        throw err;
+      }
+
+      // Apply current mute preference immediately in case user toggled mute while permission resolved
+      liveAudioTracks.forEach((track) => {
+        track.enabled = !this.isMicMuted;
+      });
+      this.mediaStream = stream;
+      this.attachTrackEndedGuard(liveAudioTracks[0], gen);
+      this.setLifecycleState('INITIALIZING');
+
+      // Web Audio visualizer & PCM capture pipeline are non-fatal enhancements once a real live MediaStream
+      // audio track has been acquired — WebKit/Safari audio-graph or suspended/interrupted states must not
+      // terminate an authorized active microphone session.
+      if (AudioContextClass) {
+        try {
+          const captureCtx =
+            prewarmedCtx && prewarmedCtx.state !== 'closed' ? prewarmedCtx : new AudioContextClass();
           this.captureAudioContext = captureCtx;
-          if (captureCtx.state === 'suspended') {
+
+          // Recover gracefully when Safari/iPadOS transitions AudioContext to 'interrupted' or 'suspended'
+          try {
+            captureCtx.onstatechange = () => {
+              if (this.isStaleSession(gen) || this.captureAudioContext !== captureCtx) return;
+              const nextState = captureCtx.state as string;
+              if (nextState === 'interrupted' || nextState === 'suspended') {
+                void this.resumeAudioContextSafely(captureCtx, 300);
+              }
+            };
+          } catch {
+            // ignore readonly onstatechange in custom environments
+          }
+
+          const initialState = captureCtx.state as string;
+          if (initialState === 'suspended' || initialState === 'interrupted') {
             await this.resumeAudioContextSafely(captureCtx, 400);
           }
           if (this.isStaleSession(gen)) {
-            try {
-              void captureCtx.close();
-            } catch {
-              // ignore
-            }
+            this.cleanupAudioContextNodesOnly();
             return false;
           }
-          const source = captureCtx.createMediaStreamSource(stream);
-          this.mediaStreamSource = source;
-          this.analyser = captureCtx.createAnalyser();
-          this.analyser.fftSize = 64;
-          source.connect(this.analyser);
-          this.startVolumeMonitoring(gen);
-          await this.setupPcmCapturePipeline(source, gen);
-          if (this.isStaleSession(gen)) {
-            return false;
+
+          if ((captureCtx.state as string) !== 'closed') {
+            const source = captureCtx.createMediaStreamSource(stream);
+            this.mediaStreamSource = source;
+
+            // Isolate optional waveform visualizer failures from essential PCM audio capture
+            try {
+              this.analyser = captureCtx.createAnalyser();
+              this.analyser.fftSize = 64;
+              source.connect(this.analyser);
+              this.startVolumeMonitoring(gen);
+            } catch {
+              this.analyser = null;
+            }
+
+            try {
+              await this.setupPcmCapturePipeline(source, gen);
+            } catch {
+              // Fallback HTTP voice capture & text consultation remain fully operational
+            }
+            if (this.isStaleSession(gen)) {
+              return false;
+            }
           }
 
           // Dedicated 24kHz AudioContext for gapless Gemini Live PCM output playback
           try {
             this.playbackAudioContext = new AudioContextClass({ sampleRate: 24000 });
           } catch {
-            this.playbackAudioContext = new AudioContextClass();
+            try {
+              this.playbackAudioContext = new AudioContextClass();
+            } catch {
+              this.playbackAudioContext = null;
+            }
           }
         } catch {
           // Clean up partial AudioContext resources while preserving the authorized MediaStream
@@ -515,7 +596,39 @@ export class AIVoiceService {
     }
   }
 
+  private attachTrackEndedGuard(track: MediaStreamTrack, gen: number): void {
+    this.detachTrackEndedGuard();
+    if (!track || typeof track.addEventListener !== 'function') return;
+    const onEnded = () => {
+      if (this.isStaleSession(gen) || this.status === 'disconnected') return;
+      this.callbacks.onError?.('Microphone input stream ended unexpectedly. Text consultation remains active.');
+      this.stopSession();
+    };
+    try {
+      track.addEventListener('ended', onEnded, { once: true });
+      this.trackEndedCleanup = () => {
+        try {
+          track.removeEventListener('ended', onEnded);
+        } catch {
+          // ignore
+        }
+      };
+    } catch {
+      this.trackEndedCleanup = null;
+    }
+  }
+
+  private detachTrackEndedGuard(): void {
+    if (this.trackEndedCleanup) {
+      this.trackEndedCleanup();
+      this.trackEndedCleanup = null;
+    }
+  }
+
   private async resumeAudioContextSafely(ctx: AudioContext, timeoutMs: number): Promise<void> {
+    const state = ctx.state as string;
+    if (state === 'running' || state === 'closed') return;
+    if (typeof ctx.resume !== 'function') return;
     let timer: ReturnType<typeof setTimeout> | null = null;
     try {
       await Promise.race([
@@ -525,7 +638,7 @@ export class AIVoiceService {
         }),
       ]);
     } catch {
-      // Non-fatal: WebKit may keep AudioContext suspended when no hardware audio sink exists
+      // Non-fatal: WebKit may keep AudioContext suspended/interrupted when no hardware audio sink exists
     } finally {
       if (timer) clearTimeout(timer);
     }
@@ -788,6 +901,14 @@ export class AIVoiceService {
       this.callbacks.onDegradedNotice?.(
         'Realtime audio socket disconnected. Switched cleanly to fallback voice & text mode.'
       );
+      if (this.status !== 'disconnected' && this.status !== 'error') {
+        if (this.isMicMuted) {
+          this.setStatus('idle');
+          this.setLifecycleState('MUTED');
+        } else {
+          this.setStatus('listening');
+        }
+      }
       return;
     }
     this.wsReconnectAttempts += 1;
@@ -795,15 +916,33 @@ export class AIVoiceService {
     const delayMs = 800 * this.wsReconnectAttempts;
     this.wsReconnectTimer = setTimeout(() => {
       if (this.isStaleSession(gen)) return;
-      void this.connectLiveWebSocket(gen);
+      void this.connectLiveWebSocket(gen).then((reconnected) => {
+        if (this.isStaleSession(gen)) return;
+        if (reconnected) {
+          this.wsReconnectAttempts = 0;
+          this.transport = 'gemini_live_ws';
+          this.callbacks.onTransportChange?.('gemini_live_ws');
+          this.setLifecycleState('CONNECTED');
+          if (this.isMicMuted) {
+            this.setStatus('idle');
+            this.setLifecycleState('MUTED');
+          } else {
+            this.setStatus('listening');
+          }
+        } else {
+          this.scheduleLiveReconnect(gen);
+        }
+      });
     }, delayMs);
   }
 
   private schedulePcm24kPlayback(base64Pcm: string) {
     if (!this.playbackAudioContext) return;
     const ctx = this.playbackAudioContext;
-    if (ctx.state === 'suspended') {
-      void ctx.resume();
+    const ctxState = ctx.state as string;
+    if (ctxState === 'closed') return;
+    if (ctxState === 'suspended' || ctxState === 'interrupted') {
+      void this.resumeAudioContextSafely(ctx, 250);
     }
 
     const int16 = base64ToInt16Array(base64Pcm);
@@ -1009,6 +1148,8 @@ export class AIVoiceService {
       this.animationFrameId = null;
     }
 
+    this.detachTrackEndedGuard();
+
     if (this.mediaStream) {
       this.mediaStream.getTracks().forEach((track) => track.stop());
       this.mediaStream = null;
@@ -1016,6 +1157,7 @@ export class AIVoiceService {
 
     if (this.captureAudioContext && this.captureAudioContext.state !== 'closed') {
       try {
+        this.captureAudioContext.onstatechange = null;
         void this.captureAudioContext.close();
       } catch {
         // ignore

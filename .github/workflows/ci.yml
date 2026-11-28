@@ -150,14 +150,32 @@ jobs:
       - name: Install Playwright browsers (Chromium, Firefox, WebKit)
         run: npx playwright install --with-deps chromium firefox webkit
 
-      - name: Execute Playwright Multi-Browser Desktop, Tablet & Mobile E2E Suite
+      - name: Targeted WebKit Desktop & iPad Pro 11 Voice Stability Gate (3 consecutive runs, retries=0)
+        run: |
+          for i in 1 2 3; do
+            echo "=== Targeted WebKit + Tablet Voice Run ${i}/3 (retries=0) ==="
+            npx playwright test e2e/public-and-ai.spec.ts --project=webkit-desktop --project=tablet --retries=0
+          done
+
+      - name: Execute Playwright Multi-Browser Desktop, Tablet & Mobile E2E Suite (45 tests)
         run: npm run test:e2e
 
-      - name: Upload Playwright report and failure artifacts
+      - name: Upload compact Playwright JSON results summary
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: playwright-e2e-artifacts
+          name: playwright-e2e-results-json
+          path: playwright-report/results.json
+          if-no-files-found: ignore
+
+      - name: Upload compact failure artifacts (traces, screenshots, voice diagnostics)
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: playwright-e2e-failure-artifacts
           path: |
-            playwright-report/
-            test-results/
+            test-results/**/trace.zip
+            test-results/**/*.png
+            test-results/**/*.json
+            test-results/**/error-context.md
+          if-no-files-found: ignore

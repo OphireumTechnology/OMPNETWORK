@@ -259,10 +259,14 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
       );
       if (!success) {
         setVoiceStatus('disconnected');
+        setVoiceLifecycle(aiVoiceService.getLifecycleState());
         setIsMicMuted(false);
       } else {
         setVoiceConsentPending(false);
+        setVoiceStatus(aiVoiceService.getStatus());
+        setVoiceLifecycle(aiVoiceService.getLifecycleState());
         setIsMicMuted(aiVoiceService.getIsMicMuted());
+        setIsSpeakerMuted(aiVoiceService.getIsSpeakerMuted());
         const devices = await aiVoiceService.listAudioInputDevices();
         setAudioDevices(devices);
         setSelectedDeviceId(aiVoiceService.getSelectedDeviceId());
@@ -287,15 +291,15 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
   };
 
   const handleToggleMic = () => {
-    const next = !isMicMuted;
-    setIsMicMuted(next);
+    const next = !aiVoiceService.getIsMicMuted();
     aiVoiceService.setMicMuted(next);
+    setIsMicMuted(aiVoiceService.getIsMicMuted());
   };
 
   const handleToggleSpeaker = () => {
-    const next = !isSpeakerMuted;
-    setIsSpeakerMuted(next);
+    const next = !aiVoiceService.getIsSpeakerMuted();
     aiVoiceService.setSpeakerMuted(next);
+    setIsSpeakerMuted(aiVoiceService.getIsSpeakerMuted());
   };
 
   const handleLanguageChange = (lang: VoiceLanguage) => {
@@ -884,37 +888,41 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
               {isVoiceActive ? (
                 <div
                   data-testid="voice-active-controls"
+                  data-voice-status={voiceStatus}
                   data-voice-lifecycle={voiceLifecycle}
+                  data-mic-muted={String(isMicMuted)}
+                  data-speaker-muted={String(isSpeakerMuted)}
                   className="px-4 py-3 bg-[#111827] border-t border-cyan-500/30 flex flex-col gap-2.5"
                 >
                   {/* Status & Live Audio Waveform Strip */}
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
-                      {voiceStatus === 'connecting' && (
+                      {voiceLifecycle === 'RECONNECTING' ? (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-mono font-bold text-amber-300">
+                          <span className="w-2 h-2 rounded-full bg-amber-300 animate-pulse" />
+                          <span>RECONNECTING</span>
+                        </span>
+                      ) : voiceStatus === 'connecting' ? (
                         <span className="inline-flex items-center gap-1.5 text-xs font-mono font-bold text-[#00C2C7]">
                           <span className="w-2 h-2 rounded-full bg-[#00C2C7] animate-pulse" />
                           <span>CONNECTING</span>
                         </span>
-                      )}
-                      {voiceStatus === 'listening' && (
+                      ) : voiceStatus === 'listening' ? (
                         <span className="inline-flex items-center gap-1.5 text-xs font-mono font-bold text-emerald-400">
                           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
                           <span>LISTENING</span>
                         </span>
-                      )}
-                      {voiceStatus === 'thinking' && (
+                      ) : voiceStatus === 'thinking' ? (
                         <span className="inline-flex items-center gap-1.5 text-xs font-mono font-bold text-amber-400">
                           <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
                           <span>ARCHITECTING</span>
                         </span>
-                      )}
-                      {voiceStatus === 'speaking' && (
+                      ) : voiceStatus === 'speaking' ? (
                         <span className="inline-flex items-center gap-1.5 text-xs font-mono font-bold text-[#00C2C7]">
                           <Volume2 className="w-3.5 h-3.5 animate-bounce" />
                           <span>SPEAKING</span>
                         </span>
-                      )}
-                      {voiceStatus === 'idle' && (
+                      ) : (
                         <span className="inline-flex items-center gap-1.5 text-xs font-mono text-slate-400">
                           <span className="w-2 h-2 rounded-full bg-slate-500" />
                           <span>{isMicMuted ? 'MIC MUTED' : 'VOICE READY'}</span>
