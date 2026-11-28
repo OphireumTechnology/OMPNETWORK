@@ -549,4 +549,152 @@ describe('Phases 21–24: Persistent AI Conversations, Realtime Live Voice WebSo
       }
     }
   });
+
+  it('Recovery 12.0: AIVoiceService completes full IDLE->REQUESTING_PERMISSION->INITIALIZING->CONNECTING->CONNECTED->LISTENING->MUTED->LISTENING->ENDING->ENDED lifecycle with real track toggling and WebKit AudioContext fault resilience', async () => {
+    const origNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    const origWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const origFetch = globalThis.fetch;
+
+    const track = {
+      kind: 'audio',
+      enabled: true,
+      readyState: 'live' as 'live' | 'ended',
+      stop() {
+        this.readyState = 'ended';
+        this.enabled = false;
+      },
+    };
+    const fakeStream = {
+      getTracks: () => [track],
+      getAudioTracks: () => [track],
+    };
+
+    let denyNextMic = false;
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: {
+        mediaDevices: {
+          getUserMedia: async () => {
+            if (denyNextMic) {
+              const err = new Error('Permission denied');
+              err.name = 'NotAllowedError';
+              throw err;
+            }
+            return fakeStream;
+          },
+        },
+      },
+    });
+
+    // Simulate WebKit headless AudioContext where resume() hangs and createMediaStreamSource throws InvalidStateError
+    class HangingWebKitAudioContext {
+      state = 'suspended';
+      resume() {
+        return new Promise<void>(() => {
+          // Intentionally never resolves (mirrors headless Linux WebKit without ALSA/PulseAudio sink)
+        });
+      }
+      createMediaStreamSource() {
+        const err = new Error('MediaStream has no playable audio destination');
+        err.name = 'InvalidStateError';
+        throw err;
+      }
+      close() {
+        this.state = 'closed';
+        return Promise.resolve();
+      }
+    }
+
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        isSecureContext: true,
+        location: { hostname: '127.0.0.1', protocol: 'http:', host: '127.0.0.1:3000' },
+        AudioContext: HangingWebKitAudioContext,
+      },
+    });
+
+    globalThis.fetch = (async () => ({
+      ok: true,
+      json: async () => ({
+        sessionId: 'webkit-lifecycle-session',
+        sessionToken: 'webkit-lifecycle-token-12345678901234567890',
+        serverGeminiAvailable: false,
+      }),
+    })) as unknown as typeof fetch;
+
+    try {
+      const voice = new AIVoiceService();
+      const transitions: VoiceLifecycleState[] = [];
+      voice.setCallbacks({
+        onLifecycleChange: (s) => transitions.push(s),
+      });
+
+      assert.equal(voice.getLifecycleState(), 'IDLE');
+      const started = await voice.startSession('webkit-lifecycle-session');
+      assert.equal(started, true, 'Session must remain active when getUserMedia succeeds even if WebKit AudioContext fails');
+      assert.equal(voice.hasActiveAudioTrack(), true);
+      assert.equal(voice.isAudioTrackEnabled(), true);
+      assert.equal(track.enabled, true);
+
+      // Mute -> verify actual track.enabled flips to false and lifecycle transitions to MUTED
+      voice.setMicMuted(true);
+      assert.equal(track.enabled, false);
+      assert.equal(voice.isAudioTrackEnabled(), false);
+      assert.equal(voice.getLifecycleState(), 'MUTED');
+      assert.notEqual(voice.getStatus(), 'disconnected');
+
+      // Unmute -> verify actual track.enabled flips back to true and lifecycle returns to LISTENING
+      voice.setMicMuted(false);
+      assert.equal(track.enabled, true);
+      assert.equal(voice.isAudioTrackEnabled(), true);
+      assert.equal(voice.getLifecycleState(), 'LISTENING');
+
+      // Stop -> verify ENDING -> ENDED -> IDLE and track.stop() executed
+      voice.stopSession();
+      assert.equal(track.readyState, 'ended');
+      assert.equal(voice.getStatus(), 'disconnected');
+      assert.equal(voice.getLifecycleState(), 'IDLE');
+
+      // Verify exact lifecycle sequence milestone progression
+      const requiredSequence: VoiceLifecycleState[] = [
+        'REQUESTING_PERMISSION',
+        'INITIALIZING',
+        'CONNECTING',
+        'CONNECTED',
+        'LISTENING',
+        'MUTED',
+        'LISTENING',
+        'ENDING',
+        'ENDED',
+      ];
+      let cursor = -1;
+      for (const expected of requiredSequence) {
+        const nextIdx = transitions.indexOf(expected, cursor + 1);
+        assert.ok(
+          nextIdx > cursor,
+          `Expected lifecycle transition ${expected} after index ${cursor}; actual transitions: ${transitions.join(' -> ')}`
+        );
+        cursor = nextIdx;
+      }
+
+      // Verify permission denial fails honestly (never fabricates connected state)
+      denyNextMic = true;
+      const deniedResult = await voice.startSession('webkit-denied-session');
+      assert.equal(deniedResult, false);
+      assert.equal(voice.getStatus(), 'disconnected');
+    } finally {
+      globalThis.fetch = origFetch;
+      if (origNavigatorDescriptor) {
+        Object.defineProperty(globalThis, 'navigator', origNavigatorDescriptor);
+      } else {
+        delete (globalThis as Record<string, unknown>).navigator;
+      }
+      if (origWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', origWindowDescriptor);
+      } else {
+        delete (globalThis as Record<string, unknown>).window;
+      }
+    }
+  });
 });

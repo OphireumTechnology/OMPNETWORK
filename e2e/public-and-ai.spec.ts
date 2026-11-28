@@ -126,13 +126,17 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
     page,
     browserName,
   }, testInfo) => {
-    // Headless WebKit on Linux (Desktop Safari + iPad Pro 11 tablet) lacks a virtual microphone CLI flag;
-    // supply a controlled test-only MediaStream fixture lazily inside getUserMedia (never in production source)
+    // Headless WebKit on Linux (Desktop Safari + iPad Pro 11 tablet) lacks virtual microphone CLI flags and
+    // unsupported permissions API; install a controlled test-only MediaStream fixture (never in production code)
+    // that retains audio resources until track.stop() and guarantees a live mutable audio track.
     if (browserName === 'webkit') {
       await page.addInitScript(() => {
-        const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-        const originalGetUserMedia = navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices);
-        const createControlledStream = () => {
+        const AudioCtx =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        const retainedContexts: Array<{ ctx: AudioContext; osc: OscillatorNode }> = [];
+
+        const createControlledStream = (): MediaStream => {
           if (AudioCtx) {
             try {
               const ctx = new AudioCtx();
@@ -141,34 +145,135 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
               osc.frequency.value = 440;
               osc.connect(dest);
               osc.start();
-              return dest.stream;
+              const stream = dest.stream;
+              const audioTracks = stream.getAudioTracks();
+              if (audioTracks.length > 0 && audioTracks[0].readyState === 'live') {
+                const entry = { ctx, osc };
+                retainedContexts.push(entry);
+                const origStop = audioTracks[0].stop.bind(audioTracks[0]);
+                audioTracks[0].stop = () => {
+                  origStop();
+                  try {
+                    osc.stop();
+                  } catch {
+                    // ignore
+                  }
+                  try {
+                    void ctx.close();
+                  } catch {
+                    // ignore
+                  }
+                  const idx = retainedContexts.indexOf(entry);
+                  if (idx >= 0) retainedContexts.splice(idx, 1);
+                };
+                return stream;
+              }
+              try {
+                osc.stop();
+                void ctx.close();
+              } catch {
+                // ignore
+              }
             } catch {
-              // Fall back cleanly if headless WebKit restricts AudioContext construction
+              // Headless WebKit on Linux without an audio backend may fail Web Audio destination creation
             }
           }
-          return new MediaStream();
+
+          // Fallback controlled MediaStream-compatible test double with a genuine mutable live audio track
+          const track = {
+            id: `webkit-test-track-${Date.now()}`,
+            kind: 'audio',
+            label: 'WebKit Test Microphone',
+            enabled: true,
+            muted: false,
+            readyState: 'live' as 'live' | 'ended',
+            stop() {
+              this.readyState = 'ended';
+              this.enabled = false;
+            },
+            addEventListener() {},
+            removeEventListener() {},
+            dispatchEvent() {
+              return true;
+            },
+            clone() {
+              return { ...this };
+            },
+            getCapabilities() {
+              return {};
+            },
+            getConstraints() {
+              return {};
+            },
+            getSettings() {
+              return { deviceId: 'webkit-test-mic', channelCount: 1, sampleRate: 48000 };
+            },
+            applyConstraints: async () => {},
+          };
+
+          const controlledStream = {
+            id: `webkit-test-stream-${Date.now()}`,
+            active: true,
+            getTracks: () => [track],
+            getAudioTracks: () => [track],
+            getVideoTracks: () => [],
+            getTrackById: (id: string) => (id === track.id ? track : null),
+            addTrack() {},
+            removeTrack() {},
+            clone() {
+              return this;
+            },
+            addEventListener() {},
+            removeEventListener() {},
+            dispatchEvent() {
+              return true;
+            },
+          };
+
+          return controlledStream as unknown as MediaStream;
         };
+
+        const testEnumerateDevices = async () => [
+          {
+            deviceId: 'webkit-test-mic',
+            kind: 'audioinput' as const,
+            label: 'WebKit Test Microphone',
+            groupId: 'webkit-test',
+            toJSON: () => ({ deviceId: 'webkit-test-mic', kind: 'audioinput', label: 'WebKit Test Microphone' }),
+          },
+        ];
+
+        const testGetUserMedia = async () => createControlledStream();
+
         if (!navigator.mediaDevices) {
           Object.defineProperty(navigator, 'mediaDevices', {
             configurable: true,
             value: {
-              getUserMedia: async () => createControlledStream(),
-              enumerateDevices: async () => [
-                { deviceId: 'webkit-test-mic', kind: 'audioinput', label: 'WebKit Test Microphone', groupId: 'test', toJSON: () => ({}) },
-              ],
+              getUserMedia: testGetUserMedia,
+              enumerateDevices: testEnumerateDevices,
             },
           });
         } else {
-          navigator.mediaDevices.getUserMedia = async (constraints: MediaStreamConstraints) => {
-            if (originalGetUserMedia) {
-              try {
-                return await originalGetUserMedia(constraints);
-              } catch {
-                return createControlledStream();
-              }
-            }
-            return createControlledStream();
-          };
+          try {
+            Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
+              configurable: true,
+              writable: true,
+              value: testGetUserMedia,
+            });
+            Object.defineProperty(navigator.mediaDevices, 'enumerateDevices', {
+              configurable: true,
+              writable: true,
+              value: testEnumerateDevices,
+            });
+          } catch {
+            Object.defineProperty(navigator, 'mediaDevices', {
+              configurable: true,
+              value: {
+                getUserMedia: testGetUserMedia,
+                enumerateDevices: testEnumerateDevices,
+              },
+            });
+          }
         }
       });
     }
@@ -232,13 +337,22 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
     await expect(confirmConsentBtn).toBeVisible();
     await confirmConsentBtn.click();
 
-    // Mute and unmute mic, then end voice cleanly
-    const muteMicBtn = page.getByTitle(/Mute Microphone/i);
+    // Mute, verify Unmute + aria-pressed, unmute back to active listening, then end voice cleanly
+    const muteMicBtn = page.getByRole('button', { name: 'Mute Microphone' });
     await expect(muteMicBtn).toBeVisible({ timeout: 10_000 });
+    await expect(muteMicBtn).toHaveAttribute('aria-pressed', 'false');
     await muteMicBtn.click();
-    await expect(page.getByTitle(/Unmute Microphone/i)).toBeVisible();
 
-    const endVoiceBtn = page.getByTitle(/End Voice Conversation/i);
+    const unmuteMicBtn = page.getByRole('button', { name: 'Unmute Microphone' });
+    await expect(unmuteMicBtn).toBeVisible();
+    await expect(unmuteMicBtn).toHaveAttribute('aria-pressed', 'true');
+    await unmuteMicBtn.click();
+
+    await expect(page.getByRole('button', { name: 'Mute Microphone' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Mute Microphone' })).toHaveAttribute('aria-pressed', 'false');
+
+    const endVoiceBtn = page.getByRole('button', { name: 'End Voice Conversation' });
+    await expect(endVoiceBtn).toBeVisible();
     await endVoiceBtn.click();
     await expect(page.getByRole('button', { name: /Start Voice/i })).toBeVisible();
   });

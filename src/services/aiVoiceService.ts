@@ -246,11 +246,15 @@ export class AIVoiceService {
       if (this.status === 'listening') {
         this.setStatus('idle');
       }
-      if (this.status !== 'disconnected') {
+      if (this.status !== 'disconnected' && this.status !== 'error') {
         this.setLifecycleState('MUTED');
       }
-    } else if (this.status !== 'disconnected') {
-      this.setLifecycleState('CONNECTED');
+    } else if (this.status !== 'disconnected' && this.status !== 'error') {
+      if (this.status === 'idle') {
+        this.setStatus('listening');
+      } else {
+        this.setLifecycleState('LISTENING');
+      }
     }
   }
 
@@ -259,7 +263,7 @@ export class AIVoiceService {
     if (muted) {
       this.cancelSpeech();
       if (this.status === 'speaking') {
-        this.setStatus('idle');
+        this.setStatus(this.isMicMuted ? 'idle' : 'listening');
       }
     }
   }
@@ -270,6 +274,22 @@ export class AIVoiceService {
 
   public getIsSpeakerMuted(): boolean {
     return this.isSpeakerMuted;
+  }
+
+  public hasActiveAudioTrack(): boolean {
+    if (!this.mediaStream || typeof this.mediaStream.getAudioTracks !== 'function') {
+      return false;
+    }
+    const tracks = this.mediaStream.getAudioTracks();
+    return tracks.some((t) => t.readyState !== 'ended');
+  }
+
+  public isAudioTrackEnabled(): boolean {
+    if (!this.mediaStream || typeof this.mediaStream.getAudioTracks !== 'function') {
+      return false;
+    }
+    const tracks = this.mediaStream.getAudioTracks();
+    return tracks.length > 0 && tracks.every((t) => t.enabled);
   }
 
   private isStaleSession(gen: number): boolean {
@@ -316,50 +336,60 @@ export class AIVoiceService {
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
       if (this.isStaleSession(gen)) {
-        stream.getTracks().forEach((track) => track.stop());
+        stream?.getTracks?.().forEach((track) => track.stop());
         return false;
+      }
+      const audioTracks = typeof stream?.getAudioTracks === 'function' ? stream.getAudioTracks() : [];
+      if (!stream || audioTracks.length === 0) {
+        stream?.getTracks?.().forEach((track) => track.stop());
+        const err = new Error('No active microphone audio track was returned by the browser.');
+        err.name = 'NotFoundError';
+        throw err;
       }
       this.mediaStream = stream;
       this.setLifecycleState('INITIALIZING');
 
+      // Web Audio visualizer & PCM capture pipeline are non-fatal enhancements once a real MediaStream
+      // audio track has been acquired — WebKit/Safari audio-graph restrictions must not kill an active mic session.
       const AudioContextClass =
         typeof window !== 'undefined'
           ? window.AudioContext || (window as any).webkitAudioContext
           : undefined;
       if (AudioContextClass) {
-        const captureCtx = new AudioContextClass();
-        this.captureAudioContext = captureCtx;
-        if (captureCtx.state === 'suspended') {
-          try {
-            await captureCtx.resume();
-          } catch {
-            // Headless WebKit may keep AudioContext suspended; continue safely
-          }
-        }
-        if (this.isStaleSession(gen)) {
-          try {
-            void captureCtx.close();
-          } catch {
-            // ignore
-          }
-          return false;
-        }
-        const source = captureCtx.createMediaStreamSource(stream);
-        this.mediaStreamSource = source;
-        this.analyser = captureCtx.createAnalyser();
-        this.analyser.fftSize = 64;
-        source.connect(this.analyser);
-        this.startVolumeMonitoring(gen);
-        await this.setupPcmCapturePipeline(source, gen);
-        if (this.isStaleSession(gen)) {
-          return false;
-        }
-
-        // Dedicated 24kHz AudioContext for gapless Gemini Live PCM output playback
         try {
-          this.playbackAudioContext = new AudioContextClass({ sampleRate: 24000 });
+          const captureCtx = new AudioContextClass();
+          this.captureAudioContext = captureCtx;
+          if (captureCtx.state === 'suspended') {
+            await this.resumeAudioContextSafely(captureCtx, 400);
+          }
+          if (this.isStaleSession(gen)) {
+            try {
+              void captureCtx.close();
+            } catch {
+              // ignore
+            }
+            return false;
+          }
+          const source = captureCtx.createMediaStreamSource(stream);
+          this.mediaStreamSource = source;
+          this.analyser = captureCtx.createAnalyser();
+          this.analyser.fftSize = 64;
+          source.connect(this.analyser);
+          this.startVolumeMonitoring(gen);
+          await this.setupPcmCapturePipeline(source, gen);
+          if (this.isStaleSession(gen)) {
+            return false;
+          }
+
+          // Dedicated 24kHz AudioContext for gapless Gemini Live PCM output playback
+          try {
+            this.playbackAudioContext = new AudioContextClass({ sampleRate: 24000 });
+          } catch {
+            this.playbackAudioContext = new AudioContextClass();
+          }
         } catch {
-          this.playbackAudioContext = new AudioContextClass();
+          // Clean up partial AudioContext resources while preserving the authorized MediaStream
+          this.cleanupAudioContextNodesOnly();
         }
       }
 
@@ -426,7 +456,10 @@ export class AIVoiceService {
         this.transport = 'gemini_live_ws';
         this.callbacks.onTransportChange?.('gemini_live_ws');
         this.setLifecycleState('CONNECTED');
-        this.setStatus('idle');
+        this.setStatus(this.isMicMuted ? 'idle' : 'listening');
+        if (this.isMicMuted) {
+          this.setLifecycleState('MUTED');
+        }
         return true;
       }
 
@@ -443,7 +476,10 @@ export class AIVoiceService {
       }
 
       this.setLifecycleState('CONNECTED');
-      this.setStatus('idle');
+      this.setStatus(this.isMicMuted ? 'idle' : 'listening');
+      if (this.isMicMuted) {
+        this.setLifecycleState('MUTED');
+      }
       const greeting = this.language.startsWith('fil')
         ? 'Magandang araw po. Ako ang inyong OPHIREUM AI Solutions Consultant. Paano ko po matutulungan ang inyong multimedia o software development project ngayon?'
         : 'Welcome to OPHIREUM MULTIMEDIA PRODUCTION. I am your AI Solutions Consultant. How can I assist with your creative media, AI, or enterprise software project today?';
@@ -476,6 +512,77 @@ export class AIVoiceService {
       if (gen === this.sessionGeneration) {
         this.isStarting = false;
       }
+    }
+  }
+
+  private async resumeAudioContextSafely(ctx: AudioContext, timeoutMs: number): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      await Promise.race([
+        ctx.resume(),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, timeoutMs);
+        }),
+      ]);
+    } catch {
+      // Non-fatal: WebKit may keep AudioContext suspended when no hardware audio sink exists
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  private cleanupAudioContextNodesOnly(): void {
+    if (this.animationFrameId) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
+    if (this.mediaStreamSource) {
+      try {
+        this.mediaStreamSource.disconnect();
+      } catch {
+        // ignore
+      }
+      this.mediaStreamSource = null;
+    }
+    if (this.analyser) {
+      try {
+        this.analyser.disconnect();
+      } catch {
+        // ignore
+      }
+      this.analyser = null;
+    }
+    if (this.workletNode) {
+      try {
+        this.workletNode.disconnect();
+      } catch {
+        // ignore
+      }
+      this.workletNode = null;
+    }
+    if (this.scriptProcessor) {
+      try {
+        this.scriptProcessor.disconnect();
+      } catch {
+        // ignore
+      }
+      this.scriptProcessor = null;
+    }
+    if (this.captureAudioContext && this.captureAudioContext.state !== 'closed') {
+      try {
+        void this.captureAudioContext.close();
+      } catch {
+        // ignore
+      }
+      this.captureAudioContext = null;
+    }
+    if (this.playbackAudioContext && this.playbackAudioContext.state !== 'closed') {
+      try {
+        void this.playbackAudioContext.close();
+      } catch {
+        // ignore
+      }
+      this.playbackAudioContext = null;
     }
   }
 
@@ -1031,8 +1138,13 @@ export class AIVoiceService {
   }
 
   public async speakText(text: string, restartRecognitionAfter = true) {
+    const gen = this.sessionGeneration;
+    if (this.isStaleSession(gen) || this.status === 'disconnected') {
+      return;
+    }
     if (this.isSpeakerMuted) {
-      this.setStatus('idle');
+      this.setStatus(this.isMicMuted ? 'idle' : 'listening');
+      if (this.isMicMuted) this.setLifecycleState('MUTED');
       return;
     }
 
@@ -1055,14 +1167,21 @@ export class AIVoiceService {
       .trim();
 
     const finishSpeaking = () => {
-      if (this.status !== 'disconnected') {
+      if (this.isStaleSession(gen) || this.status === 'disconnected') {
+        return;
+      }
+      if (this.isMicMuted) {
         this.setStatus('idle');
+        this.setLifecycleState('MUTED');
+      } else {
+        this.setStatus('listening');
       }
       if (
         restartRecognitionAfter &&
         this.recognition &&
         !this.isMicMuted &&
-        this.status !== 'disconnected'
+        !this.isStaleSession(gen) &&
+        this.getStatus() !== 'disconnected'
       ) {
         this.startRecognitionSafe();
       }
@@ -1077,6 +1196,7 @@ export class AIVoiceService {
           body: JSON.stringify({ text: cleanText.slice(0, 600), language: this.language }),
           signal: this.speakAbortController.signal,
         });
+        if (this.isStaleSession(gen)) return;
         if (res.ok) {
           const ct = res.headers.get('content-type') || '';
           let audioBlob: Blob | null = null;
@@ -1091,6 +1211,7 @@ export class AIVoiceService {
               audioBlob = new Blob([bytes], { type: payload.mimeType || 'audio/wav' });
             }
           }
+          if (this.isStaleSession(gen)) return;
           if (audioBlob) {
             const objectUrl = URL.createObjectURL(audioBlob);
             this.currentAudioUrl = objectUrl;
@@ -1102,54 +1223,67 @@ export class AIVoiceService {
             };
             audio.onerror = () => {
               this.cleanupCurrentAudio();
-              this.speakWithBrowserSynthesis(cleanText, finishSpeaking);
+              if (!this.isStaleSession(gen)) {
+                this.speakWithBrowserSynthesis(cleanText, finishSpeaking, gen);
+              }
             };
             await audio.play();
             return;
           }
         }
       } catch (err: any) {
-        if (err?.name === 'AbortError') return;
+        if (err?.name === 'AbortError' || this.isStaleSession(gen)) return;
       }
     }
 
-    this.speakWithBrowserSynthesis(cleanText, finishSpeaking);
+    if (this.isStaleSession(gen)) return;
+    this.speakWithBrowserSynthesis(cleanText, finishSpeaking, gen);
   }
 
-  private speakWithBrowserSynthesis(cleanText: string, onDone: () => void) {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+  private speakWithBrowserSynthesis(cleanText: string, onDone: () => void, gen: number) {
+    if (
+      this.isStaleSession(gen) ||
+      typeof window === 'undefined' ||
+      !('speechSynthesis' in window) ||
+      typeof SpeechSynthesisUtterance === 'undefined'
+    ) {
       onDone();
       return;
     }
 
-    const utterance = new SpeechSynthesisUtterance(cleanText);
-    this.currentUtterance = utterance;
+    try {
+      const utterance = new SpeechSynthesisUtterance(cleanText);
+      this.currentUtterance = utterance;
 
-    const voices = window.speechSynthesis.getVoices();
-    if (this.language.startsWith('fil')) {
-      const filVoice = voices.find(
-        (v) => v.lang.includes('fil') || v.lang.includes('tl') || v.name.includes('Filipino')
-      );
-      if (filVoice) utterance.voice = filVoice;
-    } else {
-      const enVoice = voices.find(
-        (v) =>
-          (v.lang.includes('en-US') || v.lang.includes('en-GB') || v.lang.includes('en')) &&
-          (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Samantha'))
-      );
-      if (enVoice) utterance.voice = enVoice;
+      const voices = window.speechSynthesis.getVoices?.() || [];
+      if (this.language.startsWith('fil')) {
+        const filVoice = voices.find(
+          (v) => v.lang.includes('fil') || v.lang.includes('tl') || v.name.includes('Filipino')
+        );
+        if (filVoice) utterance.voice = filVoice;
+      } else {
+        const enVoice = voices.find(
+          (v) =>
+            (v.lang.includes('en-US') || v.lang.includes('en-GB') || v.lang.includes('en')) &&
+            (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Samantha'))
+        );
+        if (enVoice) utterance.voice = enVoice;
+      }
+
+      utterance.onend = () => {
+        this.currentUtterance = null;
+        if (!this.isStaleSession(gen)) onDone();
+      };
+      utterance.onerror = () => {
+        this.currentUtterance = null;
+        if (!this.isStaleSession(gen)) onDone();
+      };
+
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      this.currentUtterance = null;
+      if (!this.isStaleSession(gen)) onDone();
     }
-
-    utterance.onend = () => {
-      this.currentUtterance = null;
-      onDone();
-    };
-    utterance.onerror = () => {
-      this.currentUtterance = null;
-      onDone();
-    };
-
-    window.speechSynthesis.speak(utterance);
   }
 
   private cleanupCurrentAudio() {

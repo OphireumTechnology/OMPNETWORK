@@ -18,6 +18,7 @@ import { supabaseService, ProjectBrief, ConsultationAppointment } from '../../se
 import {
   aiVoiceService,
   AudioInputDeviceOption,
+  VoiceLifecycleState,
   VoiceState,
   VoiceLanguage,
   VoiceTransportKind,
@@ -45,6 +46,7 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
 
   // Voice State
   const [voiceStatus, setVoiceStatus] = useState<VoiceState>('disconnected');
+  const [voiceLifecycle, setVoiceLifecycle] = useState<VoiceLifecycleState>('IDLE');
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [isSpeakerMuted, setIsSpeakerMuted] = useState(false);
   const [audioVolume, setAudioVolume] = useState(0);
@@ -109,7 +111,12 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
         setVoiceStatus(status);
         if (status === 'disconnected') {
           setLiveTranscript('');
+          setIsMicMuted(false);
+          setIsPushToTalkActive(false);
         }
+      },
+      onLifecycleChange: (lifecycle) => {
+        setVoiceLifecycle(lifecycle);
       },
       onTranscript: (text, isFinal) => {
         setLiveTranscript(text);
@@ -252,8 +259,10 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
       );
       if (!success) {
         setVoiceStatus('disconnected');
+        setIsMicMuted(false);
       } else {
         setVoiceConsentPending(false);
+        setIsMicMuted(aiVoiceService.getIsMicMuted());
         const devices = await aiVoiceService.listAudioInputDevices();
         setAudioDevices(devices);
         setSelectedDeviceId(aiVoiceService.getSelectedDeviceId());
@@ -873,10 +882,20 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
                   REAL-TIME VOICE CONTROL & WAVEFORM CENTER
                   ========================================================================= */}
               {isVoiceActive ? (
-                <div className="px-4 py-3 bg-[#111827] border-t border-cyan-500/30 flex flex-col gap-2.5">
+                <div
+                  data-testid="voice-active-controls"
+                  data-voice-lifecycle={voiceLifecycle}
+                  className="px-4 py-3 bg-[#111827] border-t border-cyan-500/30 flex flex-col gap-2.5"
+                >
                   {/* Status & Live Audio Waveform Strip */}
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
+                      {voiceStatus === 'connecting' && (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-mono font-bold text-[#00C2C7]">
+                          <span className="w-2 h-2 rounded-full bg-[#00C2C7] animate-pulse" />
+                          <span>CONNECTING</span>
+                        </span>
+                      )}
                       {voiceStatus === 'listening' && (
                         <span className="inline-flex items-center gap-1.5 text-xs font-mono font-bold text-emerald-400">
                           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
@@ -898,7 +917,7 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
                       {voiceStatus === 'idle' && (
                         <span className="inline-flex items-center gap-1.5 text-xs font-mono text-slate-400">
                           <span className="w-2 h-2 rounded-full bg-slate-500" />
-                          <span>VOICE READY</span>
+                          <span>{isMicMuted ? 'MIC MUTED' : 'VOICE READY'}</span>
                         </span>
                       )}
                     </div>
@@ -929,12 +948,14 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
                     <div className="flex items-center gap-1">
                       {!aiVoiceService.supportsNativeSpeechRecognition() && (
                         <button
+                          type="button"
                           onClick={handleTogglePushToTalk}
                           className={`px-2 py-1 rounded-lg border text-[10px] font-mono flex items-center gap-1 cursor-pointer transition-colors ${
                             isPushToTalkActive
                               ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300'
                               : 'bg-slate-800 border-slate-700 text-slate-200 hover:text-white'
                           }`}
+                          aria-label={isPushToTalkActive ? 'Stop Recording Voice Clip' : 'Record Voice Clip'}
                           title="Record voice clip for server transcription"
                         >
                           <Mic className="w-2.5 h-2.5" />
@@ -944,8 +965,10 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
 
                       {voiceStatus === 'speaking' && (
                         <button
+                          type="button"
                           onClick={handleInterruptAi}
                           className="px-2 py-1 rounded-lg bg-amber-950/80 hover:bg-amber-900 border border-amber-600/50 text-amber-300 text-[10px] font-mono flex items-center gap-1 cursor-pointer transition-colors"
+                          aria-label="Interrupt AI speaking"
                           title="Interrupt AI speaking"
                         >
                           <Square className="w-2.5 h-2.5 fill-current" />
@@ -954,7 +977,11 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
                       )}
 
                       <button
+                        type="button"
+                        data-testid="voice-mute-toggle"
                         onClick={handleToggleMic}
+                        aria-label={isMicMuted ? 'Unmute Microphone' : 'Mute Microphone'}
+                        aria-pressed={isMicMuted}
                         className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
                           isMicMuted
                             ? 'bg-rose-950/70 border-rose-500/50 text-rose-400 hover:bg-rose-900'
@@ -966,7 +993,10 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
                       </button>
 
                       <button
+                        type="button"
                         onClick={handleToggleSpeaker}
+                        aria-label={isSpeakerMuted ? 'Unmute Speaker Output' : 'Mute Speaker Output'}
+                        aria-pressed={isSpeakerMuted}
                         className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
                           isSpeakerMuted
                             ? 'bg-rose-950/70 border-rose-500/50 text-rose-400 hover:bg-rose-900'
@@ -978,7 +1008,10 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
                       </button>
 
                       <button
+                        type="button"
+                        data-testid="voice-end-button"
                         onClick={handleToggleVoice}
+                        aria-label="End Voice Conversation"
                         className="px-2.5 py-1 rounded-lg bg-rose-900/60 hover:bg-rose-800 border border-rose-700/60 text-white text-[11px] font-mono flex items-center gap-1 cursor-pointer transition-colors"
                         title="End Voice Conversation"
                       >
