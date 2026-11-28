@@ -215,18 +215,18 @@ export const ServicesSection: React.FC<ServicesSectionProps> = ({
             <button
               type="button"
               onClick={() => setIsBuilderOpen(true)}
-              className="inline-flex items-center gap-2 px-5 py-3 text-xs sm:text-sm font-semibold text-white bg-[#111827] hover:bg-slate-800 border border-slate-700 hover:border-[#D4AF37]/60 rounded-lg transition-colors cursor-pointer whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00C2C7]"
+              className="inline-flex items-center gap-2 px-4 sm:px-5 py-3 text-xs sm:text-sm font-semibold text-white bg-[#111827] hover:bg-slate-800 border border-slate-700 hover:border-[#D4AF37]/60 rounded-lg transition-colors cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00C2C7]"
             >
-              <Layers className="w-4 h-4 text-[#D4AF37]" />
+              <Layers className="w-4 h-4 text-[#D4AF37] shrink-0" />
               <span>Request a Personalized Proposal</span>
             </button>
 
             <button
               type="button"
               onClick={() => onOpenAIConsultant()}
-              className="inline-flex items-center gap-2 px-5 py-3 text-xs sm:text-sm font-semibold text-[#00C2C7] hover:text-white bg-transparent hover:bg-[#00C2C7]/10 border border-[#00C2C7]/45 rounded-lg transition-colors cursor-pointer whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00C2C7]"
+              className="inline-flex items-center gap-2 px-4 sm:px-5 py-3 text-xs sm:text-sm font-semibold text-[#00C2C7] hover:text-white bg-transparent hover:bg-[#00C2C7]/10 border border-[#00C2C7]/45 rounded-lg transition-colors cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00C2C7]"
             >
-              <Bot className="w-4 h-4" />
+              <Bot className="w-4 h-4 shrink-0" />
               <span>Speak With Our AI Solutions Consultant</span>
             </button>
           </div>
@@ -665,14 +665,14 @@ export const ServicesSection: React.FC<ServicesSectionProps> = ({
             <button
               type="button"
               onClick={() => setIsBuilderOpen(true)}
-              className="px-5 py-2.5 rounded-lg bg-[#D4AF37] hover:bg-[#e3be48] text-[#0B1220] text-xs sm:text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap"
+              className="px-4 sm:px-5 py-2.5 rounded-lg bg-[#D4AF37] hover:bg-[#e3be48] text-[#0B1220] text-xs sm:text-sm font-semibold transition-colors cursor-pointer"
             >
               Request a Personalized Proposal
             </button>
             <button
               type="button"
               onClick={() => onOpenAIConsultant()}
-              className="px-5 py-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-[#00C2C7]/45 text-[#00C2C7] hover:text-white text-xs sm:text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap"
+              className="px-4 sm:px-5 py-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-[#00C2C7]/45 text-[#00C2C7] hover:text-white text-xs sm:text-sm font-semibold transition-colors cursor-pointer"
             >
               Speak With Our AI Solutions Consultant
             </button>

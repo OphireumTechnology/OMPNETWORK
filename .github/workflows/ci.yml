@@ -67,6 +67,14 @@ jobs:
             echo "Forbidden live_payments_enabled=true default detected in SQL migrations!"
             exit 1
           fi
+          if [ -d public/assets/aistudio ] || [ -d dist/assets/aistudio ]; then
+            echo "Forbidden development assets/aistudio directory detected in public/ or dist/!"
+            exit 1
+          fi
+          if find public dist -maxdepth 4 -type f -name 'Paste_*' 2>/dev/null | grep -q .; then
+            echo "Forbidden Paste_* development transcript detected in public/ or dist/!"
+            exit 1
+          fi
           if grep -rnE "rawBody \|\| JSON\.stringify\(req\.body" src/server/; then
             echo "Forbidden JSON.stringify(req.body) webhook signature fallback detected!"
             exit 1

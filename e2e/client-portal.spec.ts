@@ -57,7 +57,7 @@ test.describe('Phase 26 E2E — Client Portal Registration, Commerce, Orders, Pr
     expect(checkoutRes.status()).toBe(201);
     const orderData = await checkoutRes.json();
     expect(orderData.order.orderNumber).toBeTruthy();
-    expect(['pending', 'unpaid']).toContain(orderData.order.paymentStatus);
+    expect(orderData.order.paymentStatus).toBe('pending');
     expect(orderData.order.paymentStatus).not.toBe('paid');
 
     // Create a support ticket on canonical /api/portal/support and verify durable retrieval

@@ -44,10 +44,25 @@ test.describe('Enterprise Reliability, Accessibility, Privacy & Legal Governance
     await expect(page.locator('h1').first()).toBeVisible();
     await expect(page.locator('footer')).toBeVisible();
 
-    const overflow = await page.evaluate(() => {
-      return document.documentElement.scrollWidth - window.innerWidth;
+    const overflowAudit = await page.evaluate(() => {
+      const innerWidth = window.innerWidth;
+      const scrollWidth = document.documentElement.scrollWidth;
+      const offenders = Array.from(document.querySelectorAll<HTMLElement>('body *'))
+        .map((el) => {
+          const rect = el.getBoundingClientRect();
+          return {
+            tag: el.tagName.toLowerCase(),
+            id: el.id || '',
+            className: typeof el.className === 'string' ? el.className.slice(0, 80) : '',
+            right: Math.round(rect.right),
+            width: Math.round(rect.width),
+          };
+        })
+        .filter((item) => item.right > innerWidth + 1)
+        .slice(0, 5);
+      return { overflowPx: scrollWidth - innerWidth, innerWidth, scrollWidth, offenders };
     });
-    expect(overflow).toBeLessThanOrEqual(0);
+    expect(overflowAudit.overflowPx, JSON.stringify(overflowAudit)).toBeLessThanOrEqual(0);
     expect(consoleErrors).toEqual([]);
   });
 

@@ -10,6 +10,13 @@ const chromiumMediaLaunchOptions = {
   ],
 };
 
+const firefoxMediaLaunchOptions = {
+  firefoxUserPrefs: {
+    'media.navigator.streams.fake': true,
+    'media.navigator.permission.disabled': true,
+  },
+};
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
@@ -45,6 +52,7 @@ export default defineConfig({
         },
       },
   projects: [
+    // Chromium-based desktop target
     {
       name: 'chromium-desktop',
       use: {
@@ -53,30 +61,29 @@ export default defineConfig({
         launchOptions: chromiumMediaLaunchOptions,
       },
     },
+    // Firefox-based desktop target
     {
       name: 'firefox-desktop',
       use: {
         ...devices['Desktop Firefox'],
-        launchOptions: {
-          firefoxUserPrefs: {
-            'media.navigator.streams.fake': true,
-            'media.navigator.permission.disabled': true,
-          },
-        },
+        launchOptions: firefoxMediaLaunchOptions,
       },
     },
+    // WebKit-based desktop target (must NEVER receive Chromium flags or permissions)
     {
       name: 'webkit-desktop',
-      use: { ...devices['Desktop Safari'] },
+      use: {
+        ...devices['Desktop Safari'],
+      },
     },
+    // WebKit-based tablet target (iPad Pro 11 runs on WebKit — strictly WebKit-compatible config)
     {
       name: 'tablet',
       use: {
         ...devices['iPad Pro 11'],
-        permissions: ['microphone'],
-        launchOptions: chromiumMediaLaunchOptions,
       },
     },
+    // Chromium-based mobile target
     {
       name: 'mobile',
       use: {

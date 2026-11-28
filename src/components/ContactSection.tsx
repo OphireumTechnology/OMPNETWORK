@@ -280,11 +280,11 @@ export const ContactSection: React.FC<ContactSectionProps> = ({
 
                 <div className="p-4 rounded-xl bg-[#111827] border border-slate-800 flex items-start gap-3.5">
                   <Mail className="w-5 h-5 text-[#C0C7D1] shrink-0 mt-0.5" />
-                  <div>
+                  <div className="min-w-0">
                     <span className="text-xs font-mono text-slate-400 block uppercase">
                       Administrative Dispatch Routing
                     </span>
-                    <span className="text-sm font-semibold text-white font-mono">
+                    <span className="text-sm font-semibold text-white font-mono break-all">
                       {COMPANY_CONFIG.configurableEmail}
                     </span>
                     <p className="text-xs text-slate-400 mt-0.5">

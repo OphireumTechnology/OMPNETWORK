@@ -17,6 +17,7 @@ import {
   PRODUCTION_EMBEDDING_DIMENSIONS,
 } from '../src/server/ai/knowledgeService';
 import { InMemoryTestDatabase } from './_testDb';
+import { AIVoiceService, type VoiceLifecycleState } from '../src/services/aiVoiceService';
 
 function listenOnEphemeralPort(
   app: ReturnType<typeof createApp>['app'],
@@ -476,5 +477,76 @@ describe('Phases 21–24: Persistent AI Conversations, Realtime Live Voice WebSo
       false,
       'Deleted document chunks must not be returned'
     );
+  });
+
+  it('Recovery 11.0: AIVoiceService prevents duplicate concurrent starts, stops leaked MediaStream tracks on stale getUserMedia, and enforces deterministic lifecycle transitions', async () => {
+    const origNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    let resolvePendingMic: ((stream: any) => void) | null = null;
+    let getUserMediaCalls = 0;
+    let trackStopped = false;
+
+    const fakeStream = {
+      getTracks: () => [
+        {
+          stop: () => {
+            trackStopped = true;
+          },
+        },
+      ],
+      getAudioTracks: () => [{ enabled: true, stop: () => { trackStopped = true; } }],
+    };
+
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: {
+        mediaDevices: {
+          getUserMedia: () => {
+            getUserMediaCalls += 1;
+            return new Promise((resolve) => {
+              resolvePendingMic = resolve;
+            });
+          },
+        },
+      },
+    });
+
+    try {
+      const voice = new AIVoiceService();
+      const states: VoiceLifecycleState[] = [];
+      voice.setCallbacks({
+        onLifecycleChange: (s) => states.push(s),
+      });
+
+      assert.equal(voice.getLifecycleState(), 'IDLE');
+
+      // Launch startSession and trigger a concurrent duplicate call while getUserMedia is pending
+      const firstStart = voice.startSession('voice-race-test');
+      const duplicateStart = await voice.startSession('voice-race-test');
+      assert.equal(duplicateStart, true);
+      assert.equal(getUserMediaCalls, 1, 'Concurrent duplicate startSession must not invoke getUserMedia twice');
+      assert.ok(states.includes('REQUESTING_PERMISSION'));
+
+      // Terminate session BEFORE getUserMedia resolves
+      voice.stopSession();
+      assert.equal(voice.getStatus(), 'disconnected');
+      assert.equal(voice.getLifecycleState(), 'IDLE');
+      assert.ok(states.includes('ENDING'));
+      assert.ok(states.includes('ENDED'));
+
+      // Now resolve the stale getUserMedia callback — terminated session MUST NOT restart and MUST stop tracks
+      assert.ok(resolvePendingMic, 'Expected pending getUserMedia resolver');
+      resolvePendingMic(fakeStream);
+      const started = await firstStart;
+      assert.equal(started, false, 'Terminated voice session must ignore stale getUserMedia resolution');
+      assert.equal(trackStopped, true, 'Late MediaStream tracks must be stopped immediately to avoid mic leaks');
+      assert.equal(voice.getStatus(), 'disconnected');
+      assert.equal(voice.getLifecycleState(), 'IDLE');
+    } finally {
+      if (origNavigatorDescriptor) {
+        Object.defineProperty(globalThis, 'navigator', origNavigatorDescriptor);
+      } else {
+        delete (globalThis as Record<string, unknown>).navigator;
+      }
+    }
   });
 });

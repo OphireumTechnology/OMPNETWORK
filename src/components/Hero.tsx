@@ -112,7 +112,7 @@ export const Hero: React.FC<HeroProps> = ({ onNavigate, onOpenPortal }) => {
             <div className="relative group max-w-sm sm:max-w-md w-full">
 
               {/* Subtle ambient lighting halo */}
-              <div className="absolute -inset-1.5 bg-gradient-to-br from-[#D4AF37]/20 via-[#00C2C7]/25 to-slate-800/40 rounded-3xl blur-lg opacity-70 group-hover:opacity-95 transition duration-500" />
+              <div aria-hidden="true" className="pointer-events-none absolute -inset-1.5 bg-gradient-to-br from-[#D4AF37]/20 via-[#00C2C7]/25 to-slate-800/40 rounded-3xl blur-lg opacity-70 group-hover:opacity-95 transition duration-500" />
 
               {/* Clean Corporate Identity Card */}
               <div className="relative rounded-2xl bg-[#111827] border border-slate-700/80 p-7 sm:p-8 shadow-2xl flex flex-col items-center text-center">

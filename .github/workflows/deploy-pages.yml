@@ -71,8 +71,16 @@ jobs:
           cp dist/index.html dist/404.html
           cmp -s dist/index.html dist/404.html
 
-      - name: Verify no server secrets leaked into frontend bundle
+      - name: Verify no development transcripts, backend artifacts, or server secrets leaked into frontend bundle
         run: |
+          if [ -d dist/assets/aistudio ] || [ -d dist/server ]; then
+            echo "ERROR: Forbidden development or server directory detected in dist/!"
+            exit 1
+          fi
+          if find dist -type f \( -name 'Paste_*' -o -name '.env*' -o -name '*.dump' -o -name '*.log' \) | grep -q .; then
+            echo "ERROR: Development transcript, log, dump, or env file detected in dist/!"
+            exit 1
+          fi
           if grep -rnE "SUPABASE_SERVICE_ROLE_KEY|ADMIN_BOOTSTRAP_PASSWORD|ADMIN_SESSION_SECRET|PORTAL_SIGNING_SECRET|RESEND_API_KEY|GOOGLE_SERVICE_ACCOUNT|XENDIT_SECRET_KEY|PAYMONGO_SECRET_KEY|MAYA_SECRET_KEY|PAYPAL_CLIENT_SECRET|GOTYME_API_SECRET|CARD_GATEWAY_SECRET_KEY" dist/; then
             echo "ERROR: Server secret identifier detected in built frontend bundle!"
             exit 1

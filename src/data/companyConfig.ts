@@ -39,7 +39,7 @@ const baseUrl = (typeof import.meta !== 'undefined' && import.meta.env && import
   : './';
 
 export const LOGO_URL = BRAND_ASSETS.primaryLogo;
-export const BRAND_BOARD_URL = `${baseUrl}assets/aistudio/Ophireum_Multimedia_Tech_Brand_Board_aa50d48b.png`;
+export const BRAND_BOARD_URL = `${baseUrl}branding/ophireum-brand-board.png`;
 export const DTI_CERTIFICATE_URL = `${baseUrl}images/dti-business-registration.png`;
 
 export const COMPANY_CONFIG: CompanyConfig = {

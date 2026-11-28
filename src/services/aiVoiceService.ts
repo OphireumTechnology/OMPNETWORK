@@ -94,7 +94,7 @@ function buildLiveWsUrl(): string {
   return 'ws://127.0.0.1:3000/api/voice/live';
 }
 
-class AIVoiceService {
+export class AIVoiceService {
   private status: VoiceState = 'disconnected';
   private lifecycleState: VoiceLifecycleState = 'IDLE';
   private transport: VoiceTransportKind = 'fallback_http';
@@ -118,6 +118,8 @@ class AIVoiceService {
   private wsReconnectAttempts = 0;
   private wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionalStop = false;
+  private sessionGeneration = 0;
+  private isStarting = false;
 
   private recognition: any = null;
   private isRecognitionRunning = false;
@@ -270,14 +272,21 @@ class AIVoiceService {
     return this.isSpeakerMuted;
   }
 
+  private isStaleSession(gen: number): boolean {
+    return this.intentionalStop || gen !== this.sessionGeneration;
+  }
+
   public async startSession(sharedSessionId?: string, sharedSessionToken?: string): Promise<boolean> {
     if (sharedSessionId) {
       this.setSessionId(sharedSessionId, sharedSessionToken);
     }
-    if (this.status !== 'disconnected' && this.status !== 'error') {
+    if (this.isStarting || (this.status !== 'disconnected' && this.status !== 'error')) {
       return true;
     }
 
+    this.isStarting = true;
+    this.sessionGeneration += 1;
+    const gen = this.sessionGeneration;
     this.intentionalStop = false;
     this.isMicMuted = false;
     this.setLifecycleState('REQUESTING_PERMISSION');
@@ -306,22 +315,45 @@ class AIVoiceService {
       };
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+      if (this.isStaleSession(gen)) {
+        stream.getTracks().forEach((track) => track.stop());
+        return false;
+      }
       this.mediaStream = stream;
       this.setLifecycleState('INITIALIZING');
 
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      const AudioContextClass =
+        typeof window !== 'undefined'
+          ? window.AudioContext || (window as any).webkitAudioContext
+          : undefined;
       if (AudioContextClass) {
-        this.captureAudioContext = new AudioContextClass();
-        if (this.captureAudioContext.state === 'suspended') {
-          await this.captureAudioContext.resume();
+        const captureCtx = new AudioContextClass();
+        this.captureAudioContext = captureCtx;
+        if (captureCtx.state === 'suspended') {
+          try {
+            await captureCtx.resume();
+          } catch {
+            // Headless WebKit may keep AudioContext suspended; continue safely
+          }
         }
-        const source = this.captureAudioContext.createMediaStreamSource(stream);
+        if (this.isStaleSession(gen)) {
+          try {
+            void captureCtx.close();
+          } catch {
+            // ignore
+          }
+          return false;
+        }
+        const source = captureCtx.createMediaStreamSource(stream);
         this.mediaStreamSource = source;
-        this.analyser = this.captureAudioContext.createAnalyser();
+        this.analyser = captureCtx.createAnalyser();
         this.analyser.fftSize = 64;
         source.connect(this.analyser);
-        this.startVolumeMonitoring();
-        await this.setupPcmCapturePipeline(source);
+        this.startVolumeMonitoring(gen);
+        await this.setupPcmCapturePipeline(source, gen);
+        if (this.isStaleSession(gen)) {
+          return false;
+        }
 
         // Dedicated 24kHz AudioContext for gapless Gemini Live PCM output playback
         try {
@@ -345,8 +377,14 @@ class AIVoiceService {
           headers,
           body: JSON.stringify({ language: this.language, sessionId: this.sessionId }),
         });
+        if (this.isStaleSession(gen)) {
+          return false;
+        }
         if (res.ok) {
           const data = await res.json();
+          if (this.isStaleSession(gen)) {
+            return false;
+          }
           if (data.sessionId) {
             this.sessionId = data.sessionId;
           }
@@ -365,6 +403,9 @@ class AIVoiceService {
           }
         }
       } catch {
+        if (this.isStaleSession(gen)) {
+          return false;
+        }
         this.serverGeminiAvailable = false;
         this.callbacks.onDegradedNotice?.(
           'Voice backend connection degraded. Using local fallback mode; text chat remains available.'
@@ -374,8 +415,12 @@ class AIVoiceService {
       // Attempt native bidirectional WebSocket (/api/voice/live) when browser supports WebSocket & Gemini is configured
       const connectedLive =
         typeof WebSocket !== 'undefined' && this.serverGeminiAvailable
-          ? await this.connectLiveWebSocket()
+          ? await this.connectLiveWebSocket(gen)
           : false;
+
+      if (this.isStaleSession(gen)) {
+        return false;
+      }
 
       if (connectedLive) {
         this.transport = 'gemini_live_ws';
@@ -390,9 +435,11 @@ class AIVoiceService {
       this.callbacks.onTransportChange?.('fallback_http');
 
       const SpeechRecognitionClass =
-        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        typeof window !== 'undefined'
+          ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+          : undefined;
       if (SpeechRecognitionClass) {
-        this.setupRecognition(SpeechRecognitionClass);
+        this.setupRecognition(SpeechRecognitionClass, gen);
       }
 
       this.setLifecycleState('CONNECTED');
@@ -404,6 +451,9 @@ class AIVoiceService {
       void this.speakText(greeting, true);
       return true;
     } catch (err: any) {
+      if (this.isStaleSession(gen)) {
+        return false;
+      }
       this.setLifecycleState('ERROR');
       this.setStatus('error');
       const errName = String(err?.name || '');
@@ -422,21 +472,27 @@ class AIVoiceService {
       this.callbacks.onError?.(msg);
       this.stopSession();
       return false;
+    } finally {
+      if (gen === this.sessionGeneration) {
+        this.isStarting = false;
+      }
     }
   }
 
-  private async setupPcmCapturePipeline(source: MediaStreamAudioSourceNode): Promise<void> {
-    if (!this.captureAudioContext) return;
+  private async setupPcmCapturePipeline(source: MediaStreamAudioSourceNode, gen: number): Promise<void> {
+    if (!this.captureAudioContext || this.isStaleSession(gen)) return;
     const ctx = this.captureAudioContext;
 
     // Prefer AudioWorkletNode for low-latency off-main-thread 16kHz PCM framing
     if (ctx.audioWorklet && typeof AudioWorkletNode !== 'undefined') {
       try {
         await ctx.audioWorklet.addModule('/audio/pcm-capture-worklet.js');
+        if (this.isStaleSession(gen) || this.captureAudioContext !== ctx) return;
         const worklet = new AudioWorkletNode(ctx, 'ophireum-pcm-capture', {
           processorOptions: { targetSampleRate: 16000 },
         });
         worklet.port.onmessage = (ev: MessageEvent) => {
+          if (this.isStaleSession(gen)) return;
           const msg = ev.data;
           if (!msg || msg.type !== 'pcm16') return;
           if (this.isMicMuted) return;
@@ -490,8 +546,12 @@ class AIVoiceService {
     }
   }
 
-  private connectLiveWebSocket(): Promise<boolean> {
+  private connectLiveWebSocket(gen: number): Promise<boolean> {
     return new Promise((resolve) => {
+      if (this.isStaleSession(gen)) {
+        resolve(false);
+        return;
+      }
       let settled = false;
       const timeout = setTimeout(() => {
         if (!settled) {
@@ -505,6 +565,14 @@ class AIVoiceService {
         this.liveWs = ws;
 
         ws.onopen = () => {
+          if (this.isStaleSession(gen)) {
+            try {
+              ws.close();
+            } catch {
+              // ignore
+            }
+            return;
+          }
           ws.send(
             JSON.stringify({
               type: 'start',
@@ -516,6 +584,7 @@ class AIVoiceService {
         };
 
         ws.onmessage = (event) => {
+          if (this.isStaleSession(gen)) return;
           try {
             const msg = JSON.parse(String(event.data));
             if (msg.type === 'session_ready') {
@@ -570,8 +639,8 @@ class AIVoiceService {
               return;
             }
 
-            if (msg.type === 'upstream_closed' && !this.intentionalStop) {
-              this.scheduleLiveReconnect();
+            if (msg.type === 'upstream_closed' && !this.isStaleSession(gen)) {
+              this.scheduleLiveReconnect(gen);
             }
           } catch {
             // ignore malformed frame
@@ -579,7 +648,7 @@ class AIVoiceService {
         };
 
         ws.onerror = () => {
-          this.liveWsActive = false;
+          if (this.liveWs === ws) this.liveWsActive = false;
           if (!settled) {
             settled = true;
             clearTimeout(timeout);
@@ -588,13 +657,13 @@ class AIVoiceService {
         };
 
         ws.onclose = () => {
-          this.liveWsActive = false;
+          if (this.liveWs === ws) this.liveWsActive = false;
           if (!settled) {
             settled = true;
             clearTimeout(timeout);
             resolve(false);
-          } else if (!this.intentionalStop && this.status !== 'disconnected') {
-            this.scheduleLiveReconnect();
+          } else if (!this.isStaleSession(gen) && this.status !== 'disconnected') {
+            this.scheduleLiveReconnect(gen);
           }
         };
       } catch {
@@ -604,8 +673,9 @@ class AIVoiceService {
     });
   }
 
-  private scheduleLiveReconnect() {
-    if (this.wsReconnectAttempts >= 3 || this.intentionalStop) {
+  private scheduleLiveReconnect(gen: number) {
+    if (this.isStaleSession(gen)) return;
+    if (this.wsReconnectAttempts >= 3) {
       this.transport = 'fallback_http';
       this.callbacks.onTransportChange?.('fallback_http');
       this.callbacks.onDegradedNotice?.(
@@ -614,9 +684,11 @@ class AIVoiceService {
       return;
     }
     this.wsReconnectAttempts += 1;
+    this.setLifecycleState('RECONNECTING');
     const delayMs = 800 * this.wsReconnectAttempts;
     this.wsReconnectTimer = setTimeout(() => {
-      void this.connectLiveWebSocket();
+      if (this.isStaleSession(gen)) return;
+      void this.connectLiveWebSocket(gen);
     }, delayMs);
   }
 
@@ -740,7 +812,9 @@ class AIVoiceService {
   }
 
   public stopSession() {
+    this.sessionGeneration += 1;
     this.intentionalStop = true;
+    this.isStarting = false;
     this.setLifecycleState('ENDING');
     this.cancelSpeech();
 
@@ -1125,7 +1199,7 @@ class AIVoiceService {
     this.callbacks.onStatusChange?.(newStatus);
   }
 
-  private setupRecognition(SpeechRecognitionClass: any) {
+  private setupRecognition(SpeechRecognitionClass: any, gen: number) {
     try {
       this.recognition = new SpeechRecognitionClass();
       this.recognition.continuous = true;
@@ -1133,17 +1207,20 @@ class AIVoiceService {
       this.recognition.lang = this.language;
 
       this.recognition.onstart = () => {
+        if (this.isStaleSession(gen)) return;
         this.isRecognitionRunning = true;
         this.recognitionReconnectAttempts = 0;
       };
 
       this.recognition.onerror = (event: any) => {
+        if (this.isStaleSession(gen)) return;
         if (event?.error === 'not-allowed' || event?.error === 'service-not-allowed') {
           this.callbacks.onError?.('Speech recognition permission denied. Text fallback remains active.');
         }
       };
 
       this.recognition.onresult = (event: any) => {
+        if (this.isStaleSession(gen)) return;
         let interimTranscript = '';
         let finalTranscript = '';
 
@@ -1173,6 +1250,7 @@ class AIVoiceService {
       this.recognition.onend = () => {
         this.isRecognitionRunning = false;
         if (
+          !this.isStaleSession(gen) &&
           this.status !== 'disconnected' &&
           this.status !== 'speaking' &&
           !this.isMicMuted &&
@@ -1182,6 +1260,7 @@ class AIVoiceService {
           this.recognitionReconnectAttempts += 1;
           const delayMs = Math.min(2500, 350 * this.recognitionReconnectAttempts);
           this.recognitionRestartTimeout = setTimeout(() => {
+            if (this.isStaleSession(gen)) return;
             this.startRecognitionSafe();
           }, delayMs);
         }
@@ -1195,6 +1274,7 @@ class AIVoiceService {
 
   private startRecognitionSafe() {
     if (
+      this.intentionalStop ||
       !this.recognition ||
       this.isRecognitionRunning ||
       this.isMicMuted ||
@@ -1215,11 +1295,11 @@ class AIVoiceService {
     }
   }
 
-  private startVolumeMonitoring() {
+  private startVolumeMonitoring(gen: number) {
     const dataArray = new Uint8Array(this.analyser?.frequencyBinCount || 32);
 
     const checkVolume = () => {
-      if (this.status === 'disconnected') return;
+      if (this.isStaleSession(gen) || this.status === 'disconnected') return;
 
       if (this.status === 'speaking') {
         const simulated = Math.min(

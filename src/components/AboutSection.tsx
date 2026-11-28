@@ -18,7 +18,7 @@ export const AboutSection: React.FC<AboutSectionProps> = ({ onOpenPortal: _onOpe
   return (
     <section id="about" className="py-20 lg:py-28 bg-[#0B1220] border-t border-slate-800/80 relative">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        
+
         {/* Section Header */}
         <div className="max-w-3xl">
           <div className="flex items-center gap-2 text-xs font-semibold text-[#00C2C7] uppercase tracking-wider mb-2 font-mono">
@@ -37,7 +37,7 @@ export const AboutSection: React.FC<AboutSectionProps> = ({ onOpenPortal: _onOpe
         {/* Founder / CEO Profile & Official Office Location Highlight Card */}
         <div className="mt-12 rounded-2xl bg-gradient-to-br from-[#111827] via-[#0B1220] to-[#111827] border border-slate-700/80 p-6 sm:p-8 shadow-xl">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-            
+
             {/* Executive Leadership Left Block */}
             <div className="lg:col-span-7 space-y-4">
               <div className="flex items-center gap-2 text-xs font-mono text-[#00C2C7] uppercase tracking-wider">
@@ -103,7 +103,7 @@ export const AboutSection: React.FC<AboutSectionProps> = ({ onOpenPortal: _onOpe
 
         {/* DTI BUSINESS REGISTRATION SECTION — 2-COLUMN LUXURY ENTERPRISE LAYOUT */}
         <div id="registration" className="mt-14 rounded-2xl bg-gradient-to-br from-[#111827] via-[#0B1220] to-[#111827] border border-slate-700/80 p-6 sm:p-10 shadow-2xl relative overflow-hidden">
-          
+
           {/* Subtle gold accent lighting halo */}
           <div className="absolute top-0 right-0 w-80 h-80 bg-[#D4AF37]/5 blur-[120px] rounded-full pointer-events-none" />
           <div className="absolute bottom-0 left-0 w-80 h-80 bg-[#00C2C7]/5 blur-[120px] rounded-full pointer-events-none" />
@@ -125,10 +125,10 @@ export const AboutSection: React.FC<AboutSectionProps> = ({ onOpenPortal: _onOpe
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
-            
+
             {/* Left Column: Official Registration Details */}
             <div className="lg:col-span-7 space-y-6">
-              
+
               <div className="space-y-4">
                 <div>
                   <span className="text-xs font-mono text-slate-400 uppercase tracking-wider block">Registered Business Name</span>
@@ -206,8 +206,8 @@ export const AboutSection: React.FC<AboutSectionProps> = ({ onOpenPortal: _onOpe
 
             {/* Right Column: Certificate Image Presentation in Gold Accent Frame */}
             <div className="lg:col-span-5 flex flex-col items-center">
-              
-              <div 
+
+              <div
                 onClick={() => setShowCertificateModal(true)}
                 className="relative group cursor-pointer w-full max-w-[340px] sm:max-w-[380px] rounded-2xl p-2.5 bg-gradient-to-b from-[#1c2436] via-[#111827] to-[#0B1220] border border-[#D4AF37]/40 shadow-2xl transition-all duration-300 hover:border-[#D4AF37] hover:shadow-[#D4AF37]/15"
                 title="Click to view full-screen certificate presentation"
@@ -257,7 +257,7 @@ export const AboutSection: React.FC<AboutSectionProps> = ({ onOpenPortal: _onOpe
 
         {/* Global Digital Network Globe & Corporate Vision / Mission Grid */}
         <div className="mt-14 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-          
+
           {/* Animated Global Digital Network Visualization */}
           <div className="lg:col-span-6 rounded-2xl bg-[#111827] border border-slate-800 p-6 flex flex-col justify-between">
             <div>
@@ -278,7 +278,7 @@ export const AboutSection: React.FC<AboutSectionProps> = ({ onOpenPortal: _onOpe
 
           {/* Vision and Mission Cards */}
           <div className="lg:col-span-6 space-y-6">
-            
+
             <div className="rounded-2xl bg-[#111827] border border-slate-800 p-6 group hover:border-[#00C2C7]/40 transition-all">
               <div className="w-10 h-10 rounded-lg bg-[#00C2C7]/10 flex items-center justify-center text-[#00C2C7] mb-4">
                 <Target className="w-5 h-5" />
@@ -305,7 +305,7 @@ export const AboutSection: React.FC<AboutSectionProps> = ({ onOpenPortal: _onOpe
 
         {/* Brand Board Reference Banner */}
         <div className="mt-10 rounded-2xl bg-gradient-to-r from-[#111827] via-[#0B1220] to-[#111827] border border-slate-700/80 p-6 sm:p-8 flex flex-col lg:flex-row items-center justify-between gap-6">
-          <div className="flex items-center gap-5">
+          <div className="flex items-center gap-4 sm:gap-5 min-w-0">
             <div className="relative w-16 h-16 rounded-xl overflow-hidden border border-slate-700 shrink-0">
               <img
                 src={COMPANY_CONFIG.brandBoardUrl}
@@ -314,9 +314,9 @@ export const AboutSection: React.FC<AboutSectionProps> = ({ onOpenPortal: _onOpe
                 loading="lazy"
               />
             </div>
-            <div>
+            <div className="min-w-0">
               <span className="text-xs font-mono text-[#00C2C7] uppercase">Official Brand Board & Design Standard</span>
-              <h4 className="text-base font-bold text-white">Graphite #111827 · Technology Cyan #00C2C7 · Silver Gray #F3F4F6</h4>
+              <h4 className="text-base font-bold text-white break-words">Graphite #111827 · Technology Cyan #00C2C7 · Silver Gray #F3F4F6</h4>
               <p className="text-xs text-slate-400 mt-1">
                 Visual identity standard approved for corporate media, technological interfaces, and digital broadcasts.
               </p>
@@ -390,7 +390,7 @@ export const AboutSection: React.FC<AboutSectionProps> = ({ onOpenPortal: _onOpe
       {showCertificateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/90 backdrop-blur-md">
           <div className="relative max-w-3xl w-full max-h-[95vh] bg-[#111827] border border-[#D4AF37]/50 rounded-2xl overflow-hidden flex flex-col shadow-2xl">
-            
+
             {/* Modal Header */}
             <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-900 flex items-center justify-between gap-4">
               <div>

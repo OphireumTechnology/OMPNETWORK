@@ -56,6 +56,8 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
   const [voiceTransport, setVoiceTransport] = useState<VoiceTransportKind>('fallback_http');
   const [audioDevices, setAudioDevices] = useState<AudioInputDeviceOption[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
+  const [voiceConsentPending, setVoiceConsentPending] = useState(false);
+  const [isVoiceStarting, setIsVoiceStarting] = useState(false);
   const sharedSessionIdRef = useRef<string>(aiVoiceService.getSessionId());
   const sharedSessionTokenRef = useRef<string>(aiVoiceService.getSessionToken());
 
@@ -225,14 +227,25 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
     }
   }, [externalOpenRequest]);
 
-  // Handle Voice Toggle
-  const handleToggleVoice = async () => {
+  // Handle Voice Toggle: User activation -> Voice Disclosure -> Explicit Consent -> Microphone Acquisition
+  const handleToggleVoice = () => {
     if (isVoiceActive) {
       aiVoiceService.stopSession();
       setVoiceStatus('disconnected');
       setIsPushToTalkActive(false);
+      setVoiceConsentPending(false);
+      setIsVoiceStarting(false);
     } else {
       setVoiceError(null);
+      setVoiceConsentPending((prev) => !prev);
+    }
+  };
+
+  const handleConfirmVoiceConsent = async () => {
+    if (isVoiceStarting || isVoiceActive) return;
+    setVoiceError(null);
+    setIsVoiceStarting(true);
+    try {
       const success = await aiVoiceService.startSession(
         sharedSessionIdRef.current,
         sharedSessionTokenRef.current || undefined
@@ -240,11 +253,19 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
       if (!success) {
         setVoiceStatus('disconnected');
       } else {
+        setVoiceConsentPending(false);
         const devices = await aiVoiceService.listAudioInputDevices();
         setAudioDevices(devices);
         setSelectedDeviceId(aiVoiceService.getSelectedDeviceId());
       }
+    } finally {
+      setIsVoiceStarting(false);
     }
+  };
+
+  const handleCancelVoiceConsent = () => {
+    setVoiceConsentPending(false);
+    setVoiceError(null);
   };
 
   const handleTogglePushToTalk = () => {
@@ -427,6 +448,8 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
     if (isVoiceActive) {
       aiVoiceService.stopSession();
     }
+    setVoiceConsentPending(false);
+    setIsVoiceStarting(false);
     try {
       localStorage.removeItem('opm_consultant_messages');
       localStorage.removeItem('opm_consultant_state');
@@ -614,6 +637,8 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
               <button
                 onClick={() => {
                   if (isVoiceActive) aiVoiceService.stopSession();
+                  setVoiceConsentPending(false);
+                  setIsVoiceStarting(false);
                   setIsOpen(false);
                 }}
                 className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
@@ -998,11 +1023,51 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
                   </div>
 
                   {/* Voice Privacy Disclosure */}
-                  <div className="flex items-center gap-1.5 text-[10px] text-slate-400 leading-tight">
+                  <div
+                    data-testid="voice-disclosure-panel"
+                    className="flex items-center gap-1.5 text-[10px] text-slate-400 leading-tight"
+                  >
                     <Shield className="w-3 h-3 text-[#00C2C7] shrink-0" />
                     <span>
                       Voice Disclosure: Microphone audio is used only for real-time consultation and is not permanently stored.
                     </span>
+                  </div>
+                </div>
+              ) : voiceConsentPending ? (
+                /* Pre-Microphone Voice Disclosure & Explicit Consent Panel (Displayed BEFORE getUserMedia on all browsers) */
+                <div
+                  data-testid="voice-disclosure-panel"
+                  className="px-4 py-3 bg-[#111827] border-t border-[#00C2C7]/40 space-y-2.5"
+                >
+                  <div className="flex items-start gap-2 text-[11px] text-slate-200 leading-snug">
+                    <Shield className="w-4 h-4 text-[#00C2C7] shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-white">Voice Disclosure &amp; Microphone Consent</p>
+                      <p className="text-[10.5px] text-slate-300 mt-0.5">
+                        Voice Disclosure: Microphone audio is used only for real-time consultation and is not permanently stored. Text consultation remains available if you prefer not to enable your microphone.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      data-testid="voice-consent-cancel"
+                      onClick={handleCancelVoiceConsent}
+                      disabled={isVoiceStarting}
+                      className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="voice-consent-confirm"
+                      onClick={handleConfirmVoiceConsent}
+                      disabled={isVoiceStarting}
+                      className="px-3 py-1.5 rounded-lg bg-[#00C2C7] hover:bg-[#00d6dc] text-[#0B1220] text-[11px] font-bold transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-60"
+                    >
+                      <Mic className="w-3.5 h-3.5" />
+                      <span>{isVoiceStarting ? 'Enabling Microphone...' : 'Confirm & Enable Microphone'}</span>
+                    </button>
                   </div>
                 </div>
               ) : (
@@ -1013,6 +1078,7 @@ export const AIConsultantWidget: React.FC<AIConsultantWidgetProps> = ({ external
                     <span>Real-time two-way voice consultation</span>
                   </div>
                   <button
+                    type="button"
                     onClick={handleToggleVoice}
                     className="px-3 py-1 rounded-lg bg-[#00C2C7]/15 hover:bg-[#00C2C7] text-[#00C2C7] hover:text-[#0B1220] border border-[#00C2C7]/40 text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
                   >

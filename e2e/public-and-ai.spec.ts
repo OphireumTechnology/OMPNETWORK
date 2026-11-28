@@ -96,9 +96,26 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
     expect(bodyHtml).not.toContain('SUPABASE_SERVICE_ROLE_KEY');
     expect(bodyHtml).not.toContain('ADMIN_SESSION_SECRET');
 
-    // Verify zero horizontal overflow on desktop, tablet, and mobile viewports
-    const overflowPx = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-    expect(overflowPx).toBeLessThanOrEqual(0);
+    // Verify zero horizontal overflow on desktop, tablet, and mobile viewports (with offending-element diagnostics)
+    const overflowAudit = await page.evaluate(() => {
+      const innerWidth = window.innerWidth;
+      const scrollWidth = document.documentElement.scrollWidth;
+      const offenders = Array.from(document.querySelectorAll<HTMLElement>('body *'))
+        .map((el) => {
+          const rect = el.getBoundingClientRect();
+          return {
+            tag: el.tagName.toLowerCase(),
+            id: el.id || '',
+            className: typeof el.className === 'string' ? el.className.slice(0, 80) : '',
+            right: Math.round(rect.right),
+            width: Math.round(rect.width),
+          };
+        })
+        .filter((item) => item.right > innerWidth + 1)
+        .slice(0, 5);
+      return { overflowPx: scrollWidth - innerWidth, innerWidth, scrollWidth, offenders };
+    });
+    expect(overflowAudit.overflowPx, JSON.stringify(overflowAudit)).toBeLessThanOrEqual(0);
 
     // Verify services catalog is interactive
     const servicesSection = page.locator('#services');
@@ -109,20 +126,25 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
     page,
     browserName,
   }, testInfo) => {
-    // Headless WebKit on Linux lacks a virtual microphone CLI flag; supply a controlled Web Audio MediaStream fixture
+    // Headless WebKit on Linux (Desktop Safari + iPad Pro 11 tablet) lacks a virtual microphone CLI flag;
+    // supply a controlled test-only MediaStream fixture lazily inside getUserMedia (never in production source)
     if (browserName === 'webkit') {
       await page.addInitScript(() => {
         const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
         const originalGetUserMedia = navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices);
         const createControlledStream = () => {
           if (AudioCtx) {
-            const ctx = new AudioCtx();
-            const osc = ctx.createOscillator();
-            const dest = ctx.createMediaStreamDestination();
-            osc.frequency.value = 440;
-            osc.connect(dest);
-            osc.start();
-            return dest.stream;
+            try {
+              const ctx = new AudioCtx();
+              const osc = ctx.createOscillator();
+              const dest = ctx.createMediaStreamDestination();
+              osc.frequency.value = 440;
+              osc.connect(dest);
+              osc.start();
+              return dest.stream;
+            } catch {
+              // Fall back cleanly if headless WebKit restricts AudioContext construction
+            }
           }
           return new MediaStream();
         };
@@ -195,16 +217,24 @@ test.describe('Phase 26 E2E — Public Website, Navigation, Services Catalog & A
 
     await expect(page.locator('body')).toContainText(/starting at/i, { timeout: 15_000 });
 
-    // Activate voice consultation (Chromium/Firefox native fake-media flags, WebKit controlled MediaStream fixture)
+    // Activate voice consultation: Start Voice -> Pre-Mic Voice Disclosure -> Explicit Consent -> Mic Acquisition
     const startVoiceBtn = page.getByRole('button', { name: /Start Voice/i });
     await expect(startVoiceBtn).toBeVisible();
     await startVoiceBtn.click();
 
-    await expect(page.locator('body')).toContainText(/Voice Disclosure/i, { timeout: 10_000 });
+    // Voice Disclosure MUST render BEFORE microphone permission/acquisition on all browsers (including WebKit)
+    const disclosurePanel = page.getByTestId('voice-disclosure-panel');
+    await expect(disclosurePanel).toBeVisible({ timeout: 10_000 });
+    await expect(disclosurePanel).toContainText(/Voice Disclosure/i);
+
+    // Explicitly grant consent to acquire microphone
+    const confirmConsentBtn = page.getByTestId('voice-consent-confirm');
+    await expect(confirmConsentBtn).toBeVisible();
+    await confirmConsentBtn.click();
 
     // Mute and unmute mic, then end voice cleanly
     const muteMicBtn = page.getByTitle(/Mute Microphone/i);
-    await expect(muteMicBtn).toBeVisible();
+    await expect(muteMicBtn).toBeVisible({ timeout: 10_000 });
     await muteMicBtn.click();
     await expect(page.getByTitle(/Unmute Microphone/i)).toBeVisible();
 
