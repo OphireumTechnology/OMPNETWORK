@@ -1,0 +1,28 @@
+name: Remote dependency recovery
+on:
+  push:
+    branches: [fix/remote-postgresql-lock-recovery]
+permissions:
+  contents: read
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --package-lock-only --include=optional --no-audit --no-fund
+      - uses: actions/upload-artifact@v4
+        with:
+          name: regenerated-lockfile
+          path: package-lock.json
+      - run: npm ci --include=optional --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run test:unit && npm run test:security
+      - run: npm run test:migrations && npm run test:pg
+      - run: npm run build:all
+      - run: npm run smoke:prod
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - run: npm run test:e2e
